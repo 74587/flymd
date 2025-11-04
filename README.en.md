@@ -3,7 +3,7 @@
 [简体中文](README.md) | English
 
 [![Version](https://img.shields.io/badge/version-v0.1.4-blue.svg)](https://github.com/flyhunterl/flymd)
-[![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-NonCommercial-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/flyhunterl/flymd)
 
 A fast, lightweight, and privacy‑friendly Markdown editor powered by Tauri.
@@ -83,8 +83,11 @@ Changelog
   - Sync: faster scanning; better deletion prompts and recovery
   - Library: create/delete folders; Fix: print entire document
 
-License
-- Apache‑2.0. See LICENSE.
+License & Compliance
+- Non-Commercial Open License (flyMD NC 1.0). See [LICENSE](LICENSE).
+- Allowed: use/modify/copy/redistribute for non-commercial purposes with attribution and source link.
+- Commercial use: prohibited without prior written authorization. Contact: flyhunterl <flyhunterl@gmail.com>.
+- Third-party licenses: see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 Acknowledgements
 - Tauri, markdown‑it, DOMPurify, highlight.js, KaTeX, Mermaid

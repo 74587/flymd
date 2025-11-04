@@ -3,7 +3,7 @@
 [简体中文](README.md) | [English](README.en.md)
 
 [![Version](https://img.shields.io/badge/version-v0.1.4-blue.svg)](https://github.com/flyhunterl/flymd)
-[![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-NonCommercial-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/flyhunterl/flymd)
 
 ![lv_0_20251028184941](https://github.com/user-attachments/assets/3d6a5b6a-82e8-4d9d-9657-c9b66ef48f82)
@@ -292,9 +292,13 @@ flyMD 支持通过扩展插件来增强功能。你可以：
 
 欢迎提交 Issue 和 Pull Request！
 
-## 📄 许可证
+## 📄 许可与合规
 
-本项目采用 Apache 2.0 许可证，详见 [LICENSE](LICENSE)。
+- 本项目采用“飞速MarkDown（flyMD）非商业开源许可协议（NC 1.0）”。
+- 允许：在非商业前提下自由使用、修改、复制与再分发；必须保留署名与来源。
+- 商业使用：未经书面授权禁止。商业授权请联系：flyhunterl <flyhunterl@gmail.com>。
+- 许可全文见：[LICENSE](LICENSE)
+- 第三方组件许可见：[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)
 
 ## 🙏 致谢
 - [MilkDown](https://milkdown.dev/)
@@ -311,5 +315,4 @@ flyMD 支持通过扩展插件来增强功能。你可以：
 
 
 <img width="300" height="300" alt="image" src="https://github.com/user-attachments/assets/4a716fd5-dc61-4a4f-b968-91626debe8d2" />
-
 
