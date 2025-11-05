@@ -3640,7 +3640,7 @@ async function setLibraryDocked(docked: boolean) {
   // 更新按钮文案
   try {
     const btn = document.getElementById('lib-pin') as HTMLButtonElement | null
-    if (btn) btn.textContent = libraryDocked ? '自动' : '固定'
+    if (btn) btn.textContent = libraryDocked ? t('lib.pin.auto') : t('lib.pin.fixed')
   } catch {}
   applyLibraryLayout()
   // 若当前已显示且切到“非固定”，补绑定悬停自动隐藏
@@ -4038,11 +4038,23 @@ function applyI18nUi() {
     try { refreshTitle() } catch {}
     try { refreshStatus() } catch {}
     // 库页签/按钮
-    try { const el = document.getElementById('lib-tab-files'); if (el) el.textContent = t('tab.files') } catch {}
-    try { const el = document.getElementById('lib-tab-outline'); if (el) el.textContent = t('tab.outline') } catch {}
-    try { const el = document.getElementById('lib-choose'); if (el) (el as HTMLButtonElement).textContent = t('lib.choose') } catch {}
-    try { const el = document.getElementById('lib-refresh'); if (el) (el as HTMLButtonElement).textContent = t('lib.refresh') } catch {}
-    try { const el = document.getElementById('lib-pin'); if (el) (el as HTMLButtonElement).textContent = libraryDocked ? t('lib.pin.auto') : t('lib.pin.fixed') } catch {}
+    try {
+      const localeNow = getLocale()
+      const filesLabel = localeNow === 'en' ? (t as any)('tab.files.short') ?? t('tab.files') : t('tab.files')
+      const outlineLabel = localeNow === 'en' ? (t as any)('tab.outline.short') ?? t('tab.outline') : t('tab.outline')
+      const chooseLabel = localeNow === 'en' ? (t as any)('lib.choose.short') ?? t('lib.choose') : t('lib.choose')
+      const refreshLabel = localeNow === 'en' ? (t as any)('lib.refresh.short') ?? t('lib.refresh') : t('lib.refresh')
+      const elF = document.getElementById('lib-tab-files') as HTMLButtonElement | null
+      if (elF) elF.textContent = String(filesLabel)
+      const elO = document.getElementById('lib-tab-outline') as HTMLButtonElement | null
+      if (elO) elO.textContent = String(outlineLabel)
+      const elC = document.getElementById('lib-choose') as HTMLButtonElement | null
+      if (elC) elC.textContent = String(chooseLabel)
+      const elR = document.getElementById('lib-refresh') as HTMLButtonElement | null
+      if (elR) elR.textContent = String(refreshLabel)
+      const elP = document.getElementById('lib-pin') as HTMLButtonElement | null
+      if (elP) elP.textContent = libraryDocked ? t('lib.pin.auto') : t('lib.pin.fixed')
+    } catch {}
     // 图床设置（若已创建）
     try {
       const uplRoot = document.getElementById('uploader-overlay') as HTMLDivElement | null
@@ -4942,6 +4954,8 @@ function bindEvents() {
     refreshTitle()
     refreshStatus()
     bindEvents()  // 🔧 关键：无论存储是否成功，都要绑定事件
+    // 依据当前语言，应用一次 UI 文案（含英文简写，避免侧栏溢出）
+    try { applyI18nUi() } catch {}
     try { logInfo('打点:事件绑定完成') } catch {}
     // 扩展：初始化目录并激活已启用扩展
     try { await ensurePluginsDir(); await loadAndActivateEnabledPlugins() } catch {}

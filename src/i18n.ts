@@ -56,9 +56,13 @@ const dict = {
 
     'tab.files': '文件',
     'tab.outline': '大纲',
+    'tab.files.short': '文件',
+    'tab.outline.short': '大纲',
 
     'lib.choose': '库',
     'lib.refresh': '刷新',
+    'lib.choose.short': '库',
+    'lib.refresh.short': '刷新',
     'lib.pin.auto': '自动',
     'lib.pin.fixed': '固定',
 
@@ -203,9 +207,13 @@ const dict = {
 
     'tab.files': 'Files',
     'tab.outline': 'Outline',
+    'tab.files.short': 'Files',
+    'tab.outline.short': 'Outl',
 
     'lib.choose': 'Library',
     'lib.refresh': 'Refresh',
+    'lib.choose.short': 'Lib',
+    'lib.refresh.short': 'Ref',
     'lib.pin.auto': 'Auto',
     'lib.pin.fixed': 'Dock',
 
