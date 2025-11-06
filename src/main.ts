@@ -60,7 +60,7 @@ let hljsLoaded = false
 let mermaidReady = false
 // Mermaid 渲染缓存（按源代码文本缓存 SVG，避免重复渲染导致布局抖动）
 // Mermaid 缓存开关：默认暂时关闭缓存以排查“图片很小”的问题；可用 localStorage 覆盖
-const DISABLE_MERMAID_CACHE_DEFAULT = true
+const DISABLE_MERMAID_CACHE_DEFAULT = false
 function isMermaidCacheDisabled(): boolean {
   try {
     const v = localStorage.getItem('flymd:disableMermaidCache')
