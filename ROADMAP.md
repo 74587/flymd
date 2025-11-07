@@ -1,5 +1,8 @@
 # 路线图
 
+[简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
+
+
 
 ## 更新 v0.1.7
  - 改进: 所见模式中mermaid调整为全局渲染/双击图片编辑代码

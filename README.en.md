@@ -1,118 +1,158 @@
 # FlySpeed Markdown (flyMD)
 
-[中文说明](README.md) | English
+[简体中文](README.md) | [English](README.en.md)
 
-[![Version](https://img.shields.io/badge/version-v0.1.6-blue.svg)](https://github.com/flyhunterl/flymd)
+[![Version](https://img.shields.io/badge/version-v0.1.7-blue.svg)](https://github.com/flyhunterl/flymd)
 [![License](https://img.shields.io/badge/license-NonCommercial-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/flyhunterl/flymd)
 
-A fast, cross‑platform Markdown editor and PDF reader with a clean UI, safe preview, and a modern WYSIWYG V2 experience.
+A cross-platform WYSIWYG Markdown editor and PDF reader with image hosting, WebDAV sync, plugin extensions, fast response, and minimal resource usage.
 
-> Screenshots: see the Chinese README for an up‑to‑date gallery.
+![lv_0_20251028184941](https://github.com/user-attachments/assets/3d6a5b6a-82e8-4d9d-9657-c9b66ef48f82)
 
-## Highlights
-- Lightweight & instant: tiny installer, sub‑second cold start
-- Clean layout: minimalist menubar + editor, distraction‑free
-- WYSIWYG V2: real editing view powered by Milkdown (toggle `Ctrl+W`)
-  - Two render modes: Instant render and Enter‑to‑render (`Ctrl+Shift+R`)
-- Edit/Read modes: toggle `Ctrl+E`, quick Read `Ctrl+R`
-- Complete stack: Markdown, KaTeX (LaTeX), Mermaid, HTML, highlight.js
-- Safe preview: DOMPurify sanitizes HTML; external links add `target="_blank"` + `rel="noopener"`
-- Library: folder tree + recent files + context actions (new/rename/move/delete)
-- PDF: built‑in viewer and bookmark Outline (with cache & auto‑invalidate)
-- Image upload: S3/R2 integration; paste/drag to upload and insert URL; robust local fallback
-- Sync: WebDAV extension with logs, progress and conflict prompts
-- Position memory: remember last read/edit caret/scroll per file
-- i18n: English/Chinese UI with Auto mode following system language
+
+## ✨ Highlights
+
+- Ready to Use: Only 6MB installer, no bloat. Millisecond-level cold start, one-click code copy
+- Clean Interface: Minimalist design with just menubar + editor, focused on content creation. Excellent startup and response speed
+- Library Feature: Support for designated folders, tree-view display of subfolders and documents, with document management
+- Secure & Reliable: Local execution, no network connection, automatic HTML sanitization in preview
+- Image Hosting: S3/R2 binding support, direct paste image upload with automatic link syntax generation
+- Full-Featured: Complete support for Markdown, LaTeX, Mermaid, and HTML
+- Real-time Rendering: WYSIWYG mode, instant render on input! Global real-time rendering for Mermaid and LaTeX, double-click to edit code
+- Ultimate Performance: Millisecond-level response, farewell to common pain points of similar software
+- Position Memory: Automatic memory of reading and editing positions, returning to remembered positions on next open (v0.0.6 official)
+- Auto Sync: WebDAV sync functionality
+- Plugin Extensions: Support for plugin extensions, develop your own or install with one click
+
+## 📸 Interface Preview (v0.0.4)
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/917ad246-1208-4585-9e10-7d2da54f2eef" width="32%" alt="Markdown Editor Screenshot 1"/>
+  <img src="https://github.com/user-attachments/assets/97012b2d-4457-434d-a436-cdba796d25b4" width="32%" alt="Markdown Editor Screenshot 2"/>
+  <img src="https://github.com/user-attachments/assets/39343b06-3c54-4990-a198-e5f941da6578" width="32%" alt="Markdown Editor Screenshot 3"/>
+</p>
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/7f1e9179-6087-4abf-80d5-7965dbbf2600" width="32%" alt="Markdown Editor Screenshot 4"/>
+  <img src="https://github.com/user-attachments/assets/8d549446-6052-4c32-88f8-f473314476fd" width="32%" alt="Markdown Editor Screenshot 5"/>
+  <img src="https://github.com/user-attachments/assets/4283312d-5ff6-43a7-a537-ef503e48604e" width="32%" alt="Markdown Editor Screenshot 6"/>
+</p>
 
 ## Core Features
-- Editing Experience (WYSIWYG V2)
-  - Real-time editing / true WYSIWYG powered by Milkdown; two render modes: Instant and Enter-to-render (`Ctrl+W` to toggle, `Ctrl+Shift+R` to choose mode)
-  - Low-latency native pipeline: keep `<textarea>`, IME-friendly composition, smart pairing for brackets/quotes without disrupting input
-  - Consistent indent & multi-line: `Tab/Shift+Tab` behave the same in Edit and WYSIWYG, avoiding accidental 4-space code blocks
-  - Formatting shortcuts: `Ctrl+B` bold, `Ctrl+I` italic, `Ctrl+K` insert link; precise line/column/caret info
+- Editing Experience
+  - Instant editing/WYSIWYG (powered by Milkdown)
+  - Native low-latency: Preserves `<textarea>` pipeline, IME composition-friendly, smart bracket/quote pairing without disrupting input (Edit mode)
+  - Unified indent & multi-line operations: `Tab` behaves consistently in Edit/WYSIWYG modes
+  - Common formatting: `Ctrl+B` bold, `Ctrl+I` italic, `Ctrl+K` insert link; precise line/column/cursor feedback
+  - WYSIWYG mode: Use `Ctrl+Enter` to exit code blocks
+  **Edit mode uses standard syntax, double space + Enter triggers line break. Non-standard syntax will break line breaks in WYSIWYG mode. Reading mode unaffected**
+  **Auto-completion only works in Edit mode**
+  **Due to Chinese/English punctuation differences, Chinese IME may affect completion experience, recommend switching to English punctuation**
 - Reading & Outline
-  - Safe preview: `markdown-it` + `highlight.js` + `DOMPurify`; external links get `target="_blank"` + `rel="noopener"`
-  - Outline navigation: extract `H1-H6` into a clickable TOC; highlight current heading; scroll sync with preview
-  - PDF Outline: built-in PDF viewer with bookmarks; cached per file and auto-invalidated on change
+  - Safe preview: `markdown-it` rendering + `highlight.js` code highlighting + `DOMPurify` HTML sanitization, external links auto-add `target="_blank"` + `rel="noopener"`
+  - Outline navigation: Extract Markdown `H1–H6` to generate clickable TOC, highlight current heading, preview and scroll sync
+  - PDF Bookmarks (Outline): Built-in PDF reading and bookmark outline, cached per file and auto-invalidated on changes
 - Images & Hosting
-  - Paste/drag images; prefer upload to S3/R2 and insert a public URL; when unconfigured/failure, fall back to local save
-  - Local images just work: convert local paths to `asset:` in Tauri so they render without extra config
-- Sync (WebDAV extension)
-  - Visual sync: status hints, logs, progress, and conflict prompts
-  - Conflict strategies: `newest`/`skip`/`last-wins` (default `newest`), based on `mtime/etag` to reduce misjudgment
-  - Remote MOVE optimization: use `MOVE` to avoid duplicate download/upload; better rename/move handling
-- PDF Export (no header/footer)
-  - Save directly as PDF: cross-platform native export with headers/footers removed; supports `A4/margins/background`
-  - Preview-accurate: export from the preview HTML to match what you see
-- i18n & Usability
-  - English/Chinese + Auto follow system language; remember user preference
-  - Position memory: per-file last read/edit caret and scroll position
+  - One-step process: Paste/drag images auto-handled; prefer upload to S3/R2 and insert public URL; fallback to local save when unconfigured/failed
+  - Local images just work: No extra configuration needed for preview
+- Sync (WebDAV Extension)
+  - Visual sync: Status hints, process logs, progress feedback, and conflict prompts
+  - Remote MOVE optimization: Use `MOVE` to reduce duplicate download/upload, optimize rename/move scenarios
+- Language & Usability
+  - Bilingual (Chinese/English) + Auto: Follow system language or manual switch, remembers user choice
+  - Position memory: Each file independently remembers last "reading/editing cursor/scroll position"
 - Security & Performance
-  - Local-first, no background network unless you explicitly enable features (image upload, sync, etc.)
-  - Optimized startup/render: lazy loads, chunked assets, controllable logs; target cold start <300ms, preview toggle <16ms (typical 2-3k lines)
+  - Local-first, zero background network: No network access unless explicitly enabled (image hosting, sync, etc.)
+  - Performance optimization: Cold start and render pipeline with lazy loading, chunked static assets, controllable logs; target cold start <300ms, preview toggle <16ms (typical 2–3k line documents)
+
 ## Getting Started
-- Install
-  - Download the installer for your platform; on Windows, WebView2 is required (usually preinstalled)
+- Installation
+  - Download platform-appropriate installer from release page and install; Windows requires WebView2 (pre-installed on most systems)
 - Create/Open
   - New: `Ctrl+N`; Open: `Ctrl+O`; Save: `Ctrl+S`; Save As: `Ctrl+Shift+S`
-  - Library: sidebar tree supports new/rename/move/delete and recent files
-- Mode Switch
-  - Edit/Read: `Ctrl+E`; Quick Read: `Ctrl+R`
-  - WYSIWYG: `Ctrl+W`; switch Instant vs Enter-to-render: `Ctrl+Shift+R`
-- Editing
+  - Library: Sidebar file tree supports new/rename/move/delete and recent files
+- Mode Switching
+  - Edit mode: `Ctrl+E`; can toggle between editing and reading
+  - Quick reading: `Ctrl+R`
+  - WYSIWYG mode: `Ctrl+W`; can toggle WYSIWYG editing
+- Common Editing
   - Bold/Italic/Link: `Ctrl+B / Ctrl+I / Ctrl+K`; `Esc` closes dialogs
-  - Images: paste/drag; with S3/R2 configured, auto-upload and insert URL; otherwise fall back to local save
-- Sync (optional)
-  - Enable WebDAV in Extensions; you will see logs/progress/conflicts; start with an empty folder to verify
-- Export to PDF (optional)
-  - Choose `.pdf` in Save As; cross-platform header/footer-free export; defaults to `A4` with `16mm` margins and background on
+  - Images: Paste/drag to insert (WYSIWYG mode doesn't support dragging); with S3/R2 configured, auto-upload and insert URL; unconfigured/failed fallback to local save. Optional: Always save to local
+- Sync (Optional)
+  - Enable WebDAV in "Extensions", provides logs/progress/conflict hints; (newly launched, still improving, remember to backup)
 - Language
-  - Switch Chinese/English or Auto; your preference is remembered
-## Shortcuts
-- File: `Ctrl+N` New, `Ctrl+O` Open, `Ctrl+S` Save, `Ctrl+Shift+S` Save As
-- Mode: `Ctrl+E` Edit/Read, `Ctrl+R` Quick Read, `Ctrl+W` Toggle WYSIWYG, `Ctrl+Shift+R` Toggle Enter‑to‑render (WYSIWYG)
-- Format: `Ctrl+B` Bold, `Ctrl+I` Italic, `Ctrl+K` Insert Link, `Esc` Close dialogs
+  - Switch between Chinese/English or select Auto to follow system; language preference is remembered
 
-## Install
-- Download the latest release and run the installer
-- Requirements: Windows 10/11 (x64) / Linux / macOS; WebView2 on Windows
+## ⌨️ Shortcuts
 
-## Development & Build
-- Run
-  - Frontend dev: `npm run dev`
-  - Tauri dev: `npm run tauri:dev`
-- Build
-  - Frontend: `npm run build`
-  - Tauri package: `npm run tauri:build`
-- Optional (PDF Outline only): `npm i pdfjs-dist`
-- Android: see BUILD_ANDROID.md
+| Shortcut | Function |
+|----------|----------|
+| `Ctrl+N` | New file |
+| `Ctrl+O` | Open file |
+| `Ctrl+S` | Save file |
+| `Ctrl+H` | Find & Replace |
+| `Ctrl+Shift+S` | Save as |
+| `Ctrl+E` | Toggle edit/preview |
+| `Ctrl+R` | Enter reading (preview) |
+| `Ctrl+W` | Toggle WYSIWYG mode |
+| `Escape` | Close/return in preview or dialogs |
+| `Ctrl+B` | Bold |
+| `Ctrl+I` | Italic |
+| `Ctrl+K` | Insert link |
 
-## Roadmap
-### Completed (v0.1.6)
-- WYSIWYG V2 (Milkdown) with instant/enter-to-render; dual Edit/Read views with quick toggle
-- Library + recent files + context actions; Markdown outline with scroll sync
-- PDF reading with Outline cache; PDF export (no header/footer, cross-platform)
-- Image paste/drag + S3/R2 first + local fallback
-- WebDAV sync extension: visual progress and conflict handling (`newest/skip/last-wins`)
-- DOMPurify preview safety; i18n (EN/zh + Auto); position memory; performance and size optimizations
+## 🔌 Extension Development
 
-### In Progress (0.1.x)
-- Sync robustness: more precise `etag/mtime` comparison; solid rename/move/interruption handling
-- Image hosting UX: retries and batch insert; broader S3-compatible coverage
-- PDF export details: more paper sizes/margin presets; clarity/pagination tuning
-- Performance & stability: finer-grained lazy loading; smoother large-document scroll/render
-- Usability: more shortcuts and localized menu items; consistent dialogs/status hints
-## Privacy & Security
-- flyMD is a local desktop app. No background network access is performed unless you explicitly enable features (e.g., S3/R2 upload, WebDAV sync)
+flyMD supports plugin extensions to enhance functionality. You can:
 
-## License & Notices
-- Non‑Commercial Open License (flyMD NC 1.0). See [LICENSE](LICENSE)
-- Allowed: use/modify/copy/redistribute for non‑commercial purposes with attribution and a link to the source
-- Commercial use: prohibited without prior written authorization → contact: flyhunterl <flyhunterl@gmail.com>
-- Third‑party notices: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)
-- In case of discrepancy, the Chinese original in LICENSE prevails
+- Develop custom extension plugins
+- Install plugins from GitHub or HTTP URL
+- Manage installed extensions
 
-## Acknowledgements
-- Tauri, markdown‑it, DOMPurify, highlight.js, KaTeX, Mermaid, Milkdown
+For detailed development guide, see: [Extension Development Documentation](plugin.md)
 
+**Example Plugins:**
+- [Typecho Publisher](https://github.com/TGU-HansJack/typecho-publisher-flymd) - Publish articles to Typecho blog platform
+
+
+## 📊 Performance Targets
+
+- Cold start: ≤ 300ms
+- Installer size: ≤ 10MB
+- Memory footprint: ≤ 50MB
+- Preview toggle: ≤ 16ms
+
+## Roadmap & Changelog
+
+See: [ROADMAP.en.md](ROADMAP.en.md)
+
+### Cross-platform Support
+- [x] Windows 10/11
+- [x] Linux (Desktop environment)
+
+
+## 🤝 Contributing
+
+Issues and Pull Requests are welcome!
+
+## 📄 License & Compliance
+
+- This project uses "FlySpeed MarkDown (flyMD) Non-Commercial Open Source License (NC 1.0)".
+- Allowed: Free use, modification, copying, and redistribution for non-commercial purposes; must retain attribution and source.
+- Commercial use: Prohibited without written authorization. For commercial licensing, contact: flyhunterl <flyhunterl@gmail.com>.
+- Full license: [LICENSE](LICENSE) (includes English translation, Chinese version is primary)
+- Third-party component licenses: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)
+
+## 🙏 Acknowledgments
+- [MilkDown](https://milkdown.dev/)
+- [Tauri](https://tauri.app/)
+- [markdown-it](https://github.com/markdown-it/markdown-it)
+- [DOMPurify](https://github.com/cure53/DOMPurify)
+- [highlight.js](https://highlightjs.org/)
+- [KaTeX](https://katex.org/)
+- [Mermaid](https://mermaid.js.org/)
+
+## FAQ (Linux)
+
+- [Solution for blank screen on Arch](arch.md)
+
+
+<img width="300" height="300" alt="image" src="https://github.com/user-attachments/assets/4a716fd5-dc61-4a4f-b968-91626debe8d2" />
