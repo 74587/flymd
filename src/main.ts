@@ -14,6 +14,7 @@ import './imePatch'
 
 import './style.css'
 import './mobile.css'  // 移动端样式
+import { initThemeUI, applySavedTheme } from './theme'
 import { t, fmtStatus, getLocalePref, setLocalePref, getLocale } from './i18n'
 // KaTeX 样式改为按需动态加载（首次检测到公式时再加载）
 
@@ -771,6 +772,7 @@ app.innerHTML = `
       <div class="menu-item" id="btn-save" style="display:none;" title="${t('file.save')} (Ctrl+S)">${t('file.save')}</div>
       <div class="menu-item" id="btn-saveas" style="display:none;" title="${t('file.saveas')} (Ctrl+Shift+S)">${t('file.saveas')}</div>
       <div class="menu-item" id="btn-toggle" style="display:none;" title="${t('mode.edit')}/${t('mode.read')} (Ctrl+E)">${t('mode.read')}</div>
+      <div class="menu-item" id="btn-theme" title="主题">主题</div>
       <div class="menu-item" id="btn-extensions" title="${t('menu.extensions')}">${t('menu.extensions')}</div>
     </div>
     <div class="filename" id="filename">${t('filename.untitled')}</div>
@@ -785,6 +787,9 @@ try { logInfo('打点:DOM就绪') } catch {}
 
 // 初始化平台适配（Android 支持）
 initPlatformIntegration().catch((e) => console.error('[Platform] Initialization failed:', e))
+// 应用已保存主题并挂载主题 UI
+try { applySavedTheme() } catch {}
+try { initThemeUI() } catch {}
 
 const editor = document.getElementById('editor') as HTMLTextAreaElement
 const preview = document.getElementById('preview') as HTMLDivElement
@@ -1330,16 +1335,7 @@ function updateWysiwygVirtualPadding() {
 
 
 // 所见模式：输入 ``` 后自动补一个换行，避免预览代码块遮挡模拟光标
-// WYSIWYG 
-// 
-// WYSIWYG 
-// 
-// WYSIWYG 
-// 
-// WYSIWYG 
-// 
-// 
-// 
+// WYSIWYG 
 // 在所见模式下，确保预览中的“模拟光标 _”可见
 function ensureWysiwygCaretDotInView() {
   try {
@@ -1539,31 +1535,40 @@ const aboutBtn = document.createElement('div')
       langBtn.className = 'menu-item'
       langBtn.title = t('menu.language')
       langBtn.textContent = '🌍'
-      // 将“扩展”按钮移到窗口最右侧（紧随文件名标签之后，靠右）
+      // 将“扩展/语言/主题”按钮移到窗口最右侧（紧随文件名标签之后，靠右）
       try {
         const titlebar = document.querySelector('.titlebar') as HTMLDivElement | null
         const extBtn = document.getElementById('btn-extensions') as HTMLDivElement | null
+        const themeBtn = document.getElementById('btn-theme') as HTMLDivElement | null
         const fileNameEl = document.querySelector('.titlebar .filename') as HTMLDivElement | null
           if (titlebar && extBtn) {
             try { extBtn.remove() } catch {}
+            if (themeBtn) { try { themeBtn.remove() } catch {} }
             if (fileNameEl && fileNameEl.parentElement === titlebar) {
-              // 插入扩展按钮在文件名之后
+              // 顺序：主题 | 扩展 | 语言
+              // 先插入扩展按钮在文件名之后
               titlebar.insertBefore(extBtn, fileNameEl.nextSibling)
+              // 在扩展按钮左侧插入主题按钮（紧挨扩展）
+              if (themeBtn) titlebar.insertBefore(themeBtn, extBtn)
               // 再插入语言图标在扩展按钮之后
               titlebar.insertBefore(langBtn, extBtn.nextSibling)
             } else {
+              if (themeBtn) titlebar.appendChild(themeBtn)
               titlebar.appendChild(extBtn)
               titlebar.appendChild(langBtn)
             }
           } else if (titlebar) {
-            // 兜底：找不到扩展按钮时，将语言图标放在文件名后
+            // 兜底：找不到扩展按钮时，将语言图标与主题放在文件名后
             if (fileNameEl && fileNameEl.parentElement === titlebar) {
-              titlebar.insertBefore(langBtn, fileNameEl.nextSibling)
+              if (themeBtn) titlebar.insertBefore(themeBtn, fileNameEl.nextSibling)
+              titlebar.insertBefore(langBtn, (themeBtn || fileNameEl).nextSibling)
             } else {
+              if (themeBtn) titlebar.appendChild(themeBtn)
               titlebar.appendChild(langBtn)
             }
           } else {
             // 再兜底：仍未获取到 titlebar，则临时放回 menubar 末尾
+            if (themeBtn) menubar.appendChild(themeBtn)
             menubar.appendChild(langBtn)
           }
       } catch {}
