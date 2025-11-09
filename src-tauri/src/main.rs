@@ -318,8 +318,9 @@ fn main() {
       android_create_document,
       android_read_uri,
       android_write_uri,
-      android_persist_uri_permission,
-      get_platform
+       android_persist_uri_permission,
+       get_cli_args,
+       get_platform
     ])
     .setup(|app| {
       // Windows "打开方式/默认程序" 传入的文件参数处理
@@ -373,6 +374,17 @@ fn main() {
     })
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
+}
+
+#[tauri::command]
+async fn get_cli_args() -> Result<Vec<String>, String> {
+  // 返回启动参数（去除可执行文件本身），用于 macOS 兜底打开文件
+  use std::env;
+  let args: Vec<String> = env::args_os()
+    .skip(1)
+    .map(|s| s.to_string_lossy().to_string())
+    .collect();
+  Ok(args)
 }
 
 #[derive(Debug, Serialize)]
