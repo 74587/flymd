@@ -6976,9 +6976,23 @@ async function loadInstallablePlugins(force = false): Promise<InstallableItem[]>
       const text = await fetchTextSmart(url)
       const json = JSON.parse(text)
       const ttl = Math.max(10_000, Math.min(24 * 3600_000, (json.ttlSeconds ?? 3600) * 1000))
-      const items = (json.items ?? [])
+      let items = (json.items ?? [])
         .filter((x: any) => x && typeof x.id === 'string' && x.install && (x.install.type === 'github' || x.install.type === 'manifest') && typeof x.install.ref === 'string')
-        .slice(0, 100)
+      // 推荐优先，其次 rank 越小越靠前，其次按名称
+      try {
+        items = items.sort((a: any, b: any) => {
+          const fa = a && (a.featured === true ? 1 : 0)
+          const fb = b && (b.featured === true ? 1 : 0)
+          if (fb !== fa) return fb - fa
+          const ra = Number.isFinite(a?.rank) ? a.rank : 9999
+          const rb = Number.isFinite(b?.rank) ? b.rank : 9999
+          if (ra !== rb) return ra - rb
+          const na = String(a?.name || a?.id || '')
+          const nb = String(b?.name || b?.id || '')
+          return na.localeCompare(nb)
+        })
+      } catch {}
+      items = items.slice(0, 100)
       if (store) { await store.set('pluginMarket:cache', { ts: Date.now(), ttl, items }); await store.save() }
       if (items.length > 0) return items as InstallableItem[]
     }
@@ -7215,6 +7229,16 @@ for (const it of items) {
   const name = document.createElement('div'); name.className = 'ext-name'
   const spanName = document.createElement('span'); spanName.textContent = String(it.name || it.id)
   name.appendChild(spanName)
+  try {
+    if ((it as any).featured === true) {
+      const badge = document.createElement('span');
+      badge.className = 'ext-tag';
+      badge.textContent = '推荐';
+      badge.style.marginLeft = '8px';
+      badge.style.color = '#f97316';
+      name.appendChild(badge)
+    }
+  } catch {}
   const desc = document.createElement('div'); desc.className = 'ext-desc'
   if (it.description) {
     const descText = document.createElement('span'); descText.textContent = it.description
@@ -7377,6 +7401,21 @@ async function loadAndActivateEnabledPlugins(): Promise<void> {
 
 // 将所见模式开关暴露到全局，便于在 WYSIWYG V2 覆盖层中通过双击切换至源码模式
 try { (window as any).flymdSetWysiwygEnabled = async (enable: boolean) => { try { await setWysiwygEnabled(enable) } catch (e) { console.error('flymdSetWysiwygEnabled 调用失败', e) } } } catch {}
+
+// 公开设置插件市场地址的 helper，便于远端/本地切换索引
+try {
+  (window as any).flymdSetPluginMarketUrl = async (url: string | null) => {
+    try {
+      if (!store) return false
+      const key = 'pluginMarket:url'
+      if (url && /^https?:\/\//i.test(url)) { await store.set(key, url) } else { await store.set(key, null as any) }
+      await store.set('pluginMarket:cache', null as any)
+      await store.save()
+      console.log('[Extensions] Plugin market URL set to:', url)
+      return true
+    } catch (e) { console.error('flymdSetPluginMarketUrl 失败', e); return false }
+  }
+} catch {}
 
 
 
