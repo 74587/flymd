@@ -3277,6 +3277,7 @@ async function checkUpdateInteractive() {
           // 优先直连，其次备用代理
           const urls = [
             direct,
+            'https://ghfast.top/' + direct,
             'https://gh-proxy.com/' + direct,
             'https://cdn.gh-proxy.com/' + direct,
             'https://edgeone.gh-proxy.com/' + direct,
@@ -3312,6 +3313,7 @@ async function checkUpdateInteractive() {
           const direct = a.directUrl
           const urls = [
             direct,
+            'https://ghfast.top/' + direct,
             'https://gh-proxy.com/' + direct,
             'https://cdn.gh-proxy.com/' + direct,
             'https://edgeone.gh-proxy.com/' + direct,
@@ -3424,6 +3426,7 @@ async function downloadAndInstallWin(asset: UpdateAssetInfo, resp: CheckUpdateRe
     const direct = asset.directUrl
     const urls = [
       direct,
+      'https://ghfast.top/' + direct,
       'https://gh-proxy.com/' + direct,
       'https://cdn.gh-proxy.com/' + direct,
       'https://edgeone.gh-proxy.com/' + direct,
@@ -3479,7 +3482,7 @@ async function showUpdateOverlay(resp: CheckUpdateResp) {
         upMsg('正在下载安装包…')
         let savePath = ''
         const direct = a.directUrl
-        const urls = [direct, 'https://gh-proxy.com/' + direct, 'https://cdn.gh-proxy.com/' + direct, 'https://edgeone.gh-proxy.com/' + direct]
+        const urls = [direct, 'https://ghfast.top/' + direct, 'https://gh-proxy.com/' + direct, 'https://cdn.gh-proxy.com/' + direct, 'https://edgeone.gh-proxy.com/' + direct]
         let ok = false
         for (const u of urls) { try { savePath = await (invoke as any)('download_file', { url: u, useProxy: false }) as string; ok = true; break } catch {} }
         if (!ok) throw new Error('all proxies failed')
