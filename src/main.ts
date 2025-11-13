@@ -21,7 +21,7 @@ import { t, fmtStatus, getLocalePref, setLocalePref, getLocale } from './i18n'
 // markdown-it 和 DOMPurify 改为按需动态 import，类型仅在编译期引用
 import type MarkdownIt from 'markdown-it'
 // WYSIWYG: 锚点插件与锚点同步（用于替换纯比例同步）
-import { enableWysiwygV2, disableWysiwygV2, wysiwygV2ToggleBold, wysiwygV2ToggleItalic, wysiwygV2ApplyLink, wysiwygV2GetSelectedText } from './wysiwyg/v2/index'
+import { enableWysiwygV2, disableWysiwygV2, wysiwygV2ToggleBold, wysiwygV2ToggleItalic, wysiwygV2ApplyLink, wysiwygV2GetSelectedText, wysiwygV2FindNext, wysiwygV2FindPrev, wysiwygV2ReplaceOne as wysiwygV2ReplaceOneSel, wysiwygV2ReplaceAllInDoc } from './wysiwyg/v2/index'
 
 // Tauri 插件（v2）
 // Tauri 对话框：使用 ask 提供原生确认，避免浏览器 confirm 在关闭事件中失效
@@ -5577,6 +5577,7 @@ function bindEvents() {
     function findNext(fromCaret = true) {
       const term = String(_findInput?.value || '')
       if (!term) return
+      if (wysiwyg) { try { wysiwygV2FindNext(term, !!_findCase?.checked) } catch {} ; return }
       const val = String(editor.value || '')
       const hay = norm(val)
       const needle = norm(term)
@@ -5589,7 +5590,8 @@ function bindEvents() {
     function findPrev() {
       // 上一个：严格在光标前搜索；未命中则循环到最后一个
       const term = String(_findInput?.value || '')
-      if (!term) { try { editor.focus() } catch {} ; return }
+      if (!term) { if (wysiwyg) { try { (document.querySelector('#md-wysiwyg-root .ProseMirror') as HTMLElement)?.focus() } catch {} } else { try { editor.focus() } catch {} } ; return }
+      if (wysiwyg) { try { wysiwygV2FindPrev(term, !!_findCase?.checked) } catch {} ; return }
       const val = String(editor.value || '')
       const hay = norm(val)
       const needle = norm(term)
@@ -5608,6 +5610,7 @@ function bindEvents() {
       const term = String(_findInput?.value || '')
       const rep = String(_replaceInput?.value || '')
       if (!term) return
+      if (wysiwyg) { try { wysiwygV2ReplaceOneSel(term, rep, !!_findCase?.checked) } catch {} ; return }
       const { s, e } = getSel()
       const cur = editor.value.slice(s, e)
       const match = (_findCase?.checked ? cur === term : cur.toLowerCase() === term.toLowerCase())
@@ -5627,6 +5630,7 @@ function bindEvents() {
       const term = String(_findInput?.value || '')
       if (!term) return
       const rep = String(_replaceInput?.value || '')
+      if (wysiwyg) { try { wysiwygV2ReplaceAllInDoc(term, rep, !!_findCase?.checked) } catch {} ; return }
       const ta = editor as HTMLTextAreaElement
       const val = String(ta.value || '')
       const hay = norm(val)
@@ -5669,13 +5673,18 @@ function bindEvents() {
     btnNext?.addEventListener('click', () => findNext())
     btnRep?.addEventListener('click', () => replaceOne())
     btnAll?.addEventListener('click', () => replaceAll())
-    btnClose?.addEventListener('click', () => { panel.style.display = 'none'; try { editor.focus() } catch {} })
+    btnClose?.addEventListener('click', () => { panel.style.display = 'none'; if (wysiwyg) { try { (document.querySelector('#md-wysiwyg-root .ProseMirror') as HTMLElement)?.focus() } catch {} } else { try { editor.focus() } catch {} } })
   }
   function showFindPanel() {
     ensureFindPanel()
     if (!_findPanel) return
     // 选区文本用作初始查找词
-    try { const sel = editor.value.slice(editor.selectionStart >>> 0, editor.selectionEnd >>> 0); if (sel) { (_findInput as HTMLInputElement).value = sel; _lastFind = sel } } catch {}
+    try {
+      let sel = ''
+      if (wysiwyg) { sel = String(wysiwygV2GetSelectedText() || '') }
+      else { sel = editor.value.slice(editor.selectionStart >>> 0, editor.selectionEnd >>> 0) }
+      if (sel) { (_findInput as HTMLInputElement).value = sel; _lastFind = sel }
+    } catch {}
     _findPanel.style.display = 'block'
     setTimeout(() => { try { (_findInput as HTMLInputElement).focus(); (_findInput as HTMLInputElement).select() } catch {} }, 0)
   }
@@ -5684,7 +5693,7 @@ function bindEvents() {
   document.addEventListener('keydown', (e: KeyboardEvent) => {
     try {
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'h') { e.preventDefault(); showFindPanel(); return }
-      if (e.key === 'Escape' && _findPanel && _findPanel.style.display !== 'none') { e.preventDefault(); _findPanel.style.display = 'none'; try { editor.focus() } catch {}; return }
+      if (e.key === 'Escape' && _findPanel && _findPanel.style.display !== 'none') { e.preventDefault(); _findPanel.style.display = 'none'; if (wysiwyg) { try { (document.querySelector('#md-wysiwyg-root .ProseMirror') as HTMLElement)?.focus() } catch {} } else { try { editor.focus() } catch {} } ; return }
     } catch {}
   })
 

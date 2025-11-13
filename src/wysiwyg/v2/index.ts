@@ -3,6 +3,7 @@
 
  import { history } from '@milkdown/plugin-history'
 import { Editor, rootCtx, defaultValueCtx, editorViewOptionsCtx, editorViewCtx, commandsCtx } from '@milkdown/core'
+import { TextSelection } from '@milkdown/prose/state'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { readFile } from '@tauri-apps/plugin-fs'
 // 用于外部（main.ts）在所见模式下插入 Markdown（文件拖放时复用普通模式逻辑）
@@ -327,6 +328,136 @@ export function isWysiwygV2Enabled(): boolean { return !!_editor }
 export async function wysiwygV2ReplaceAll(markdown: string) {
   if (!_editor) return
   try { await _editor.action(replaceAll(markdown)) } catch {}
+}
+
+// =============== 所见模式：查找 / 替换（Ctrl+H 面板接入） ===============
+// 说明：
+// - 简化实现：仅在单个文本节点内匹配，不跨节点；
+// - 支持大小写开关、前后查找；
+// - 替换：当前选区精确匹配则替换，否则先定位到下一处再替换；
+// - 全部替换：单事务从后往前批量替换，避免位置偏移；
+
+function _getView(): any { try { return (_editor as any)?.ctx?.get?.(editorViewCtx) } catch { return null } }
+function _norm(s: string, cs: boolean): string { return cs ? s : s.toLowerCase() }
+
+function _find(term: string, cs: boolean, backwards = false): { from: number, to: number } | null {
+  try {
+    const view = _getView()
+    if (!view || !term) return null
+    const state = view.state
+    const needle = _norm(String(term), cs)
+    const selFrom = state.selection.from >>> 0
+    let found: { from: number, to: number } | null = null
+
+    const scan = (startPos: number, endPos: number) => {
+      let hit: { from: number, to: number } | null = null
+      state.doc.descendants((node: any, pos: number) => {
+        if (!backwards && hit) return false
+        if (!node?.isText) return true
+        const text: string = String(node.text || '')
+        if (!text) return true
+        const absStart = pos >>> 0
+        const absEnd = (pos + text.length) >>> 0
+        if (absEnd <= startPos || absStart >= endPos) return true
+        const localStart = Math.max(0, startPos - absStart)
+        const localEnd = Math.min(text.length, endPos - absStart)
+        const segment = text.slice(0, localEnd)
+        if (!backwards) {
+          const idx = _norm(segment, cs).indexOf(needle, localStart)
+          if (idx >= 0) { const from = absStart + idx; hit = { from, to: from + term.length }; return false }
+        } else {
+          const idx = _norm(segment, cs).lastIndexOf(needle, Math.max(0, Math.min(localEnd - 1, selFrom - absStart)))
+          if (idx >= 0 && idx < localEnd) { const from = absStart + idx; hit = { from, to: from + term.length }; return true }
+        }
+        return true
+      })
+      if (hit) { found = hit; return true }
+      return false
+    }
+
+    if (!backwards) {
+      if (!scan(state.selection.to >>> 0, state.doc.content.size >>> 0)) scan(0, selFrom)
+    } else {
+      if (!scan(0, selFrom)) scan(selFrom, state.doc.content.size >>> 0)
+    }
+    return found
+  } catch { return null }
+}
+
+function _selectAndScroll(from: number, to: number): boolean {
+  try {
+    const view = _getView()
+    if (!view) return false
+    const st = view.state
+    const tr = st.tr.setSelection(TextSelection.create(st.doc, from, to)).scrollIntoView()
+    view.dispatch(tr)
+    try { view.focus() } catch {}
+    return true
+  } catch { return false }
+}
+
+export function wysiwygV2FindNext(term: string, caseSensitive = false): boolean {
+  const hit = _find(String(term || ''), !!caseSensitive, false)
+  if (!hit) return false
+  return _selectAndScroll(hit.from, hit.to)
+}
+
+export function wysiwygV2FindPrev(term: string, caseSensitive = false): boolean {
+  const hit = _find(String(term || ''), !!caseSensitive, true)
+  if (!hit) return false
+  return _selectAndScroll(hit.from, hit.to)
+}
+
+export function wysiwygV2ReplaceOne(term: string, replacement: string, caseSensitive = false): boolean {
+  try {
+    const view = _getView()
+    if (!view) return false
+    const st = view.state
+    const cur = st.doc.textBetween(st.selection.from, st.selection.to)
+    const match = !!term && (caseSensitive ? cur === term : cur.toLowerCase() === term.toLowerCase())
+    if (!match) {
+      if (!wysiwygV2FindNext(term, caseSensitive)) return false
+    }
+    const st2 = view.state
+    const tr = st2.tr.insertText(String(replacement || ''), st2.selection.from, st2.selection.to).scrollIntoView()
+    view.dispatch(tr)
+    try { view.focus() } catch {}
+    return true
+  } catch { return false }
+}
+
+export function wysiwygV2ReplaceAllInDoc(term: string, replacement: string, caseSensitive = false): number {
+  try {
+    const view = _getView()
+    if (!view || !term) return 0
+    const st = view.state
+    const needle = _norm(String(term), !!caseSensitive)
+    const matches: Array<{ from: number, to: number }> = []
+    st.doc.descendants((node: any, pos: number) => {
+      if (!node?.isText) return true
+      const text = String(node.text || '')
+      if (!text) return true
+      const hay = _norm(text, !!caseSensitive)
+      let i = 0
+      for (;;) {
+        const idx = hay.indexOf(needle, i)
+        if (idx < 0) break
+        const from = (pos >>> 0) + idx
+        matches.push({ from, to: from + term.length })
+        i = idx + Math.max(1, term.length)
+      }
+      return true
+    })
+    if (!matches.length) return 0
+    let tr = st.tr
+    for (let i = matches.length - 1; i >= 0; i--) {
+      const m = matches[i]
+      tr = tr.insertText(String(replacement || ''), m.from, m.to)
+    }
+    view.dispatch(tr.scrollIntoView())
+    try { view.focus() } catch {}
+    return matches.length
+  } catch { return 0 }
 }
 
 // =============== 自动渲染覆盖层：Mermaid 代码块 ===============
