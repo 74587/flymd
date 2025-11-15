@@ -169,18 +169,31 @@ export const themeAPI = { registerTheme, registerPalette, registerTypography, re
 // ===== 主题 UI =====
 
 function buildColorList(): Array<{ id: string; label: string; color: string }> {
-  // 从当前 CSS 读取“所见模式当前颜色”
+  // 从当前 CSS 读取"所见模式当前颜色"
   const curW = getCssVar('--wysiwyg-bg') || '#e9edf5'
   const base = [
     { id: 'sys-wys', label: '所见色', color: curW },
     { id: 'pure', label: '纯白', color: '#ffffff' },
     { id: 'parch', label: '羊皮纸', color: '#fbf5e6' },
     { id: 'soft-blue', label: '淡蓝', color: '#f7f9fc' },
-    // 自增几种柔和色
+    // 柔和护眼色系
     { id: 'warm-gray', label: '暖灰', color: '#f6f5f1' },
     { id: 'mist-blue', label: '雾蓝', color: '#eef3f9' },
     { id: 'mint', label: '薄荷', color: '#eef8f1' },
     { id: 'ivory', label: '象牙', color: '#fffaf0' },
+    // 新增护眼色系
+    { id: 'beige', label: '米色', color: '#f5f5dc' },
+    { id: 'sand', label: '沙色', color: '#faf8f3' },
+    { id: 'cream', label: '奶油', color: '#fffef9' },
+    { id: 'pearl', label: '珍珠', color: '#fafaf8' },
+    // 新增冷色调
+    { id: 'sky', label: '天蓝', color: '#e8f4f8' },
+    { id: 'frost', label: '冰霜', color: '#f0f8ff' },
+    { id: 'lavender', label: '薰衣草', color: '#f5f3ff' },
+    // 新增暖色调
+    { id: 'peach', label: '蜜桃', color: '#fff5ee' },
+    { id: 'rose', label: '玫瑰', color: '#fff5f7' },
+    { id: 'apricot', label: '杏色', color: '#fff8f0' },
   ]
   return base.concat(_palettes)
 }
