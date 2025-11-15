@@ -33,7 +33,7 @@ function clearStatus(delayMs: number = 1800) {
 // 计算文件内容的 MD5 哈希
 async function calculateFileHash(data: Uint8Array): Promise<string> {
   try {
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data as any)
     const hashArray = Array.from(new Uint8Array(hashBuffer))
     const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
     return hashHex
@@ -158,7 +158,7 @@ async function openSyncLog(): Promise<void> {
     await openPath(logPath)
   } catch (e) {
     console.warn('打开日志失败', e)
-    alert('打开日志失败: ' + (e?.message || e))
+    alert('打开日志失败: ' + ((e as any)?.message || e))
   }
 }
 
@@ -368,9 +368,10 @@ if (name.startsWith('.')) { await syncLog('[scan-skip-hidden] ' + (rel ? rel + '
           // 优化：检查是否可以复用上次的哈希
           const lastFile = lastMeta?.files[__relUnix]
           let hash = ''
-          if (lastFile && lastFile.mtime === mt && lastFile.size === size) {
-            // 文件没有变化，复用上次的哈希（不重新计算）
+          if (lastFile && Math.abs(lastFile.mtime - mt) <= 1000 && lastFile.size === size) {
+            // 文件 mtime 和 size 都没变，复用上次的哈希（不重新计算）
             hash = lastFile.hash
+            await syncLog(`[hash-reuse] ${__relUnix} - mtime和size未变，复用哈希`)
           } else {
             // 文件有变化或第一次扫描，需要计算哈希
             const fileData = await readFile(full as any)
@@ -387,7 +388,19 @@ if (name.startsWith('.')) { await syncLog('[scan-skip-hidden] ' + (rel ? rel + '
   return map
 }
 
+// PROPFIND 缓存
+const _propfindCache = new Map<string, { result: any; timestamp: number }>()
+const CACHE_TTL = 30000  // 30秒缓存
+
 async function listRemoteDir(baseUrl: string, auth: { username: string; password: string }, remotePath: string): Promise<{ files: { name: string; isDir: boolean; mtime?: number; etag?: string }[] }> {
+  // 检查缓存
+  const cacheKey = `${baseUrl}:${remotePath}`
+  const cached = _propfindCache.get(cacheKey)
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    await syncLog(`[propfind-cache-hit] ${remotePath}`)
+    return cached.result
+  }
+
   const http = await getHttpClient(); if (!http) throw new Error('no http client')
   const url = joinUrl(baseUrl, remotePath)
   const body = `<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:getlastmodified/><d:getetag/><d:resourcetype/></d:prop></d:propfind>`
@@ -466,9 +479,75 @@ async function listRemoteDir(baseUrl: string, auth: { username: string; password
       files.push({ name, isDir, mtime: mt, etag })
     }
   } catch (e) {
-    await syncLog('[remote-propfind] 解析XML失败: ' + (e?.message || e))
+    await syncLog('[remote-propfind] 解析XML失败: ' + ((e as any)?.message || e))
   }
-  return { files }
+
+  const result = { files }
+  // 保存到缓存
+  _propfindCache.set(cacheKey, { result, timestamp: Date.now() })
+  return result
+}
+
+// 尝试使用 Depth: infinity 一次性获取整个目录树
+async function tryListRemoteInfinity(baseUrl: string, auth: { username: string; password: string }, rootPath: string): Promise<{ files: Map<string, FileEntry>; dirsProps: { [dir: string]: { mtime?: number; etag?: string } } } | null> {
+  try {
+    const http = await getHttpClient(); if (!http) return null
+    const url = joinUrl(baseUrl, rootPath)
+    const body = `<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:getlastmodified/><d:getetag/><d:resourcetype/></d:prop></d:propfind>`
+    const headers: Record<string,string> = { Depth: 'infinity', 'Content-Type': 'application/xml' }
+    const authStr = btoa(`${auth.username}:${auth.password}`)
+    headers['Authorization'] = `Basic ${authStr}`
+
+    const resp = await http.fetch(url, { method: 'PROPFIND', headers, body })
+    if (!(resp?.ok === true || (typeof resp.status === 'number' && resp.status >= 200 && resp.status < 300))) {
+      return null  // 服务器不支持
+    }
+
+    const text = typeof resp.text === 'function' ? await resp.text() : (resp.data || '')
+    const doc = new DOMParser().parseFromString(String(text || ''), 'application/xml')
+    const respNodes = Array.from(doc.getElementsByTagNameNS('*','response'))
+
+    const map = new Map<string, FileEntry>()
+    const dirsProps: { [dir: string]: { mtime?: number; etag?: string } } = {}
+
+    for (const r of respNodes) {
+      const hrefEl = (r as any).getElementsByTagNameNS?.('*','href')?.[0] as Element | undefined
+      const mEl = (r as any).getElementsByTagNameNS?.('*','getlastmodified')?.[0] as Element | undefined
+      const etagEl = (r as any).getElementsByTagNameNS?.('*','getetag')?.[0] as Element | undefined
+      const typeEl = (r as any).getElementsByTagNameNS?.('*','resourcetype')?.[0] as Element | undefined
+      const rawHref = hrefEl?.textContent || ''
+      if (!rawHref) continue
+
+      let href = rawHref
+      try { href = decodeURIComponent(rawHref) } catch {}
+
+      // 提取相对路径
+      const rootUrl = new URL(joinUrl(baseUrl, rootPath))
+      const itemUrl = href.startsWith('http') ? new URL(href) : new URL(href, rootUrl)
+      let rel = itemUrl.pathname.replace(rootUrl.pathname, '').replace(/^\/+/, '')
+      if (!rel) continue
+      if (rel.startsWith('.')) continue
+
+      const typeXml = typeEl?.outerHTML || typeEl?.innerHTML || ''
+      const isDir = /<d:collection\b/i.test(typeXml) || /<collection\b/i.test(typeXml) || /\bcollection\b/i.test(typeXml) || rawHref.endsWith('/')
+      const mt = mEl?.textContent ? toEpochMs(mEl.textContent) : undefined
+      const etag = etagEl?.textContent ? String(etagEl.textContent).replace(/^["']|["']$/g, '') : undefined
+
+      if (isDir) {
+        dirsProps[rel] = { mtime: mt, etag }
+      } else {
+        if (/\.(md|markdown|txt|png|jpg|jpeg|gif|svg|pdf)$/i.test(rel)) {
+          map.set(rel, { path: rel, mtime: toEpochMs(mt), size: 0, etag })
+        }
+      }
+    }
+
+    await syncLog(`[infinity-success] 使用 Depth:infinity 获取到 ${map.size} 个文件`)
+    return { files: map, dirsProps }
+  } catch (e) {
+    await syncLog(`[infinity-failed] Depth:infinity 不支持，回退到递归扫描: ${(e as any)?.message || e}`)
+    return null
+  }
 }
 
 // 远端递归扫描（带剪枝）：
@@ -480,6 +559,11 @@ async function listRemoteRecursively(
   rootPath: string,
   opts?: { lastDirs?: { [dir: string]: { mtime?: number; etag?: string } } }
 ): Promise<{ files: Map<string, FileEntry>; dirsProps: { [dir: string]: { mtime?: number; etag?: string } } }> {
+  // 先尝试 Depth: infinity
+  const infinityResult = await tryListRemoteInfinity(baseUrl, auth, rootPath)
+  if (infinityResult) return infinityResult
+
+  // 回退到递归扫描
   const map = new Map<string, FileEntry>()
   const dirsProps: { [dir: string]: { mtime?: number; etag?: string } } = {}
   let dirCount = 0
@@ -497,10 +581,14 @@ async function listRemoteRecursively(
     try {
       __filesRes = await listRemoteDir(baseUrl, auth, full)
     } catch (e) {
-      await syncLog('[remote-scan-error] 列出目录失败: ' + full + ' - ' + (e?.message || e))
+      await syncLog('[remote-scan-error] 列出目录失败: ' + full + ' - ' + ((e as any)?.message || e))
       __filesRes = { files: [] }
     }
     const files = __filesRes.files || []
+
+    // 分离文件和目录
+    const subDirs: Array<{ name: string; rel: string; needDive: boolean }> = []
+
     for (const f of files) {
       if (!f?.name) continue
       if (String(f.name).startsWith('.')) continue
@@ -520,12 +608,19 @@ async function listRemoteRecursively(
           }
         }
         if (needDive) {
-          await walk(r)
+          subDirs.push({ name: f.name, rel: r, needDive })
         }
       } else {
         fileCount++
         map.set(r, { path: r, mtime: toEpochMs(f.mtime), size: 0, etag: f.etag })
       }
+    }
+
+    // 并发扫描子目录 (每次最多3个)
+    const DIR_CONCURRENCY = 3
+    for (let i = 0; i < subDirs.length; i += DIR_CONCURRENCY) {
+      const batch = subDirs.slice(i, i + DIR_CONCURRENCY)
+      await Promise.all(batch.map(d => walk(d.rel)))
     }
   }
   await walk('')
@@ -859,16 +954,16 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
       dirs: { ...(lastMeta.dirs || {}), ...((remoteScan as any)?.dirsProps || {}) }
     }
 
-    for (const act of plan) {
+    // 并发控制：将任务分组并发执行
+    const CONCURRENCY = 5  // 同时处理5个文件
+    const processTask = async (act: typeof plan[0]) => {
       if (Date.now() > deadline) {
-        await syncLog('[timeout] 超时中断，已完成 ' + __processed + '/' + __total + '，剩余 ' + (plan.length - __processed) + ' 个任务未完成')
-        await syncLog('[timeout] 将保存已完成任务的元数据，下次同步将继续处理剩余文件')
-        break
+        await syncLog('[timeout] 超时中断')
+        return { success: false, timeout: true }
       }
       try {
         if (act.type === 'move-remote') {
           // 处理重命名：使用 WebDAV MOVE
-          moves++
           await syncLog('[move-remote] ' + (act.oldRel || '') + ' -> ' + act.rel)
           const oldRemotePath = cfg.rootPath.replace(/\/+$/,'') + '/' + encodePath(act.oldRel || '')
           const newRemotePath = cfg.rootPath.replace(/\/+$/,'') + '/' + encodePath(act.rel)
@@ -898,7 +993,6 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
           if (act.oldRel) delete newMeta.files[act.oldRel]
         } else if (act.type === 'conflict') {
           // 处理冲突：根据策略自动选择或询问用户
-          conflicts++
           await syncLog('[conflict] ' + act.rel + ' - 策略: ' + cfg.conflictStrategy)
 
           let chooseLocal = false  // 默认选择远程
@@ -936,8 +1030,7 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
             const remoteDir = (cfg.rootPath || '').replace(/\/+$/, '') + (relDir ? '/' + relDir : '')
             await ensureRemoteDir(cfg.baseUrl, auth, remoteDir)
             await uploadFile(cfg.baseUrl, auth, cfg.rootPath.replace(/\/+$/,'') + '/' + encodePath(act.rel), buf as any)
-            up++
-            // 记录到元数据
+              // 记录到元数据
             const meta = await stat(full)
             const remote = remoteIdx.get(act.rel)
             newMeta.files[act.rel] = {
@@ -957,8 +1050,7 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
             const dir = full.split(/\\|\//).slice(0, -1).join(localRoot.includes('\\') ? '\\' : '/')
             if (!(await exists(dir as any))) { try { await mkdir(dir as any, { recursive: true } as any) } catch {} }
             await writeFile(full as any, data as any)
-            down++
-            // 记录到元数据
+              // 记录到元数据
             const meta = await stat(full)
             const remote = remoteIdx.get(act.rel)
             newMeta.files[act.rel] = {
@@ -984,8 +1076,7 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
             const dir = full.split(/\\|\//).slice(0, -1).join(localRoot.includes('\\') ? '\\' : '/')
             if (!(await exists(dir as any))) { try { await mkdir(dir as any, { recursive: true } as any) } catch {} }
             await writeFile(full as any, data as any)
-            down++
-            await syncLog('[ok] download ' + act.rel)
+              await syncLog('[ok] download ' + act.rel)
             // 记录到元数据
             const meta = await stat(full)
             const remote = remoteIdx.get(act.rel)
@@ -1008,7 +1099,6 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
           const remoteDir = (cfg.rootPath || '').replace(/\/+$/, '') + (relDir ? '/' + relDir : '')
           await ensureRemoteDir(cfg.baseUrl, auth, remoteDir)
           await uploadFile(cfg.baseUrl, auth, cfg.rootPath.replace(/\/+$/,'') + '/' + encodePath(act.rel), buf as any)
-          up++
           await syncLog('[ok] upload ' + act.rel)
           // 记录到元数据
           const meta = await stat(full)
@@ -1039,8 +1129,7 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
               // 用户选择删除远程文件
               await syncLog('[local-deleted-action] ' + act.rel + ' 用户选择删除远程文件')
               await deleteRemoteFile(cfg.baseUrl, auth, cfg.rootPath.replace(/\/+$/,'') + '/' + encodePath(act.rel))
-              del++
-              await syncLog('[ok] delete-remote ' + act.rel)
+                  await syncLog('[ok] delete-remote ' + act.rel)
               // 从元数据中移除
               delete newMeta.files[act.rel]
             } else {
@@ -1052,8 +1141,7 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
               const dir = full.split(/\\|\//).slice(0, -1).join(localRoot.includes('\\') ? '\\' : '/')
               if (!(await exists(dir as any))) { try { await mkdir(dir as any, { recursive: true } as any) } catch {} }
               await writeFile(full as any, data as any)
-              down++
-              await syncLog('[ok] recover ' + act.rel)
+                  await syncLog('[ok] recover ' + act.rel)
               // 记录到元数据
               const meta = await stat(full)
               const remote = remoteIdx.get(act.rel)
@@ -1067,31 +1155,63 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
               }
             }
           } catch (e) {
-            await syncLog('[local-deleted-error] ' + act.rel + ' 处理失败: ' + (e?.message || e))
+            await syncLog('[local-deleted-error] ' + act.rel + ' 处理失败: ' + ((e as any)?.message || e))
           }
         } else if (act.type === 'delete') {
           // 不再自动删除远程文件，只记录警告
           await syncLog('[skip-delete-remote] ' + act.rel + ' 为了安全，不自动删除远程文件')
           // 从元数据中移除（但不删除实际文件）
         }
+        return { success: true, type: act.type }
       } catch (e) {
         console.warn('sync step failed', act, e)
-        try { await syncLog('[fail] ' + act.type + ' ' + act.rel + ' : ' + (e?.message || e)) } catch {}
-        __fail++
-        try { __lastErr = String(e?.message || e || __lastErr) } catch {}
-        updateStatus(`同步中… ${__processed}/${__total} (失败 ${__fail})`)
+        try { await syncLog('[fail] ' + act.type + ' ' + act.rel + ' : ' + ((e as any)?.message || e)) } catch {}
+        return { success: false, error: e }
       }
-      __processed++
+    }
 
-      // 更新状态显示实际操作（显示文件名，不要太长）
-      const shortName = act.rel.length > 35 ? '...' + act.rel.substring(act.rel.length - 32) : act.rel
-      const actionEmoji = act.type === 'upload' ? '↑' : act.type === 'download' ? '↓' : act.type === 'move-remote' ? '↔' : '✗'
-      updateStatus(`${actionEmoji} ${shortName} (${__processed}/${__total})`)
+    // 并发执行任务
+    for (let i = 0; i < plan.length; i += CONCURRENCY) {
+      const batch = plan.slice(i, i + CONCURRENCY)
+      const results = await Promise.all(batch.map(act => processTask(act)))
 
-      // 每10个文件输出一次进度日志
-      if (__processed % 10 === 0) {
-        await syncLog(`[progress] 已处理 ${__processed}/${__total} 个文件，上传${up} 下载${down} 移动${moves} 冲突${conflicts}`)
+      for (let j = 0; j < results.length; j++) {
+        const result = results[j]
+        const act = batch[j]
+
+        if (result.timeout) {
+          await syncLog('[timeout] 超时中断，已完成 ' + __processed + '/' + __total + '，剩余 ' + (plan.length - __processed) + ' 个任务未完成')
+          await syncLog('[timeout] 将保存已完成任务的元数据，下次同步将继续处理剩余文件')
+          break
+        }
+
+        if (!result.success) {
+          __fail++
+          try { __lastErr = String((result as any).error?.message || (result as any).error || __lastErr) } catch {}
+          updateStatus(`同步中… ${__processed}/${__total} (失败 ${__fail})`)
+        } else {
+          // 更新计数器
+          if (result.type === 'upload') up++
+          else if (result.type === 'download') down++
+          else if (result.type === 'move-remote') moves++
+          else if (result.type === 'delete') del++
+          else if (result.type === 'conflict') conflicts++
+        }
+
+        __processed++
+
+        // 更新状态显示实际操作（显示文件名，不要太长）
+        const shortName = act.rel.length > 35 ? '...' + act.rel.substring(act.rel.length - 32) : act.rel
+        const actionEmoji = act.type === 'upload' ? '↑' : act.type === 'download' ? '↓' : act.type === 'move-remote' ? '↔' : '✗'
+        updateStatus(`${actionEmoji} ${shortName} (${__processed}/${__total})`)
+
+        // 每10个文件输出一次进度日志
+        if (__processed % 10 === 0) {
+          await syncLog(`[progress] 已处理 ${__processed}/${__total} 个文件，上传${up} 下载${down} 移动${moves} 冲突${conflicts}`)
+        }
       }
+
+      if (results.some(r => r.timeout)) break
     }
 
     // 保存同步元数据
@@ -1119,9 +1239,9 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
     } catch {}
     await syncLog('[done] up=' + up + ' down=' + down + ' moves=' + moves + ' del=' + del + ' conflicts=' + conflicts + ' total=' + __total);
     return { uploaded: up, downloaded: down }
-  } catch (e) { try { await syncLog('[error] ' + (e?.message || e)) } catch {}
+  } catch (e) { try { await syncLog('[error] ' + ((e as any)?.message || e)) } catch {}
     console.warn('sync failed', e)
-    updateStatus('同步失败：' + (e?.message || '未知错误'))
+    updateStatus('同步失败：' + ((e as any)?.message || '未知错误'))
     clearStatus(3000)
     return null
   } finally {
@@ -1201,7 +1321,7 @@ export async function initWebdavSync(): Promise<void> {
           }
         } catch (e) {
           console.error('关闭前同步出错:', e)
-          await syncLog('[shutdown-error] ' + (e?.message || e))
+          await syncLog('[shutdown-error] ' + ((e as any)?.message || e))
           // 出错时也要退出，不能卡住
           try {
             await getCurrentWindow().destroy()
