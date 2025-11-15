@@ -152,7 +152,7 @@ html, body {
   text-overflow: ellipsis;
 }
 
-.container { height: calc(100% - 32px); position: relative; }
+.container { height: calc(100% - 32px); position: relative; background: var(--bg); }
 /* 所见模式：整体容器背景替换为专用色 */
 .container.wysiwyg { /* legacy overlay 标记，保留但不隐藏容器，避免误伤 */ }
 .container.wysiwyg-v2 { background: var(--wysiwyg-bg) !important; }
