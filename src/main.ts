@@ -3534,6 +3534,15 @@ async function toggleMode() {
     try { editor.focus() } catch {}
   }
   ;(document.getElementById('btn-toggle') as HTMLButtonElement).textContent = mode === 'edit' ? '阅读' : '编辑'
+  // 模式切换后，如大纲面板可见，强制按当前模式重建一次大纲
+  try {
+    const outline = document.getElementById('lib-outline') as HTMLDivElement | null
+    if (outline && !outline.classList.contains('hidden')) {
+      _outlineLastSignature = ''
+      renderOutlinePanel()
+      if (mode !== 'edit') bindOutlineScrollSync()
+    }
+  } catch {}
 }
 
 // 打开文件
