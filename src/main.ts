@@ -5696,7 +5696,7 @@ function bindEvents() {
     panel.innerHTML = `
       <div style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
         <input id="find-text" type="text" placeholder="查找... (Enter=下一个, Shift+Enter=上一个)" style="flex:1; padding:6px 8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--fg);" />
-        <span id="find-count" style="min-width:88px; text-align:right; font-size:12px; color:var(--muted); white-space:nowrap; padding:2px 8px; border-radius:999px; background:rgba(127,127,127,0.06);"></span>
+        <span id="find-count" style="text-align:center; font-size:11px; color:var(--muted); white-space:nowrap; padding:3px 6px; border-radius:4px; background:rgba(127,127,127,0.08); border:1px solid rgba(127,127,127,0.12);"></span>
         <label title="区分大小写" style="display:flex; align-items:center; gap:4px; user-select:none;">
           <input id="find-case" type="checkbox" />Aa
         </label>
@@ -5783,12 +5783,12 @@ function bindEvents() {
           const total = _previewFindMatches.length
           if (!total) { lblCount.textContent = '未找到'; return }
           const cur = _previewFindIndex >= 0 ? (_previewFindIndex + 1) : 0
-          lblCount.textContent = cur > 0 ? `${cur} / ${total} 处` : `共 ${total} 处`
+          lblCount.textContent = cur > 0 ? `${cur}/${total}` : `${total}个`
           return
         }
         const { total, index } = countMatchesInEditor(term)
         if (!total) { lblCount.textContent = '未找到'; return }
-        lblCount.textContent = index > 0 ? `${index} / ${total} 处` : `共 ${total} 处`
+        lblCount.textContent = index > 0 ? `${index}/${total}` : `${total}个`
       } catch {
         try { lblCount.textContent = '' } catch {}
       }
