@@ -168,6 +168,18 @@ const dict = {
     'lang.zh': '中文',
     'lang.en': 'English',
 
+    // 右键菜单
+    'ctx.newFile': '在此新建文档',
+    'ctx.newFolder': '在此新建文件夹',
+    'ctx.customIcon': '自定义图标',
+    'ctx.moveTo': '移动到…',
+    'ctx.rename': '重命名',
+    'ctx.delete': '删除',
+    'ctx.sortNameAsc': '按名称 A→Z',
+    'ctx.sortNameDesc': '按名称 Z→A',
+    'ctx.sortTimeDesc': '按修改时间 新→旧',
+    'ctx.sortTimeAsc': '按修改时间 旧→新',
+
     // 扩展与插件
     'ext.title': '扩展与插件管理',
     'ext.install.section': '安装扩展（GitHub 或 URL）',
@@ -329,6 +341,18 @@ const dict = {
     'lang.auto': 'Auto',
     'lang.zh': '中文',
     'lang.en': 'English',
+
+    // Context menu
+    'ctx.newFile': 'New File Here',
+    'ctx.newFolder': 'New Folder Here',
+    'ctx.customIcon': 'Custom Icon',
+    'ctx.moveTo': 'Move to…',
+    'ctx.rename': 'Rename',
+    'ctx.delete': 'Delete',
+    'ctx.sortNameAsc': 'Sort by name A→Z',
+    'ctx.sortNameDesc': 'Sort by name Z→A',
+    'ctx.sortTimeDesc': 'Sort by time: newest first',
+    'ctx.sortTimeAsc': 'Sort by time: oldest first',
 
     // Extensions & Plugins
     'ext.title': 'Extensions & Plugins',
