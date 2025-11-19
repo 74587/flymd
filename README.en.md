@@ -25,8 +25,8 @@ A cross-platform WYSIWYG Markdown editor and PDF reader with image hosting, WebD
 - Auto Sync: WebDAV sync functionality
 - Plugin Extensions: Support for plugin extensions, develop your own or install with one click
 - AI Assistant: Install from the Extensions market to polish, correct and summarize content
-
 - Export formats: Export to PDF, DOCX, WPS
+- Todo Reminder Extension: Install from the Extensions market to push unfinished TODOs at scheduled times via WeChat, SMS, or email to designated recipients
 ## 📸 Interface Preview (v0.2.2)
 <p align="center">
   <img src="https://github.com/user-attachments/assets/661c3263-d877-4fcf-a77f-69096b42b9d5" width="32%" alt="Markdown Editor Screenshot 1"/>
@@ -133,6 +133,7 @@ For detailed development guide, see: [Extension Development Documentation](plugi
 
 **Example Plugins:**
 - [Typecho Publisher](https://github.com/TGU-HansJack/typecho-publisher-flymd) - Publish articles to Typecho blog platform
+- Todo Reminder Extension - Push unfinished TODOs at scheduled times via WeChat, SMS, or email to designated recipients
 
 
 ## 📊 Performance Targets
