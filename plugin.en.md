@@ -1,5 +1,7 @@
 # flyMD Plugin Development Documentation
 
+[简体中文](plugin.md) | [English](plugin.en.md)
+
 > This document describes how to develop plugins for flyMD
 
 ## Table of Contents

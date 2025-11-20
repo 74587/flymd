@@ -136,7 +136,9 @@ flyMD 支持通过扩展插件来增强功能。你可以：
 - 从 GitHub 或 HTTP URL 安装插件
 - 管理已安装的扩展
 
-详细开发指南请参阅：[扩展开发文档](plugin.md)
+详细开发指南请参阅：
+- [扩展开发文档 (中文)](plugin.md)
+- [Extension Development Documentation (English)](plugin.en.md)
 
 **示例插件：**
 - [Typecho Publisher](https://github.com/TGU-HansJack/typecho-publisher-flymd) - 将文章发布到 Typecho 博客平台

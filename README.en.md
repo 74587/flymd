@@ -131,7 +131,9 @@ flyMD supports plugin extensions to enhance functionality. You can:
 - Install plugins from GitHub or HTTP URL
 - Manage installed extensions
 
-For detailed development guide, see: [Extension Development Documentation](plugin.md)
+For detailed development guide, see:
+- [扩展开发文档 (中文)](plugin.md)
+- [Extension Development Documentation (English)](plugin.en.md)
 
 **Example Plugins:**
 - [Typecho Publisher](https://github.com/TGU-HansJack/typecho-publisher-flymd) - Publish articles to Typecho blog platform
