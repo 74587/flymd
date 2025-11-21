@@ -704,156 +704,6 @@ async function quick(context, kind){
   await sendFromInput(context)
 }
 
-// ========== xxtui 待办推送相关函数 ==========
-// 解析时间表达式（复制自 xxtui-todo-push）
-function parseTimeExpr(expr, nowSec) {
-  const s = String(expr || '').trim()
-  if (!s) return 0
-
-  // 1. 显式日期时间：YYYY-MM-DD HH[:mm]
-  {
-    const m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})\s+(\d{1,2})(?::(\d{1,2}))?$/)
-    if (m) {
-      const y = parseInt(m[1], 10) || 0
-      const mo = parseInt(m[2], 10) || 0
-      const d = parseInt(m[3], 10) || 0
-      const h = parseInt(m[4], 10) || 0
-      const mi = m[5] != null ? (parseInt(m[5], 10) || 0) : 0
-      if (y && mo && d) {
-        const dt = new Date(y, mo - 1, d, h, mi, 0, 0)
-        return Math.floor(dt.getTime() / 1000)
-      }
-    }
-  }
-
-  // 2. 仅时间（今天或次日）：HH[:mm] / HH点[mm分]
-  {
-    let mt = s.match(/^(\d{1,2})(?::(\d{1,2}))?$/)
-    if (!mt) mt = s.match(/^(\d{1,2})点(?:(\d{1,2})分?)?$/)
-    if (mt) {
-      const base = new Date(nowSec * 1000)
-      const y = base.getFullYear()
-      const mo = base.getMonth()
-      const d = base.getDate()
-      const h = parseInt(mt[1], 10) || 0
-      const mi = mt[2] != null ? (parseInt(mt[2], 10) || 0) : 0
-      const dt = new Date(y, mo, d, h, mi, 0, 0)
-      let ts = Math.floor(dt.getTime() / 1000)
-      if (ts <= nowSec) ts += 24 * 3600
-      return ts
-    }
-  }
-
-  // 3. 简单中文相对日期 + 时段：今天/明天/后天 [早上/下午/晚上] [HH[:mm]]
-  {
-    const m = s.match(/^(今天|明天|后天)\s*(早上|上午|中午|下午|晚上|晚|今晚)?\s*(\d{1,2})?(?::(\d{1,2}))?$/)
-    if (m) {
-      const word = m[1]
-      const period = m[2] || ''
-      const hRaw = m[3]
-      const miRaw = m[4]
-
-      let addDay = 0
-      if (word === '明天') addDay = 1
-      else if (word === '后天') addDay = 2
-
-      let h = 9
-      if (hRaw != null) {
-        h = parseInt(hRaw, 10) || 0
-      } else if (period) {
-        if (period === '中午') h = 12
-        else if (period === '下午') h = 15
-        else if (period === '晚上' || period === '晚' || period === '今晚') h = 20
-        else h = 9
-      }
-
-      const mi = miRaw != null ? (parseInt(miRaw, 10) || 0) : 0
-
-      const base = new Date(nowSec * 1000)
-      const y = base.getFullYear()
-      const mo = base.getMonth()
-      const d = base.getDate() + addDay
-      const dt = new Date(y, mo, d, h, mi, 0, 0)
-      return Math.floor(dt.getTime() / 1000)
-    }
-  }
-
-  // 4. 简单相对时间：X小时后 / X分钟后
-  {
-    const mHour = s.match(/^(\d+)\s*(小时|h|H)后$/)
-    if (mHour) {
-      const n = parseInt(mHour[1], 10) || 0
-      if (n > 0) return nowSec + n * 3600
-    }
-    const mMin = s.match(/^(\d+)\s*(分钟|分)后$/)
-    if (mMin) {
-      const n = parseInt(mMin[1], 10) || 0
-      if (n > 0) return nowSec + n * 60
-    }
-  }
-
-  return 0
-}
-
-function parseTodoTime(title, nowSec) {
-  const raw = String(title || '').trim()
-  if (!raw) return null
-  const idx = raw.lastIndexOf('@')
-  if (idx < 0) return null
-
-  const text = String(raw.slice(0, idx)).trim()
-  const expr = String(raw.slice(idx + 1)).trim()
-  if (!expr) return null
-
-  const ts = parseTimeExpr(expr, nowSec)
-  if (!ts || !Number.isFinite(ts)) return null
-  if (ts <= nowSec) return null
-
-  return {
-    title: text || raw,
-    reminderTime: ts
-  }
-}
-
-async function pushScheduledTodo(context, xxtuiCfg, todo) {
-  const key = String(xxtuiCfg && xxtuiCfg.apiKey || '').trim()
-  if (!key) throw new Error('xxtui API Key 未配置')
-  const ts = todo && todo.reminderTime ? Number(todo.reminderTime) : 0
-  if (!ts || !Number.isFinite(ts)) throw new Error('时间格式错误')
-
-  const url = 'https://www.xxtui.com/scheduled/reminder/' + encodeURIComponent(key)
-  const text = String(todo && todo.title || '').trim()
-  const title = '[TODO] ' + (text || '待办事项')
-  const lines = []
-  lines.push('提醒内容:')
-  lines.push(text || title)
-
-  try {
-    const d = new Date(ts * 1000)
-    if (Number.isFinite(d.getTime())) {
-      const pad = (n) => (n < 10 ? '0' + n : '' + n)
-      const s = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
-        ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes())
-      lines.push('')
-      lines.push('提醒时间：' + s)
-    }
-  } catch {}
-
-  lines.push('来源：' + ((xxtuiCfg && xxtuiCfg.from) || 'AI 写作助手'))
-
-  const payload = {
-    title,
-    content: lines.join('\n'),
-    reminderTime: ts
-  }
-
-  await context.http.fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  })
-}
-
 async function generateTodosAndPush(context) {
   const GENERATING_MARKER = '[正在生成待办并创建提醒]\n\n'
   try {
@@ -867,16 +717,10 @@ async function generateTodosAndPush(context) {
       return
     }
 
-    // 加载 xxtui 配置
-    let xxtuiCfg
-    try {
-      xxtuiCfg = await context.storage.get('xxtui.todo.config')
-      if (!xxtuiCfg || !xxtuiCfg.apiKey) {
-        context.ui.notice('请先配置 xxtui 插件的 API Key', 'err', 3000)
-        return
-      }
-    } catch {
-      context.ui.notice('xxtui 插件未安装或未配置', 'err', 3000)
+    // 检查 xxtui-todo-push 插件是否可用
+    const xxtuiAPI = context.getPluginAPI('xxtui-todo-push')
+    if (!xxtuiAPI || !xxtuiAPI.parseAndCreateReminders) {
+      context.ui.notice('xxtui-todo-push 插件未安装或版本过低', 'err', 3000)
       return
     }
 
@@ -971,41 +815,25 @@ ${content.length > 4000 ? content.slice(0, 4000) + '...' : content}
     const newContent = todoSection + content
     context.setEditorValue(newContent)
 
-    // 推送到 xxtui
-    const nowSec = Math.floor(Date.now() / 1000)
-    let okCount = 0
-    let failCount = 0
+    // 调用 xxtui API 批量创建提醒
+    try {
+      const result = await xxtuiAPI.parseAndCreateReminders(todoSection)
+      const { success = 0, failed = 0 } = result || {}
+      const total = validTodos.length
 
-    for (const todoLine of validTodos) {
-      try {
-        // 解析待办项（提取 - [ ] 后的内容）
-        const match = todoLine.match(/^[-*]\s+\[([\sx])\]\s+(.+)$/)
-        if (!match) continue
-
-        const todoText = match[2].trim()
-        const parsed = parseTodoTime(todoText, nowSec)
-
-        if (parsed && parsed.reminderTime) {
-          // 有时间的待办，创建定时提醒
-          await pushScheduledTodo(context, xxtuiCfg, {
-            title: parsed.title,
-            reminderTime: parsed.reminderTime
-          })
-          okCount++
-        }
-      } catch (err) {
-        console.error('推送单条待办失败：', err)
-        failCount++
+      let msg = `成功生成 ${total} 条待办事项`
+      if (success > 0) {
+        msg += `，已创建 ${success} 条提醒`
       }
+      if (failed > 0) {
+        msg += `（${failed} 条创建失败）`
+      }
+
+      context.ui.notice(msg, success > 0 ? 'ok' : 'warn', 3500)
+    } catch (err) {
+      console.error('创建提醒失败：', err)
+      context.ui.notice(`成功生成 ${validTodos.length} 条待办事项，但创建提醒失败：${err.message || '未知错误'}`, 'warn', 4000)
     }
-
-    const total = validTodos.length
-    const pushed = okCount
-    const msg = pushed > 0
-      ? `成功生成 ${total} 条待办事项，已推送 ${pushed} 条定时提醒到 xxtui`
-      : `成功生成 ${total} 条待办事项（无带时间的待办，未推送）`
-
-    context.ui.notice(msg, okCount > 0 ? 'ok' : 'err', 3500)
   } catch (error) {
     console.error('生成待办事项失败：', error)
     try {
