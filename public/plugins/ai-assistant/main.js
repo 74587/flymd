@@ -65,9 +65,9 @@ function lastUserMsg() { try { const arr = __AI_SESSION__.messages; for (let i =
 function shorten(s, n){ const t = String(s||'').trim(); return t.length>n? (t.slice(0,n)+'…') : t }
 function isFreeProvider(cfg){ return !!cfg && cfg.provider === 'free' }
 function buildApiUrl(cfg){
+  // 免费代理模式：使用硬编码的代理地址，保留用户的自定义配置
+  if (isFreeProvider(cfg)) return 'https://flymd.llingfei.com/ai/ai_proxy.php'
   const base = String((cfg && cfg.baseUrl) || 'https://api.openai.com/v1').trim()
-  // 免费代理模式：baseUrl 直接是完整代理地址
-  if (isFreeProvider(cfg)) return base
   return base.replace(/\/$/, '') + '/chat/completions'
 }
 function buildApiHeaders(cfg){
@@ -154,6 +154,25 @@ function ensureCss() {
     '#ai-assist-win.dark #ai-vresizer:hover{background:rgba(96,165,250,0.2)}',
     // 极窄宽度优化（<300px）
     '@media (max-width: 320px) { #ai-input button { font-size: 11px; padding: 5px 6px; } }',
+    // toggle 开关样式
+    '.toggle-switch{position:relative;display:inline-block;width:44px;min-width:44px;max-width:44px;height:22px;margin:0 8px;vertical-align:middle;flex-shrink:0}',
+    '.toggle-switch input{opacity:0;width:0;height:0;position:absolute}',
+    '.toggle-slider{position:absolute;cursor:pointer;top:0;left:0;width:44px;height:22px;background:#d1d5db;transition:.3s;border-radius:22px}',
+    '.toggle-slider:before{position:absolute;content:"";height:16px;width:16px;left:3px;top:3px;background:#fff;transition:.3s;border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,.2)}',
+    'input:checked + .toggle-slider{background:#2563eb}',
+    'input:checked + .toggle-slider:before{left:25px}',
+    '#ai-assist-win.dark .toggle-slider{background:#4b5563}',
+    '#ai-assist-win.dark input:checked + .toggle-slider{background:#3b82f6}',
+    // 免费模式警告样式
+    '.free-warning{display:none;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:10px 12px;margin:8px 0;color:#92400e;font-size:12px;line-height:1.5}',
+    '#ai-assist-win.dark .free-warning{background:#78350f;border-color:#d97706;color:#fef3c7}',
+    // 模式切换行样式
+    '.set-row.mode-row{display:flex;align-items:center;gap:10px;margin:8px 0}',
+    '.set-row.mode-row label{width:110px;color:#334155}',
+    '.mode-label{font-size:13px;color:#6b7280}',
+    '.mode-label.active{color:#2563eb;font-weight:500}',
+    '#ai-assist-win.dark .mode-label{color:#9ca3af}',
+    '#ai-assist-win.dark .mode-label.active{color:#60a5fa}',
   ].join('\n')
   DOC().head.appendChild(css)
 }
@@ -1136,14 +1155,15 @@ export async function openSettings(context){
     '<div id="ai-set-dialog">',
     ' <div id="ai-set-head"><div id="ai-set-title">AI 设置</div><button id="ai-set-close" title="关闭">×</button></div>',
     ' <div id="ai-set-body">',
-    '  <div class="set-row"><label>模式</label><select id="set-provider"><option value="openai">自定义 API Key</option><option value="free">免费AI模型（小参数量，仅供试用）</option></select></div>',
-    '  <div class="set-row"><label>Base URL</label><select id="set-base-select"><option value="https://api.openai.com/v1">OpenAI</option><option value="https://api.siliconflow.cn/v1">硅基流动</option><option value="https://apic1.ohmycdn.com/api/v1/ai/openai/cc-omg/v1">OMG资源包</option><option value="custom">自定义</option></select><input id="set-base" type="text" placeholder="https://api.openai.com/v1"/></div>',
-    '  <div class="set-row"><label>API Key</label><input id="set-key" type="password" placeholder="sk-..."/></div>',
-    '  <div class="set-row"><label>模型</label><input id="set-model" type="text" placeholder="gpt-4o-mini"/></div>',
+    '  <div class="set-row mode-row"><label>模式</label><span class="mode-label" id="mode-label-custom">自定义</span><label class="toggle-switch"><input type="checkbox" id="set-provider-toggle"/><span class="toggle-slider"></span></label><span class="mode-label" id="mode-label-free">免费模型</span></div>',
+    '  <div class="free-warning" id="free-warning">免费小参数模型，体验较差，响应速度慢，有隐私泄露风险，仅供试用。</div>',
+    '  <div class="set-row custom-only"><label>Base URL</label><select id="set-base-select"><option value="https://api.openai.com/v1">OpenAI</option><option value="https://api.siliconflow.cn/v1">硅基流动</option><option value="https://apic1.ohmycdn.com/api/v1/ai/openai/cc-omg/v1">OMG资源包</option><option value="custom">自定义</option></select><input id="set-base" type="text" placeholder="https://api.openai.com/v1"/></div>',
+    '  <div class="set-row custom-only"><label>API Key</label><input id="set-key" type="password" placeholder="sk-..."/></div>',
+    '  <div class="set-row custom-only"><label>模型</label><input id="set-model" type="text" placeholder="gpt-4o-mini"/></div>',
     '  <div class="set-row"><label>侧栏宽度(px)</label><input id="set-sidew" type="number" min="400" step="10" placeholder="400"/></div>',
     '  <div class="set-row"><label>上下文截断</label><input id="set-max" type="number" min="1000" step="500" placeholder="6000"/></div>',
-    '  <div class="set-row set-link-row"><a href="https://cloud.siliconflow.cn/i/X96CT74a" target="_blank" rel="noopener noreferrer">点此注册硅基流动得2000万免费Token</a></div>',
-    '  <div class="set-row set-link-row"><a href="https://x.dogenet.win/i/dXCKvZ6Q" target="_blank" rel="noopener noreferrer">点此注册OMG获得20美元Claude资源包</a></div>',
+    '  <div class="set-row set-link-row custom-only"><a href="https://cloud.siliconflow.cn/i/X96CT74a" target="_blank" rel="noopener noreferrer">点此注册硅基流动得2000万免费Token</a></div>',
+    '  <div class="set-row set-link-row custom-only"><a href="https://x.dogenet.win/i/dXCKvZ6Q" target="_blank" rel="noopener noreferrer">点此注册OMG获得20美元Claude资源包</a></div>',
     ' </div>',
     ' <div id="ai-set-actions"><button id="ai-set-cancel">取消</button><button class="primary" id="ai-set-ok">保存</button></div>',
     '</div>'
@@ -1155,18 +1175,21 @@ export async function openSettings(context){
     try { overlay.style.position = 'fixed'; overlay.style.inset = '0'; overlay.style.zIndex = '2147483000' } catch {}
   }
   // 赋初值
-  const elProvider = overlay.querySelector('#set-provider')
+  const elProviderToggle = overlay.querySelector('#set-provider-toggle')
   const elBase = overlay.querySelector('#set-base')
   const elBaseSel = overlay.querySelector('#set-base-select')
   const elKey = overlay.querySelector('#set-key')
   const elModel = overlay.querySelector('#set-model')
   const elMax = overlay.querySelector('#set-max')
   const elSideW = overlay.querySelector('#set-sidew')
+  const elFreeWarning = overlay.querySelector('#free-warning')
+  const elCustomOnlyRows = overlay.querySelectorAll('.custom-only')
+  const elModeLabelCustom = overlay.querySelector('#mode-label-custom')
+  const elModeLabelFree = overlay.querySelector('#mode-label-free')
   const FREE_PROXY_URL = 'https://flymd.llingfei.com/ai/ai_proxy.php'
-  if (elProvider) elProvider.value = cfg.provider === 'free' ? 'free' : 'openai'
-  // 免费模式下，前端不显示真实 URL，只显示产品名
-  if (cfg.provider === 'free') elBase.value = '飞速MarkDown AI'
-  else elBase.value = cfg.baseUrl || 'https://api.openai.com/v1'
+  if (elProviderToggle) elProviderToggle.checked = cfg.provider === 'free'
+  // 始终显示用户保存的自定义配置值（不因免费模式而清空）
+  elBase.value = cfg.baseUrl || 'https://api.openai.com/v1'
   elKey.value = cfg.apiKey || ''
   elModel.value = cfg.model || 'gpt-4o-mini'
   elMax.value = String((cfg.limits?.maxCtxChars) || 6000)
@@ -1183,41 +1206,26 @@ export async function openSettings(context){
       })
   }
   const applyProviderUI = () => {
-    const mode = elProvider && elProvider.value === 'free' ? 'free' : 'openai'
-    const isFree = mode === 'free'
-    if (isFree) {
-      if (elBaseSel) elBaseSel.disabled = true
-      if (elBase) {
-        elBase.disabled = true
-        // 免费模式只展示产品名，不暴露后端 URL
-        elBase.value = '飞速MarkDown AI'
-      }
-      if (elKey) {
-        elKey.disabled = true
-        elKey.value = ''
-        elKey.placeholder = '无需填写'
-      }
-      if (elModel) {
-        elModel.disabled = true
-      }
-    } else {
-      if (elBaseSel) elBaseSel.disabled = false
-      if (elBase) {
-        elBase.disabled = false
-        if (!elBase.value) elBase.value = 'https://api.openai.com/v1'
-      }
-      if (elKey) {
-        elKey.disabled = false
-        elKey.placeholder = 'sk-...'
-      }
-      if (elModel) {
-        elModel.disabled = false
-      }
+    const isFree = elProviderToggle && elProviderToggle.checked
+    // 控制自定义设置行的显示/隐藏
+    elCustomOnlyRows.forEach(row => {
+      row.style.display = isFree ? 'none' : 'flex'
+    })
+    // 控制警告文字的显示/隐藏
+    if (elFreeWarning) {
+      elFreeWarning.style.display = isFree ? 'block' : 'none'
+    }
+    // 控制模式标签的高亮
+    if (elModeLabelCustom) {
+      elModeLabelCustom.classList.toggle('active', !isFree)
+    }
+    if (elModeLabelFree) {
+      elModeLabelFree.classList.toggle('active', isFree)
     }
   }
-  if (elProvider) {
+  if (elProviderToggle) {
     applyProviderUI()
-    elProvider.addEventListener('change', applyProviderUI)
+    elProviderToggle.addEventListener('change', applyProviderUI)
   }
   // 交互
   const close = () => { try { overlay.remove() } catch {} }
@@ -1226,11 +1234,10 @@ export async function openSettings(context){
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close() })
   WIN().addEventListener('keydown', function onEsc(e){ if (e.key === 'Escape') { close(); WIN().removeEventListener('keydown', onEsc) } })
   overlay.querySelector('#ai-set-ok')?.addEventListener('click', async () => {
-    const provider = elProvider && elProvider.value === 'free' ? 'free' : 'openai'
-    const baseUrl = provider === 'free'
-      ? FREE_PROXY_URL
-      : (String(elBase.value || '').trim() || 'https://api.openai.com/v1')
-    const apiKey = provider === 'free' ? '' : String(elKey.value || '').trim()
+    const provider = elProviderToggle && elProviderToggle.checked ? 'free' : 'openai'
+    // 始终保存用户输入的自定义配置值，不因免费模式而清空
+    const baseUrl = String(elBase.value || '').trim() || 'https://api.openai.com/v1'
+    const apiKey = String(elKey.value || '').trim()
     const model = String(elModel.value || '').trim() || 'gpt-4o-mini'
     const n = Math.max(1000, parseInt(String(elMax.value || '6000'),10) || 6000)
     const sidew = Math.max(MIN_WIDTH, parseInt(String(elSideW.value || MIN_WIDTH),10) || MIN_WIDTH)
