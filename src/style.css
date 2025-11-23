@@ -1623,6 +1623,94 @@ body > .block-menu { display: none !important; }
   opacity: 0.8;
 }
 
+/* 专注模式开关样式 */
+.theme-focus-section {
+  padding-bottom: 14px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid rgba(127,127,127,0.15);
+}
+
+.theme-focus-row {
+  display: flex;
+  align-items: center;
+}
+
+.theme-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  user-select: none;
+  width: 100%;
+}
+
+.theme-toggle-text {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--fg);
+}
+
+.theme-toggle-switch {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.theme-toggle-input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+.theme-toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(127,127,127,0.3);
+  border-radius: 24px;
+  transition: all 0.3s ease;
+}
+
+.theme-toggle-slider::before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  border-radius: 50%;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.theme-toggle-input:checked + .theme-toggle-slider {
+  background-color: #2563eb;
+}
+
+.theme-toggle-input:checked + .theme-toggle-slider::before {
+  transform: translateX(20px);
+}
+
+.theme-toggle-input:focus + .theme-toggle-slider {
+  box-shadow: 0 0 0 2px rgba(37,99,235,0.3);
+}
+
+.theme-toggle-shortcut {
+  font-size: 11px;
+  color: rgba(127,127,127,0.7);
+  background: rgba(127,127,127,0.1);
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  margin-left: auto;
+}
+
 .theme-typos {
   display: flex;
   gap: 8px;
@@ -3892,6 +3980,51 @@ body.focus-mode .container {
 body.focus-mode .focus-trigger-zone {
   display: block;
   pointer-events: auto;
+}
+
+/* 专注模式下库侧栏：纯文字，无图标，无悬浮效果 */
+body.focus-mode .library .lib-ico,
+body.focus-mode .library .lib-ico-folder,
+body.focus-mode .library .lib-ico-file,
+body.focus-mode .library .lib-ico-app,
+body.focus-mode .library .lib-tg {
+  display: none !important;
+}
+
+/* 移除悬浮效果 */
+body.focus-mode .library .lib-node:hover {
+  background: transparent !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+/* 简化行间距和内边距 */
+body.focus-mode .library .lib-node {
+  padding: 3px 8px;
+  gap: 0;
+  min-height: 22px;
+}
+
+/* 文件名纯文字显示 */
+body.focus-mode .library .lib-node .lib-name {
+  padding-left: 0;
+  font-weight: 400;
+}
+
+/* 选中态保持简单背景 */
+body.focus-mode .library .lib-node.selected {
+  background: rgba(127,127,127,0.1);
+}
+
+/* 大纲条目也简化 */
+body.focus-mode .library .lib-outline .ol-item:hover {
+  background: transparent !important;
+  border-left-color: transparent !important;
+  transform: none !important;
+}
+
+body.focus-mode .library .lib-outline .ol-tg {
+  display: none !important;
 }
 
 /* ============ 专注模式样式结束 ============ */

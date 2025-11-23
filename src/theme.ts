@@ -213,6 +213,18 @@ function createPanel(): HTMLDivElement {
   panel.className = 'theme-panel hidden'
   panel.id = 'theme-panel'
   panel.innerHTML = `
+    <div class="theme-section theme-focus-section">
+      <div class="theme-focus-row">
+        <label class="theme-toggle-label" for="focus-mode-toggle">
+          <span class="theme-toggle-text">专注模式</span>
+          <div class="theme-toggle-switch">
+            <input type="checkbox" id="focus-mode-toggle" class="theme-toggle-input" />
+            <span class="theme-toggle-slider"></span>
+          </div>
+          <span class="theme-toggle-shortcut">Ctrl+Shift+F</span>
+        </label>
+      </div>
+    </div>
     <div class="theme-section">
       <div class="theme-title">编辑背景</div>
       <div class="theme-swatches" data-target="edit"></div>
@@ -601,6 +613,35 @@ export function initThemeUI(): void {
         applyThemePrefs(cur)
         lastSaved = { ...cur }
       })
+    }
+
+    // 专注模式开关
+    const focusToggle = panel.querySelector('#focus-mode-toggle') as HTMLInputElement | null
+    if (focusToggle) {
+      // 初始化开关状态：同步当前 body 上的 focus-mode 类
+      focusToggle.checked = document.body.classList.contains('focus-mode')
+      // 监听开关变化
+      focusToggle.addEventListener('change', () => {
+        // 触发全局专注模式切换（main.ts 中的 toggleFocusMode）
+        const enabled = focusToggle.checked
+        document.body.classList.toggle('focus-mode', enabled)
+        // 通过自定义事件通知 main.ts 保存状态
+        const ev = new CustomEvent('flymd:focus:toggle', { detail: { enabled } })
+        window.dispatchEvent(ev)
+      })
+      // 监听外部专注模式变化（如快捷键触发），同步开关状态
+      const syncFocusToggle = () => {
+        focusToggle.checked = document.body.classList.contains('focus-mode')
+      }
+      // 使用 MutationObserver 监听 body 的 class 变化
+      const observer = new MutationObserver((mutations) => {
+        for (const m of mutations) {
+          if (m.type === 'attributes' && m.attributeName === 'class') {
+            syncFocusToggle()
+          }
+        }
+      })
+      observer.observe(document.body, { attributes: true, attributeFilter: ['class'] })
     }
 
     // 主题按钮：切换面板显隐

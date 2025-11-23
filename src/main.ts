@@ -5610,6 +5610,19 @@ function initFocusModeEvents() {
       }
     }, 200)
   })
+
+  // 监听来自主题面板开关的专注模式切换事件
+  window.addEventListener('flymd:focus:toggle', async (ev: Event) => {
+    const detail = (ev as CustomEvent).detail || {}
+    const enabled = !!detail.enabled
+    focusMode = enabled
+    // 保存状态到 store
+    try { if (store) { await store.set('focusMode', focusMode); await store.save() } } catch {}
+    // 如果退出专注模式，确保 titlebar 可见
+    if (!focusMode) {
+      titlebar.classList.remove('show')
+    }
+  })
 }
 // ========== 专注模式结束 ==========
 
