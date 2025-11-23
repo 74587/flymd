@@ -2822,6 +2822,11 @@ wysiwygCaretEl.id = 'wysiwyg-caret'
       } catch {}
     })
     containerEl.appendChild(floatToggle)
+    // 初始化状态：如果侧栏此刻是隐藏的，直接显示展开按钮
+    try {
+      const isHidden = library.classList.contains('hidden')
+      floatToggle.classList.toggle('show', isHidden)
+    } catch {}
     // 监听侧栏显示/隐藏状态，切换浮动按钮显示
     const observer = new MutationObserver(() => {
       try {
@@ -8669,7 +8674,7 @@ function bindEvents() {
     try {
       const WYSIWYG_DEFAULT_KEY = 'flymd:wysiwyg:default'
       const wysiwygDefault = localStorage.getItem(WYSIWYG_DEFAULT_KEY) === 'true'
-      if (wysiwygDefault && !wysiwyg && currentFilePath) {
+      if (wysiwygDefault && !wysiwyg) {
         // 延迟一小段时间，确保编辑器已完全初始化
         setTimeout(async () => {
           try {
