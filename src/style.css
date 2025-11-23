@@ -4135,6 +4135,33 @@ body.focus-mode .library .lib-action-btn.active {
   opacity: 1;
 }
 
+/* 退出专注模式按钮样式 */
+.custom-titlebar-btn.custom-titlebar-exit-focus {
+  font-size: 16px;
+  opacity: 0.6;
+  margin-right: 4px;
+  width: auto;
+  padding: 0 8px;
+  font-family: monospace;
+  font-weight: 400;
+}
+
+.custom-titlebar-btn.custom-titlebar-exit-focus:hover {
+  opacity: 1;
+  background: rgba(127, 127, 127, 0.15);
+}
+
+/* 分隔线样式 */
+.custom-titlebar-separator {
+  display: inline-block;
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  opacity: 0.3;
+  margin: 0 8px;
+  vertical-align: middle;
+}
+
 /* 专注模式下调整内容区域，为自定义标题栏留出空间 */
 body.focus-mode.custom-titlebar-active .container {
   padding-top: 30px;

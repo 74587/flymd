@@ -5568,6 +5568,23 @@ function createCustomTitleBar() {
   const controls = document.createElement('div')
   controls.className = 'custom-titlebar-controls'
 
+  // 退出专注模式按钮
+  const exitFocusBtn = document.createElement('button')
+  exitFocusBtn.className = 'custom-titlebar-btn custom-titlebar-exit-focus'
+  exitFocusBtn.innerHTML = '&lt;/&gt;'
+  exitFocusBtn.title = '退出专注模式'
+  exitFocusBtn.addEventListener('click', async () => {
+    try {
+      await toggleFocusMode(false)
+    } catch (err) {
+      console.error('退出专注模式失败:', err)
+    }
+  })
+
+  // 分隔线
+  const separator = document.createElement('span')
+  separator.className = 'custom-titlebar-separator'
+
   // 最小化按钮
   const minBtn = document.createElement('button')
   minBtn.className = 'custom-titlebar-btn'
@@ -5620,6 +5637,8 @@ function createCustomTitleBar() {
   })
 
   // 组装元素
+  controls.appendChild(exitFocusBtn)
+  controls.appendChild(separator)
   controls.appendChild(minBtn)
   controls.appendChild(maxBtn)
   controls.appendChild(closeBtn)
