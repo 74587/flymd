@@ -34,6 +34,45 @@ const state = {
   watching: false,
   unwatch: null as null | (() => void),
   sortMode: 'name_asc' as 'name_asc' | 'name_desc' | 'mtime_asc' | 'mtime_desc',
+  currentRoot: null as string | null,
+}
+
+const EXPANDED_KEY_PREFIX = 'flymd:libExpanded:'
+function expandedStorageKey(root: string) {
+  return `${EXPANDED_KEY_PREFIX}${root}`
+}
+
+function restoreExpandedState(root: string | null) {
+  state.expanded = new Set<string>()
+  if (!root) return
+  let restored = false
+  try {
+    const raw = localStorage.getItem(expandedStorageKey(root))
+    if (raw) {
+      const arr = JSON.parse(raw)
+      if (Array.isArray(arr)) {
+        restored = true
+        for (const item of arr) {
+          if (typeof item === 'string') state.expanded.add(item)
+        }
+      }
+    }
+  } catch {}
+  if (!restored) state.expanded.add(root)
+}
+
+function persistExpandedState() {
+  try {
+    const root = state.currentRoot
+    if (!root) return
+    const arr = Array.from(state.expanded)
+    localStorage.setItem(expandedStorageKey(root), JSON.stringify(arr))
+  } catch {}
+}
+
+function setExpandedState(path: string, expanded: boolean) {
+  state.expanded[expanded ? 'add' : 'delete'](path)
+  persistExpandedState()
 }
 
 // 目录递归包含受支持文档的缓存
@@ -257,7 +296,7 @@ async function buildDir(root: string, dir: string, parent: HTMLElement) {
         if (ev.detail === 2) return
         saveSelection(e.path, true, row)
         const now = !was
-        state.expanded[now ? 'add' : 'delete'](e.path)
+        setExpandedState(e.path, now)
         kids.style.display = now ? '' : 'none'
         row.classList.toggle('expanded', now)
         if (now && kids.childElementCount === 0) await buildDir(root, e.path, kids)
@@ -516,7 +555,7 @@ async function renderRoot(root: string) {
   if (!state.container) return
   state.container.innerHTML = ''
   const topRow = document.createElement('div')
-  topRow.className = 'lib-node lib-dir expanded'
+  topRow.className = 'lib-node lib-dir'
   ;(topRow as any).dataset.path = root
   const tg = makeTg(); const ico = makeFolderIcon(root); const label = document.createElement('span'); label.className='lib-name'; label.textContent = nameOf(root) || root
   topRow.appendChild(tg); topRow.appendChild(ico); topRow.appendChild(label)
@@ -524,8 +563,10 @@ async function renderRoot(root: string) {
   kids.className = 'lib-children'
   state.container.appendChild(topRow)
   state.container.appendChild(kids)
-  state.expanded.add(root)
-  await buildDir(root, root, kids)
+  const rootExpanded = state.expanded.has(root)
+  topRow.classList.toggle('expanded', rootExpanded)
+  kids.style.display = rootExpanded ? '' : 'none'
+  if (rootExpanded) await buildDir(root, root, kids)
 
   // 刷新后恢复选中态
   try {
@@ -579,7 +620,7 @@ async function renderRoot(root: string) {
   topRow.addEventListener('click', async () => {
     const was = state.expanded.has(root)
     const now = !was
-    state.expanded[now ? 'add' : 'delete'](root)
+    setExpandedState(root, now)
     kids.style.display = now ? '' : 'none'
     topRow.classList.toggle('expanded', now)
     if (now && kids.childElementCount === 0) await buildDir(root, root, kids)
@@ -589,7 +630,14 @@ async function renderRoot(root: string) {
 async function refresh() {
   const root = await state.opts!.getRoot()
   // 若未选择库目录，不再在侧栏显示提示，保持空白即可，避免误导用户
-  if (!root) { if (state.container) state.container.innerHTML = ''; return }
+  if (!root) {
+    state.currentRoot = null
+    state.expanded = new Set<string>()
+    if (state.container) state.container.innerHTML = ''
+    return
+  }
+  state.currentRoot = root
+  restoreExpandedState(root)
   // 刷新前清理目录缓存，确保显示与实际文件状态一致
   try { hasDocCache.clear(); hasDocPending.clear() } catch {}
   await renderRoot(root)

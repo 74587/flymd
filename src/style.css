@@ -974,7 +974,7 @@ body.focus-mode .library .lib-toggle-btn { display: flex; }
 .lib-float-toggle:hover { opacity: 0.8; background: rgba(127, 127, 127, 0.1); }
 body.focus-mode .lib-float-toggle.show { display: flex; }
 .library .lib-actions { display: flex; align-items: center; gap: 6px; }
-.library .lib-action-btn { -webkit-app-region: no-drag; cursor: pointer; border: 1px solid var(--border); background: rgba(127,127,127,0.04); color: var(--fg); border-radius: 6px; padding: 5px 10px; font-size: 12px; font-weight: 500; transition: all 0.15s ease; flex: 1; text-align: center; }
+.library .lib-action-btn { -webkit-app-region: no-drag; cursor: pointer; border: 1px solid var(--border); background: rgba(127,127,127,0.04); color: var(--fg); border-radius: 6px; padding: 5px 10px; font-size: 12px; font-weight: 500; transition: all 0.15s ease; flex: 1; text-align: center; white-space: nowrap; writing-mode: horizontal-tb; word-break: keep-all; }
 .library .lib-action-btn:hover { background: rgba(127,127,127,0.12); border-color: rgba(127,127,127,0.25); }
 .library .lib-action-btn.active { background: rgba(127,127,127,0.18); color: var(--fg); border-color: rgba(127,127,127,0.3); font-weight: 600; }
 .library .hidden { display: none !important; }
