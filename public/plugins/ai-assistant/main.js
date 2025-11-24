@@ -9,6 +9,12 @@
 const CFG_KEY = 'ai.config'
 const SES_KEY = 'ai.session.default'
 
+const FREE_MODEL_OPTIONS = {
+  qwen: { label: 'Qwen', id: 'Qwen/Qwen3-8B' },
+  glm: { label: 'GLM', id: 'THUDM/glm-4-9b-chat' }
+}
+const DEFAULT_FREE_MODEL_KEY = 'qwen'
+
 const DEFAULT_CFG = {
   provider: 'free', // 默认使用免费模式
   baseUrl: 'https://api.openai.com/v1',
@@ -17,7 +23,8 @@ const DEFAULT_CFG = {
   win: { x: 60, y: 60, w: 400, h: 440 },
   dock: 'left', // 'left'=左侧停靠；'right'=右侧停靠；false=浮动窗口
   limits: { maxCtxChars: 6000 },
-  theme: 'auto'
+  theme: 'auto',
+  freeModel: DEFAULT_FREE_MODEL_KEY
 }
 
 // 会话只做最小持久化（可选），首版以内存为主
@@ -38,6 +45,7 @@ async function loadCfg(context) {
     const cfg = { ...DEFAULT_CFG, ...(s || {}) }
     // 兼容旧配置：将 dock: true 转换为 'left'
     if (cfg.dock === true) cfg.dock = 'left'
+    cfg.freeModel = normalizeFreeModelKey(cfg.freeModel)
     // 更新免费模式缓存
     __AI_IS_FREE_MODE__ = cfg.provider === 'free'
     return cfg
@@ -67,6 +75,19 @@ function el(id) { return DOC().getElementById(id) }
 function lastUserMsg() { try { const arr = __AI_SESSION__.messages; for (let i = arr.length - 1; i >= 0; i--) { if (arr[i].role === 'user') return String(arr[i].content || '') } } catch {} return '' }
 function shorten(s, n){ const t = String(s||'').trim(); return t.length>n? (t.slice(0,n)+'…') : t }
 function isFreeProvider(cfg){ return !!cfg && cfg.provider === 'free' }
+function normalizeFreeModelKey(key){
+  const raw = String(key || '').trim().toLowerCase()
+  if (raw && Object.prototype.hasOwnProperty.call(FREE_MODEL_OPTIONS, raw)) return raw
+  return DEFAULT_FREE_MODEL_KEY
+}
+function resolveModelId(cfg){
+  if (isFreeProvider(cfg)) {
+    const key = normalizeFreeModelKey(cfg?.freeModel)
+    return FREE_MODEL_OPTIONS[key].id
+  }
+  const custom = String(cfg?.model || '').trim()
+  return custom || DEFAULT_CFG.model
+}
 function buildApiUrl(cfg){
   // 免费代理模式：使用硬编码的代理地址，保留用户的自定义配置
   if (isFreeProvider(cfg)) return 'https://flymd.llingfei.com/ai/ai_proxy.php'
@@ -432,7 +453,7 @@ function isDefaultSessionName(name){
     const prompt = `文件/标题：${base}\n线索：${sample}`
       const url = buildApiUrl(cfg)
       const headers = buildApiHeaders(cfg)
-    const body = JSON.stringify({ model: cfg.model, stream: false, messages: [ { role:'system', content: sys }, { role:'user', content: prompt } ] })
+    const body = JSON.stringify({ model: resolveModelId(cfg), stream: false, messages: [ { role:'system', content: sys }, { role:'user', content: prompt } ] })
     let name = ''
     try {
       const r = await fetch(url, { method:'POST', headers, body })
@@ -487,8 +508,13 @@ async function refreshHeader(context){
     const modelInput = el('ai-model')
     const modelPowered = el('ai-model-powered')
     const modelPoweredImg = el('ai-model-powered-img')
+    const freeModelSelect = el('ai-free-model')
     if (modelLabel) modelLabel.style.display = isFree ? 'none' : ''
     if (modelInput) modelInput.style.display = isFree ? 'none' : ''
+    if (freeModelSelect) {
+      freeModelSelect.style.display = isFree ? '' : 'none'
+      if (isFree) freeModelSelect.value = normalizeFreeModelKey(cfg.freeModel)
+    }
     if (modelPowered && modelPoweredImg) {
       modelPowered.style.display = isFree ? 'inline-block' : 'none'
       if (isFree) {
@@ -611,7 +637,7 @@ async function mountWindow(context){
     '<div id="ai-body">',
     ' <div id="ai-toolbar">',
     '  <div id="ai-selects" class="small">',
-    '   <label id="ai-model-label">模型</label> <input id="ai-model" placeholder="如 gpt-4o-mini" style="width:160px"/><a id="ai-model-powered" href="https://cloud.siliconflow.cn/i/X96CT74a" target="_blank" rel="noopener noreferrer" style="display:none;border:none;outline:none;"><img id="ai-model-powered-img" src="" alt="Powered by" style="height:20px;width:auto;border:none;outline:none;vertical-align:middle;"/></a>',
+    '   <label id="ai-model-label">模型</label> <input id="ai-model" placeholder="如 gpt-4o-mini" style="width:160px"/><a id="ai-model-powered" href="https://cloud.siliconflow.cn/i/X96CT74a" target="_blank" rel="noopener noreferrer" style="display:none;border:none;outline:none;"><img id="ai-model-powered-img" src="" alt="Powered by" style="height:20px;width:auto;border:none;outline:none;vertical-align:middle;"/></a><select id="ai-free-model" title="选择免费模型" style="display:none;margin-left:8px;"><option value="qwen">Qwen</option><option value="glm">GLM</option></select>',
     '  </div>',
     '  <div style="flex:1"></div>',
     '  <button class="btn" id="ai-dock-toggle" title="在侧栏/浮窗之间切换">浮动</button>',
@@ -641,6 +667,15 @@ async function mountWindow(context){
       const cfg = await loadCfg(context)
       cfg.model = String(modelInput.value || '').trim()
       await saveCfg(context, cfg)
+    })
+  } catch {}
+  try {
+    const freeModelSelect = el.querySelector('#ai-free-model')
+    freeModelSelect?.addEventListener('change', async () => {
+      const cfg = await loadCfg(context)
+      cfg.freeModel = normalizeFreeModelKey(freeModelSelect.value)
+      await saveCfg(context, cfg)
+      await refreshHeader(context)
     })
   } catch {}
   el.querySelector('#ai-send').addEventListener('click',()=>{ sendFromInput(context) })
@@ -829,7 +864,7 @@ async function translateText(context) {
     const url = buildApiUrl(cfg)
     const headers = buildApiHeaders(cfg)
     const body = JSON.stringify({
-      model: cfg.model,
+      model: resolveModelId(cfg),
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: prompt }
@@ -954,7 +989,7 @@ ${content.length > 4000 ? content.slice(0, 4000) + '...' : content}
       const url = buildApiUrl(cfg)
       const headers = buildApiHeaders(cfg)
     const body = JSON.stringify({
-      model: cfg.model,
+      model: resolveModelId(cfg),
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: prompt }
@@ -1090,7 +1125,7 @@ ${content.length > 4000 ? content.slice(0, 4000) + '...' : content}
       const url = buildApiUrl(cfg)
       const headers = buildApiHeaders(cfg)
     const body = JSON.stringify({
-      model: cfg.model,
+      model: resolveModelId(cfg),
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: prompt }
@@ -1184,7 +1219,7 @@ async function sendFromInput(context){
     userMsgs.forEach(m => finalMsgs.push(m))
 
       const url = buildApiUrl(cfg)
-      const bodyObj = { model: cfg.model, messages: finalMsgs, stream: !isFree }
+      const bodyObj = { model: resolveModelId(cfg), messages: finalMsgs, stream: !isFree }
       const headers = buildApiHeaders(cfg)
 
     const chatEl = el('ai-chat')
