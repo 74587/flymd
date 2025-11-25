@@ -9566,6 +9566,90 @@ async function installPluginFromGit(inputRaw: string, opt?: { enabled?: boolean 
   return record
 }
 
+// 从本地文件夹安装扩展
+async function installPluginFromLocal(sourcePath: string, opt?: { enabled?: boolean }): Promise<InstalledPlugin> {
+  await ensurePluginsDir()
+
+  // 读取 manifest.json
+  const manifestPath = `${sourcePath}/manifest.json`
+  let manifestText: string
+  try {
+    manifestText = await readTextFile(manifestPath)
+  } catch {
+    throw new Error('未找到 manifest.json 文件')
+  }
+
+  let manifest: PluginManifest
+  try {
+    manifest = JSON.parse(manifestText) as PluginManifest
+  } catch {
+    throw new Error('manifest.json 解析失败')
+  }
+
+  if (!manifest?.id) throw new Error('manifest.json 缺少 id')
+
+  // 检查宿主版本兼容性
+  if (manifest.minHostVersion) {
+    const currentVersion = APP_VERSION
+    const requiredVersion = manifest.minHostVersion
+    if (compareVersions(currentVersion, requiredVersion) < 0) {
+      throw new Error(
+        `此扩展需要 flyMD ${requiredVersion} 或更高版本，当前版本为 ${currentVersion}。\n` +
+        `请先升级 flyMD 再安装此扩展。`
+      )
+    }
+  }
+
+  // 递归复制文件夹
+  async function copyDirRecursive(src: string, dest: string): Promise<void> {
+    try {
+      await mkdir(dest as any, { baseDir: BaseDirectory.AppLocalData, recursive: true } as any)
+    } catch {}
+
+    const entries = await readDir(src)
+    for (const entry of entries as any[]) {
+      const srcPath = `${src}/${entry.name}`
+      const destPath = `${dest}/${entry.name}`
+
+      if (entry.isDirectory) {
+        await copyDirRecursive(srcPath, destPath)
+      } else {
+        // 复制文件
+        try {
+          const content = await readFile(srcPath)
+          await writeFile(destPath as any, content, { baseDir: BaseDirectory.AppLocalData } as any)
+        } catch (e) {
+          console.warn(`复制文件失败: ${srcPath}`, e)
+        }
+      }
+    }
+  }
+
+  // 目标目录
+  const dir = `${PLUGINS_DIR}/${manifest.id}`
+  await copyDirRecursive(sourcePath, dir)
+
+  const mainRel = (manifest.main || 'main.js').replace(/^\/+/, '')
+  const enabled = (opt && typeof opt.enabled === 'boolean') ? opt.enabled : true
+
+  const record: InstalledPlugin = {
+    id: manifest.id,
+    name: manifest.name,
+    version: manifest.version,
+    enabled,
+    showInMenuBar: false,
+    dir,
+    main: mainRel,
+    description: manifest.description,
+    manifestUrl: '', // 本地安装没有 URL
+  }
+
+  const map = await getInstalledPlugins()
+  map[manifest.id] = record
+  await setInstalledPlugins(map)
+  return record
+}
+
 async function readPluginMainCode(p: InstalledPlugin): Promise<string> {
   const path = `${p.dir}/${p.main || 'main.js'}`
   return await readTextFile(path as any, { baseDir: BaseDirectory.AppLocalData } as any)
@@ -10305,6 +10389,11 @@ function ensureExtensionsOverlayMounted() {
             <input type=\"text\" id=\"ext-install-input\" placeholder=\"${t('ext.install.placeholder')}\">
             <button class=\"primary\" id=\"ext-install-btn\">${t('ext.install.btn')}</button>
           </div>
+          <div class=\"ext-subtitle\" style=\"margin-top: 16px;\">本地安装</div>
+          <div class=\"ext-install\">
+            <input type=\"text\" id=\"ext-local-path\" placeholder=\"点击选择本地扩展文件夹...\" readonly style=\"cursor: pointer;\">
+            <button class=\"primary\" id=\"ext-local-install-btn\">安装</button>
+          </div>
         </div>
         <div class=\"ext-section\" id=\"ext-list-host\"></div>
       </div>
@@ -10314,10 +10403,15 @@ function ensureExtensionsOverlayMounted() {
   _extOverlayEl = overlay
   _extListHost = overlay.querySelector('#ext-list-host') as HTMLDivElement | null
   _extInstallInput = overlay.querySelector('#ext-install-input') as HTMLInputElement | null
+  const extLocalPath = overlay.querySelector('#ext-local-path') as HTMLInputElement | null
   const btnClose = overlay.querySelector('#ext-close') as HTMLButtonElement | null
   const btnInstall = overlay.querySelector('#ext-install-btn') as HTMLButtonElement | null
+  const btnLocalInstall = overlay.querySelector('#ext-local-install-btn') as HTMLButtonElement | null
+
   btnClose?.addEventListener('click', () => showExtensionsOverlay(false))
   overlay.addEventListener('click', (e) => { if (e.target === overlay) showExtensionsOverlay(false) })
+
+  // GitHub/URL 安装
   btnInstall?.addEventListener('click', async () => {
     const v = (_extInstallInput?.value || '').trim()
     if (!v) return
@@ -10329,6 +10423,47 @@ function ensureExtensionsOverlayMounted() {
       pluginNotice(t('ext.install.ok'), 'ok', 1500)
     } catch (e) {
       showError(t('ext.install.fail'), e)
+    }
+  })
+
+  // 浏览本地文件夹
+  async function browseLocalFolder() {
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: '选择扩展文件夹'
+      })
+      if (selected && typeof selected === 'string') {
+        extLocalPath!.value = selected
+      }
+    } catch (e) {
+      console.error('选择文件夹失败', e)
+    }
+  }
+
+  extLocalPath?.addEventListener('click', browseLocalFolder)
+
+  // 本地安装
+  btnLocalInstall?.addEventListener('click', async () => {
+    const path = (extLocalPath?.value || '').trim()
+    if (!path) {
+      pluginNotice('请先选择扩展文件夹', 'err', 2000)
+      return
+    }
+    try {
+      btnLocalInstall.textContent = '安装中...'
+      btnLocalInstall.disabled = true
+      const rec = await installPluginFromLocal(path)
+      await activatePlugin(rec)
+      extLocalPath!.value = ''
+      await refreshExtensionsUI()
+      pluginNotice('本地扩展安装成功', 'ok', 1500)
+    } catch (e) {
+      showError('本地安装失败', e)
+    } finally {
+      btnLocalInstall.textContent = '安装'
+      btnLocalInstall.disabled = false
     }
   })
 }
