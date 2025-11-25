@@ -127,11 +127,6 @@ Built-in free AI service—**ready to use out of the box**, no API key required.
 
 > 💡 **Advanced Usage**: We recommend [registering a SiliconFlow account](https://cloud.siliconflow.cn/i/X96CT74a) to unlock more powerful top-tier models and higher rate limits.
 
-## ⚠️ Known Issues (v0.4.0)
-
-- Library sidebar collapse state is not remembered and always resets to closed on launch
-- After entering Focus Mode the library directory disappears, and the target library must be reselected in Library Management
-- The three WebDAV sync toggles currently default to ON but are expected to default to OFF
 
 ## 🚀 Getting Started
 

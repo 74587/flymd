@@ -2,6 +2,11 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v0.4.1
+- Improved: Library sidebar open/close state is now persisted and restored across restarts and mode switches; first open automatically refreshes the tree to prevent empty panels
+- Fixed: Focus Mode no longer hides the folder toggle arrows, so the library tree remains expandable even when WYSIWYG/Focus Mode is active
+- Improved: WebDAV sync dialog now defaults the “Enable / Sync on startup / Sync on shutdown” toggles to OFF—sync only runs after you explicitly opt in
+
 ## Update v0.4.0 
 - Added: Dark mode toggle in theme settings — manually switch to dark theme with auto-saved state
 - Added: Dark mode fully optimizes text display across all windows including library sidebar, dialogs, editor, and WYSIWYG mode
