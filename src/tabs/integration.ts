@@ -27,7 +27,7 @@ function pausePathWatcher(duration = 1000): void {
   pauseWatcherTimeout = setTimeout(() => { pauseWatcher = false }, duration)
 }
 
-function pauseDirtySyncFor(duration = 500): void {
+function pauseDirtySyncFor(duration = 800): void {
   pauseDirtySync = true
   if (pauseDirtySyncTimeout) clearTimeout(pauseDirtySyncTimeout)
   pauseDirtySyncTimeout = setTimeout(() => { pauseDirtySync = false }, duration)

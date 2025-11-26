@@ -189,11 +189,19 @@ export class TabManager {
       await this.hooks.setWysiwygEnabled(tab.wysiwygEnabled)
     }
 
+    // 重要：所见模式切换可能会因内容规范化差异错误触发 dirty = true
+    // 在所见模式切换完成后，强制恢复正确的 dirty 状态
+    this.hooks.setDirty(tab.dirty)
+
     // 恢复位置（延迟执行，等待渲染完成）
+    const savedDirty = tab.dirty
+    const hooks = this.hooks
     requestAnimationFrame(() => {
-      if (!this.hooks) return
-      this.hooks.setScrollTop(tab.scrollTop)
-      this.hooks.setCursorPos(tab.cursorLine, tab.cursorCol)
+      if (!hooks) return
+      hooks.setScrollTop(tab.scrollTop)
+      hooks.setCursorPos(tab.cursorLine, tab.cursorCol)
+      // 再次确保 dirty 状态正确（处理异步回调可能导致的状态变化）
+      hooks.setDirty(savedDirty)
     })
 
     // 刷新 UI
