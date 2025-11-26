@@ -4947,6 +4947,43 @@ body.focus-mode.custom-titlebar-active .focus-trigger-zone {
   }
 }
 
+/* 夜间模式 - 标签栏 */
+body.dark-mode .tabbar {
+  background: #0b0c0e !important;
+  border-bottom-color: #1f2937 !important;
+}
+
+body.dark-mode .tabbar-tab {
+  color: #9ca3af !important;
+}
+
+body.dark-mode .tabbar-tab:hover {
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: #e5e7eb !important;
+}
+
+body.dark-mode .tabbar-tab.active {
+  background: #1f2937 !important;
+  color: #e5e7eb !important;
+}
+
+body.dark-mode .tabbar-tab.active::after {
+  background: #60a5fa !important;
+}
+
+body.dark-mode .tabbar-tab-close:hover {
+  background: rgba(255, 255, 255, 0.1) !important;
+}
+
+body.dark-mode .tabbar-new-btn {
+  color: #9ca3af !important;
+}
+
+body.dark-mode .tabbar-new-btn:hover {
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: #e5e7eb !important;
+}
+
 /* 专注模式下隐藏标签栏 */
 body.focus-mode .tabbar {
   display: none;
