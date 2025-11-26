@@ -74,6 +74,8 @@ function clampCtx(s, n) { const t = String(s || ''); return t.length > n ? t.sli
 // 最小宽度常量
 const MIN_WIDTH = 400
 
+const AI_AVATAR_FALLBACK_URL = 'https://flymd.llingfei.com/Flymdnew.png'
+
 // 避免固定字符串被滥用
 const FLYMD_TOKEN_SECRET = 'flymd-rolling-secret-v1' // 与后端 ai_proxy.php 保持一致
 const FLYMD_TOKEN_WINDOW_MS = 120000 // 2 分钟一个窗口
@@ -540,6 +542,12 @@ function renderMsgs(root) {
       const avatar = DOC().createElement('img')
       avatar.className = 'ai-avatar'
       avatar.src = resolvePluginAsset('Flymdnew.png')
+      if (AI_AVATAR_FALLBACK_URL) {
+        avatar.onerror = () => {
+          avatar.onerror = null
+          avatar.src = AI_AVATAR_FALLBACK_URL
+        }
+      }
       avatar.alt = 'AI'
       wrapper.appendChild(avatar)
     }
