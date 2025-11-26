@@ -2115,13 +2115,12 @@ export async function openSettings(context){
     '  <div class="set-row mode-row"><label>模式</label><span class="mode-label" id="mode-label-custom">自定义</span><label class="toggle-switch"><input type="checkbox" id="set-provider-toggle"/><span class="toggle-slider"></span></label><span class="mode-label" id="mode-label-free">免费模型</span></div>',
     '  <div class="set-row mode-row"><label>翻译免费</label><span style="font-size:12px;color:#6b7280;">翻译功能始终使用免费模型</span><label class="toggle-switch"><input type="checkbox" id="set-trans-free-toggle"/><span class="toggle-slider"></span></label></div>',
     '  <div class="free-warning" id="free-warning">免费模型由硅基流动提供，<a href="https://cloud.siliconflow.cn/i/X96CT74a" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline;">推荐注册硅基流动账号获得顶级模型体验</a></div>',
-    '  <div class="set-row custom-only"><label>Base URL</label><select id="set-base-select"><option value="https://api.siliconflow.cn/v1">硅基流动</option><option value="https://api.openai.com/v1">OpenAI</option><option value="https://apic1.ohmycdn.com/api/v1/ai/openai/cc-omg/v1">OMG资源包</option><option value="custom">自定义</option></select><input id="set-base" type="text" placeholder="https://api.siliconflow.cn/v1"/></div>',
+    '  <div class="set-row custom-only"><label>Base URL</label><select id="set-base-select"><option value="https://api.siliconflow.cn/v1">硅基流动</option><option value="https://api.openai.com/v1">OpenAI</option><option value="custom">自定义</option></select><input id="set-base" type="text" placeholder="https://api.siliconflow.cn/v1"/></div>',
     '  <div class="set-row custom-only"><label>API Key</label><input id="set-key" type="password" placeholder="sk-..."/></div>',
     '  <div class="set-row custom-only"><label>模型</label><input id="set-model" type="text" placeholder="gpt-4o-mini"/></div>',
     '  <div class="set-row"><label>侧栏宽度(px)</label><input id="set-sidew" type="number" min="400" step="10" placeholder="400"/></div>',
     '  <div class="set-row"><label>上下文截断</label><input id="set-max" type="number" min="1000" step="500" placeholder="6000"/></div>',
     '  <div class="set-row set-link-row custom-only"><a href="https://cloud.siliconflow.cn/i/X96CT74a" target="_blank" rel="noopener noreferrer">点此注册硅基流动得2000万免费Token</a></div>',
-    '  <div class="set-row set-link-row custom-only"><a href="https://x.dogenet.win/i/dXCKvZ6Q" target="_blank" rel="noopener noreferrer">点此注册OMG获得20美元Claude资源包</a></div>',
     '  <div class="powered-by-img" id="powered-by-container" style="display:none;text-align:center;margin:12px 0 4px 0;"><a href="https://cloud.siliconflow.cn/i/X96CT74a" target="_blank" rel="noopener noreferrer" style="border:none;outline:none;"><img id="powered-by-img" src="" alt="Powered by" style="max-width:180px;height:auto;cursor:pointer;border:none;outline:none;"/></a></div>',
     ' </div>',
     ' <div id="ai-set-actions"><button id="ai-set-cancel">取消</button><button class="primary" id="ai-set-ok">保存</button></div>',
@@ -2162,7 +2161,6 @@ export async function openSettings(context){
     const cur = String(cfg.baseUrl || '').trim()
     if (!cur || cur === 'https://api.siliconflow.cn/v1') elBaseSel.value = 'https://api.siliconflow.cn/v1'
     else if (cur === 'https://api.openai.com/v1') elBaseSel.value = 'https://api.openai.com/v1'
-    else if (cur === 'https://apic1.ohmycdn.com/api/v1/ai/openai/cc-omg/v1') elBaseSel.value = 'https://apic1.ohmycdn.com/api/v1/ai/openai/cc-omg/v1'
     else elBaseSel.value = 'custom'
       elBaseSel.addEventListener('change', () => {
         const val = elBaseSel.value
