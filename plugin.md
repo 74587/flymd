@@ -597,6 +597,144 @@ if (confirmed) {
 }
 ```
 
+### context.ui.showNotification (新增)
+
+显示通知气泡（右下角），支持更丰富的选项。
+
+```javascript
+// 显示成功通知
+const id = context.ui.showNotification('操作成功！', {
+  type: 'success',  // 'success' | 'error' | 'info'
+  duration: 2000    // 显示时长（毫秒），不设置则使用默认值
+});
+
+// 显示错误通知
+context.ui.showNotification('操作失败！', {
+  type: 'error',
+  duration: 3000
+});
+
+// 显示信息通知
+context.ui.showNotification('新版本可用', {
+  type: 'info',
+  duration: 5000
+});
+
+// 显示可点击的通知
+context.ui.showNotification('发现 3 个待办事项，点击查看详情', {
+  type: 'success',
+  duration: 10000,
+  onClick: () => {
+    // 用户点击通知时执行
+    console.log('用户点击了通知');
+  }
+});
+
+// 手动控制通知显示时长
+const notificationId = context.ui.showNotification('正在处理...', {
+  type: 'info',
+  duration: 0  // 0 表示不自动关闭
+});
+
+// 手动关闭通知
+setTimeout(() => {
+  context.ui.hideNotification(notificationId);
+}, 5000);
+```
+
+**参数说明：**
+- `message`（string，必需）：通知内容
+- `options`（object，可选）：通知选项
+  - `type`（string）：通知类型，可选值：
+    - `'success'` - 成功通知（绿色，✔ 图标，默认 2秒）
+    - `'error'` - 错误通知（红色，✖ 图标，默认 3秒）
+    - `'info'` - 信息通知（蓝色，🔔 图标，默认 5秒）
+  - `duration`（number）：显示时长（毫秒），设为 `0` 表示不自动关闭
+  - `onClick`（function）：点击通知时的回调函数
+
+**返回值：**
+- 返回通知 ID（string），可用于手动关闭通知
+
+**通知特性：**
+- 显示在应用右下角
+- 支持多条通知同时显示（自动向上堆叠）
+- **最高层级显示**：z-index 为 999999，不会被任何弹窗遮挡或模糊
+- 平滑的淡入淡出动画
+- 点击通知可触发自定义操作
+
+**与 `context.ui.notice` 的区别：**
+- `notice`：简化版，仅支持成功/错误两种类型，显示在底部状态栏
+- `showNotification`：完整版，支持三种类型、可点击、可手动关闭，显示为独立气泡
+
+**示例：扩展使用通知系统**
+
+```javascript
+export function activate(context) {
+  context.addMenuItem({
+    label: '我的工具',
+    children: [
+      {
+        label: '提取待办',
+        onClick: async () => {
+          try {
+            const content = context.getEditorValue();
+            const todos = content.match(/- \[ \]/g) || [];
+
+            if (todos.length === 0) {
+              // 使用新通知 API 显示信息
+              context.ui.showNotification('当前文档没有任何待办（< [] 语法）', {
+                type: 'info',
+                duration: 3000
+              });
+            } else {
+              // 显示可点击的通知
+              context.ui.showNotification(`发现 ${todos.length} 个待办，点击查看`, {
+                type: 'success',
+                duration: 5000,
+                onClick: () => {
+                  console.log('待办列表：', todos);
+                }
+              });
+            }
+          } catch (error) {
+            // 显示错误通知
+            context.ui.showNotification('提取失败：' + error.message, {
+              type: 'error',
+              duration: 3000
+            });
+          }
+        }
+      }
+    ]
+  });
+}
+```
+
+### context.ui.hideNotification (新增)
+
+手动关闭指定的通知。
+
+```javascript
+// 显示持久通知
+const id = context.ui.showNotification('正在上传文件...', {
+  type: 'info',
+  duration: 0  // 不自动关闭
+});
+
+// 上传完成后手动关闭
+try {
+  await uploadFile();
+  context.ui.hideNotification(id);
+  context.ui.showNotification('上传成功！', { type: 'success' });
+} catch (error) {
+  context.ui.hideNotification(id);
+  context.ui.showNotification('上传失败', { type: 'error' });
+}
+```
+
+**参数说明：**
+- `id`（string，必需）：通知 ID，由 `showNotification` 返回
+
 ### context.getEditorValue
 
 获取编辑器当前内容。
