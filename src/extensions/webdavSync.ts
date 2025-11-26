@@ -100,40 +100,95 @@ type SyncMetadata = {
   }
 }
 
-// 获取同步元数据
-async function getSyncMetadata(): Promise<SyncMetadata> {
+const LEGACY_META_FILENAME = 'flymd-sync-meta.json'
+const PROFILE_META_PREFIX = 'flymd-sync-meta-'
+
+type SyncProfileInput = { localRoot: string; baseUrl: string; remoteRoot: string }
+type SyncProfileContext = { key: string; metaPath: string; legacyPath: string }
+type SyncMetadataState = { meta: SyncMetadata; profile: SyncProfileContext; isFreshProfile: boolean; legacyDetected: boolean }
+
+function joinLocalDataPath(dir: string, file: string): string {
+  const sep = dir.includes('\\') ? '\\' : '/'
+  const cleanDir = dir.replace(/[\\/]+$/, '')
+  return cleanDir + sep + file
+}
+
+function normalizeLocalRootForKey(root: string): string {
+  if (!root) return ''
+  return root.replace(/\\/g, '/').replace(/\/+$/, '')
+}
+
+function normalizeRemoteRootForKey(path: string): string {
+  if (!path) return '/'
+  let p = path.replace(/\\/g, '/').trim()
+  if (!p.startsWith('/')) p = '/' + p
+  p = p.replace(/\/+$/, '')
+  return p || '/'
+}
+
+function normalizeBaseUrlForKey(url: string): string {
+  const trimmed = (url || '').trim()
+  if (!trimmed) return ''
   try {
-    const localDataDir = await appLocalDataDir()
-    const metaPath = localDataDir + (localDataDir.includes('\\') ? '\\' : '/') + 'flymd-sync-meta.json'
-    if (!(await exists(metaPath as any))) {
-      return { files: {}, lastSyncTime: 0 }
-    }
-    const data = await readFile(metaPath as any)
-    const text = new TextDecoder().decode(data)
+    const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : 'https://' + trimmed
+    const u = new URL(normalized)
+    const protocol = (u.protocol || '').toLowerCase()
+    const host = (u.host || '').toLowerCase()
+    let pathname = (u.pathname || '').replace(/\\/g, '/')
+    pathname = pathname.replace(/\/+$/, '')
+    return `${protocol}//${host}${pathname}`
+  } catch {
+    return trimmed.replace(/\\/g, '/').replace(/\/+$/, '')
+  }
+}
 
-    // 检查文件是否为空或内容无效
+async function hashProfileKey(input: string): Promise<string> {
+  try {
+    const data = new TextEncoder().encode(input)
+    const buf = await crypto.subtle.digest('SHA-1', data as any)
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('')
+  } catch {
+    let hash = 0
+    for (let i = 0; i < input.length; i++) {
+      hash = (hash * 31 + input.charCodeAt(i)) >>> 0
+    }
+    return hash.toString(16)
+  }
+}
+
+async function resolveSyncProfile(input: SyncProfileInput): Promise<SyncProfileContext> {
+  const { localRoot, baseUrl, remoteRoot } = input
+  const keyRaw = `${normalizeLocalRootForKey(localRoot)}|${normalizeBaseUrlForKey(baseUrl)}|${normalizeRemoteRootForKey(remoteRoot)}`
+  const key = await hashProfileKey(keyRaw)
+  const localDataDir = await appLocalDataDir()
+  const metaPath = joinLocalDataPath(localDataDir, `${PROFILE_META_PREFIX}${key}.json`)
+  const legacyPath = joinLocalDataPath(localDataDir, LEGACY_META_FILENAME)
+  return { key, metaPath, legacyPath }
+}
+
+async function readMetadataFile(metaPath: string): Promise<SyncMetadata | null> {
+  let rawData: Uint8Array | null = null
+  try {
+    rawData = await readFile(metaPath as any)
+    const text = new TextDecoder().decode(rawData)
     if (!text || text.trim().length === 0) {
-      console.warn('同步元数据文件为空，将使用默认值')
       return { files: {}, lastSyncTime: 0 }
     }
-
     const rawMeta = JSON.parse(text) as any
 
-    // 兼容旧格式：确保所有文件条目都有 size 字段
     const files: SyncMetadata['files'] = {}
     for (const [path, meta] of Object.entries(rawMeta.files || {})) {
       const m = meta as any
       files[path] = {
         hash: m.hash || '',
         mtime: m.mtime || 0,
-        size: m.size || 0,  // 旧格式没有 size，默认为 0
+        size: m.size || 0,
         syncTime: m.syncTime || 0,
-        remoteMtime: m.remoteMtime || undefined,  // 新增字段
-        remoteEtag: m.remoteEtag || undefined     // 新增字段
+        remoteMtime: m.remoteMtime || undefined,
+        remoteEtag: m.remoteEtag || undefined
       }
     }
 
-    // 目录快照兼容
     const dirs: SyncMetadata['dirs'] = {}
     try {
       const rawDirs = rawMeta.dirs || {}
@@ -148,33 +203,54 @@ async function getSyncMetadata(): Promise<SyncMetadata> {
     return { files, lastSyncTime: rawMeta.lastSyncTime || 0, dirs }
   } catch (e) {
     console.warn('读取同步元数据失败', e)
-    // 如果是 JSON 解析错误，尝试备份损坏的文件
-    if (e instanceof SyntaxError) {
+    if (e instanceof SyntaxError && rawData) {
       console.warn('元数据文件损坏，将使用空元数据重新开始同步')
+      const backupPath = metaPath + '.corrupted.' + Date.now()
       try {
-        const localDataDir = await appLocalDataDir()
-        const metaPath = localDataDir + (localDataDir.includes('\\') ? '\\' : '/') + 'flymd-sync-meta.json'
-        const backupPath = metaPath + '.corrupted.' + Date.now()
-        // 尝试备份损坏的文件
-        try {
-          const data = await readFile(metaPath as any)
-          await writeFile(backupPath as any, data as any)
-          console.log('已备份损坏的元数据文件到: ' + backupPath)
-        } catch {}
+        await writeFile(backupPath as any, rawData as any)
+        console.log('已备份损坏的元数据文件到: ' + backupPath)
       } catch {}
     }
-    return { files: {}, lastSyncTime: 0 }
+    return null
   }
 }
 
-// 保存同步元数据
-async function saveSyncMetadata(meta: SyncMetadata): Promise<void> {
+async function loadSyncMetadataProfile(input: SyncProfileInput): Promise<SyncMetadataState> {
+  const profile = await resolveSyncProfile(input)
+  let profileExists = false
   try {
-    const localDataDir = await appLocalDataDir()
-    const metaPath = localDataDir + (localDataDir.includes('\\') ? '\\' : '/') + 'flymd-sync-meta.json'
+    profileExists = await exists(profile.metaPath as any)
+  } catch {
+    profileExists = false
+  }
+
+  let loaded: SyncMetadata | null = null
+  if (profileExists) {
+    loaded = await readMetadataFile(profile.metaPath)
+  }
+
+  const isFreshProfile = !loaded
+  let legacyDetected = false
+  if (isFreshProfile) {
+    try {
+      legacyDetected = await exists(profile.legacyPath as any)
+    } catch {
+      legacyDetected = false
+    }
+  }
+
+  return { meta: loaded || { files: {}, lastSyncTime: 0 }, profile, isFreshProfile, legacyDetected }
+}
+
+// 保存同步元数据
+async function saveSyncMetadata(meta: SyncMetadata, profile: SyncProfileContext): Promise<void> {
+  try {
     const text = JSON.stringify(meta, null, 2)
     const data = new TextEncoder().encode(text)
-    await writeFile(metaPath as any, data as any)
+    await writeFile(profile.metaPath as any, data as any)
+    try {
+      await writeFile(profile.legacyPath as any, data as any)
+    } catch {}
   } catch (e) {
     console.warn('保存同步元数据失败', e)
   }
@@ -856,7 +932,13 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
     try { await ensureRemoteDir(baseUrl, auth, (cfg.rootPath || '').replace(/\/+$/, '')) } catch {}
 
     // 获取上次同步的元数据
-    const lastMeta = await getSyncMetadata()
+    const profileState = await loadSyncMetadataProfile({ localRoot, baseUrl, remoteRoot: cfg.rootPath || '/flymd' })
+    await syncLog('[profile] key=' + profileState.profile.key + ' fresh=' + profileState.isFreshProfile + (profileState.legacyDetected ? ' legacy-detected' : ''))
+    const forceSafePull = profileState.isFreshProfile && profileState.legacyDetected
+    if (forceSafePull) {
+      await syncLog('[profile] 检测到旧版同步数据且当前库没有独立配置，默认执行全量拉取以避免误删')
+    }
+    const lastMeta = profileState.meta
     const skipMinutes = cfg.skipRemoteScanMinutes !== undefined ? cfg.skipRemoteScanMinutes : 5
     const allowSmartSkip = reason !== 'manual' && skipMinutes > 0
     const timeSinceLastSync = Date.now() - (lastMeta.lastSyncTime || 0)
@@ -990,6 +1072,11 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
 
       // 情况1：本地有，远程无
       if (local && !remote) {
+        if (forceSafePull && last) {
+          await syncLog('[safe-mode] ' + k + ' 检测到潜在跨库差异，跳过删除远端逻辑，改为上传本地版本')
+          plan.push({ type: 'upload', rel: k, reason: 'safe-mode-local' })
+          continue
+        }
         if (last) {
           // 上次同步过，现在远程没有了
           // 检查本地文件是否已修改（通过哈希比对）
@@ -1027,6 +1114,11 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
       }
       // 情况2：本地无，远程有
       else if (!local && remote) {
+        if (forceSafePull && last) {
+          await syncLog('[safe-mode] ' + k + ' 检测到潜在跨库差异，跳过删除远端文件提示，改为下载远端版本')
+          plan.push({ type: 'download', rel: k, reason: 'safe-mode-remote' })
+          continue
+        }
         if (last) {
           // 上次同步过，现在本地没有了 → 用户可能删除了本地文件
           // 询问用户是否同步删除远程文件
@@ -1437,7 +1529,7 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
 
     // 保存同步元数据
     await syncLog('[save-meta] 正在保存元数据，共 ' + Object.keys(newMeta.files).length + ' 个文件记录')
-    await saveSyncMetadata(newMeta)
+    await saveSyncMetadata(newMeta, profileState.profile)
     await syncLog('[save-meta] 元数据保存完成')
 
     // 同步完成后，刷新并保存库根快照，供下次快速短路判断
