@@ -5427,8 +5427,7 @@ body.dark-mode .sticky-opacity-slider-container {
 /* 便签颜色选择面板 */
 .sticky-color-picker-container {
   position: fixed;
-  top: 45px;
-  right: 180px;
+  /* top 和 left 由 JavaScript 动态设置 */
   background: rgba(255, 255, 255, 0.95);
   border: 1px solid rgba(0, 0, 0, 0.1);
   border-radius: 8px;

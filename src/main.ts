@@ -6977,6 +6977,40 @@ function toggleStickyColorPicker(btn: HTMLButtonElement) {
   }, 0)
 
   document.body.appendChild(container)
+
+  // 动态计算面板位置，确保不超出窗口边界
+  const btnRect = btn.getBoundingClientRect()
+  const containerRect = container.getBoundingClientRect()
+  const windowWidth = window.innerWidth
+  const windowHeight = window.innerHeight
+
+  // 默认在按钮下方居中显示
+  let top = btnRect.bottom + 8
+  let left = btnRect.left + btnRect.width / 2 - containerRect.width / 2
+
+  // 边界检测：如果面板超出右边界，调整到左对齐
+  if (left + containerRect.width > windowWidth - 10) {
+    left = windowWidth - containerRect.width - 10
+  }
+
+  // 边界检测：如果面板超出左边界，调整到右对齐
+  if (left < 10) {
+    left = 10
+  }
+
+  // 边界检测：如果面板超出底部，显示在按钮上方
+  if (top + containerRect.height > windowHeight - 10) {
+    top = btnRect.top - containerRect.height - 8
+  }
+
+  // 边界检测：如果面板超出顶部，强制显示在按钮下方
+  if (top < 10) {
+    top = btnRect.bottom + 8
+  }
+
+  container.style.top = `${top}px`
+  container.style.left = `${left}px`
+  container.style.right = 'auto'
   btn.classList.add('active')
 }
 
