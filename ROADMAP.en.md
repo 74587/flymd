@@ -6,9 +6,12 @@
 - Added: Sticky Note mode to open the current document in a compact, dedicated note window that automatically switches to Focus + Reading mode, hides the sidebar, and keeps only the content area—ideal for todos, small reference notes, and ideas that should stay on the desktop.
 - Added: Sticky Note controls with round "Lock position" and "Always on top" buttons, so you can disable window dragging to avoid accidental moves and keep notes floating above other apps.
 - Added: Enhanced tab right-click menu with "Open in new instance", direct file rename on disk, and one-click "Create sticky note" from the current tab.
+- Added: Sticky Note mode now supports quick todo input—type a line, press Enter or blur the field to jump back to Reading mode, and completed items get automatic strikethrough so notes work better as a lightweight todo board.
+- Added: Integrated "Push" and "Remind" buttons into Sticky Note headers to send notes directly into the xxtui todo list and schedule reminders; new host APIs for the xxtui todo-push plugin and AI Assistant enable right-click actions "Generate todo" and "Generate & create reminder" that turn selected text into structured tasks.
 - Improved: AI Assistant replies now support Markdown rendering and code highlighting, making long answers and code snippets much easier to read.
 - Improved: AI requests gain automatic retry with a clearer "thinking…" indicator, while long-running operations like translation use a persistent, dismissible notification bar instead of transient toasts.
-- Fixed: Some extensions' long-running notifications either failed to stay visible or could not be dismissed correctly when using the unified notification API.
+- Improved: Reworked the editor undo/redo logic with per-tab undo stacks so switching tabs or WYSIWYG modes no longer corrupts or mixes up your undo history.
+- Fixed: Some extensions' long-running notifications either failed to stay visible or could not be dismissed correctly when using the unified notification API, and several scrolling/offset glitches in WYSIWYG mode plus code-copy button positioning in long documents.
 
 ## Update v0.4.8
 - Added: WebDAV sync now supports end-to-end encryption, encrypting file contents locally before upload so even compromised servers cannot easily read the plaintext.
