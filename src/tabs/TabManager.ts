@@ -184,9 +184,16 @@ export class TabManager {
       this.hooks.setMode(tab.mode)
     }
 
-    // 设置所见模式
-    if (this.hooks.getWysiwygEnabled() !== tab.wysiwygEnabled) {
-      await this.hooks.setWysiwygEnabled(tab.wysiwygEnabled)
+    // 修复：所见模式需要独立的撤销栈，每次切换标签时强制重建编辑器实例
+    // 先禁用当前的所见模式（如果启用了）
+    const currentWysiwygEnabled = this.hooks.getWysiwygEnabled()
+    if (currentWysiwygEnabled) {
+      await this.hooks.setWysiwygEnabled(false)
+    }
+
+    // 然后根据目标标签状态启用所见模式
+    if (tab.wysiwygEnabled) {
+      await this.hooks.setWysiwygEnabled(true)
     }
 
     // 重要：所见模式切换可能会因内容规范化差异错误触发 dirty = true
