@@ -58,12 +58,14 @@ Stay connected for the latest updates, preview builds, and tips:
 - **Millisecond-Level Startup & Rendering** - Instant loading, smooth writing, no lag
 - **Reading Position Memory** - Resume where you left off, never lose your place
 - **Outline / TOC Support** - Smart outline, quick navigation for long documents
+- **Customizable Context Menus** - Right-click menus support drag-and-drop sorting so your most-used actions stay on top
 
 ### 🚀 Advanced Features
 - **One-Click Publish to Typecho/WordPress/Halo** - Write and publish seamlessly to blog platforms
 - **AI Assistant Extension** - Writing assistance, polishing, and error correction
 - **Smart Todo Reminder Push** - Auto-detect TODOs, push via WeChat, SMS, Email, DingTalk, Feishu and more
 - **Flexible iframe Embedding** - Embed music, videos, maps, online documents and more
+- **Selection-Aware AI Actions** - Right-click quick actions like "Continue / Polish / Correct" can target only the selected text for precise editing
 
 > 💡 The AI Assistant extension installs silently in the background on first launch. If you uninstall it from the Extensions panel, FlyMD will never auto-install it again.
 
@@ -74,7 +76,7 @@ Stay connected for the latest updates, preview builds, and tips:
 ### 🔐 Security & Performance
 - **Local-First** - Zero background network, secure and controllable data
 - **Image Hosting Support** - S3/R2 one-click upload, auto-insert image links
-- **WebDAV Sync** - Multi-device data sync with complete history
+- **WebDAV Sync** - Multi-device data sync with complete history, optional end-to-end encryption, and HTTP host whitelists for safer plain-HTTP connections
 - **Extension Plugin System** - Custom extensions, unlimited possibilities
 
 ## 🎯 Focus Mode: Immersive Writing Experience
@@ -91,6 +93,10 @@ Press `Ctrl+Shift+F` to enter Focus Mode and enjoy true immersive writing:
 - 📝 When writing long-form content, need full-screen focus
 - ✍️ When inspiration strikes, don't want to be interrupted by any elements
 - 🎨 When presenting documents, achieve the best visual effect
+
+### 🎨 Theme & UI Polish
+- Auto-detect system dark mode and switch to night theme accordingly, with dedicated tab bar styling for dark themes
+- Richer theme presets including more background colors and Markdown typography layouts, plus an optimized theme settings panel for quick visual tuning
 
 ## 🤖 AI + Todo Integration: Your Intelligent Life Assistant
 
@@ -191,6 +197,7 @@ sudo xattr -r -d com.apple.quarantine /Applications/flymd.app
 - Press `Ctrl+T` anytime to launch a blank tab so the current draft stays intact
 - Cycle through open docs with `Ctrl+Tab / Ctrl+Shift+Tab` to review multiple manuscripts without losing context
 - In the library sidebar, hold `Ctrl` and click a document to open it in a new tab and immediately switch to edit mode for side-by-side reviewing and editing
+- Right-click on a tab to access tab-specific actions such as closing or pinning (more options will be iterated in future versions)
 
 ### Image Handling
 - **Paste/Drag Images**: Auto-process and insert
@@ -202,6 +209,7 @@ Enable WebDAV in "Extensions", supports:
 - Multi-device data sync
 - Real-time status prompts
 - Conflict detection and handling
+- Optional end-to-end encryption and HTTP host whitelists for safer plain-HTTP sync
 
 ## 🔌 Extension Development
 
