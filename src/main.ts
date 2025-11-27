@@ -1886,6 +1886,19 @@ function onTaskCheckboxChange(ev: Event) {
     ;(editor as HTMLTextAreaElement).value = lines.join('\n')
     try { (window as any).dirty = true } catch {}
     try { refreshTitle(); refreshStatus() } catch {}
+    // 立即更新删除线样式（无需等待 renderPreview）
+    try {
+      const listItem = el.closest('li.task-list-item') as HTMLElement | null
+      if (listItem) {
+        if (el.checked) {
+          listItem.style.textDecoration = 'line-through'
+          listItem.style.opacity = '0.65'
+        } else {
+          listItem.style.textDecoration = ''
+          listItem.style.opacity = ''
+        }
+      }
+    } catch {}
     try { renderPreview() } catch {}
     try { if (currentFilePath) { void saveFile() } else { void saveAs() } } catch {}
   } catch {}
