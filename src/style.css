@@ -5367,3 +5367,25 @@ body.dark-mode .sticky-note-btn.active:hover {
   app-region: no-drag !important;
   cursor: default !important;
 }
+
+/* 便签模式右键菜单缩放 */
+body.sticky-note-mode .flymd-context-menu {
+  transform: scale(0.85);
+  transform-origin: top left;
+  font-size: 12px;
+  min-width: 140px;
+  max-width: 240px;
+}
+
+body.sticky-note-mode .flymd-context-menu .context-menu-item {
+  padding: 5px 10px;
+}
+
+body.sticky-note-mode .flymd-context-menu .context-menu-icon {
+  font-size: 12px;
+  margin-right: 6px;
+}
+
+body.sticky-note-mode .flymd-context-menu .context-menu-note {
+  font-size: 10px;
+}
