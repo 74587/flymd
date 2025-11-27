@@ -5401,19 +5401,111 @@ body.sticky-note-mode .flymd-context-menu .context-menu-icon {
 
 /* ============ 便签模式待办项按钮 ============ */
 
+/* 便签模式下待办项使用flex布局 */
+body.sticky-note-mode li.task-list-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+}
+
+/* 待办项内容容器（文字部分） */
+body.sticky-note-mode li.task-list-item .task-content {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* 待办项按钮容器 */
 .sticky-todo-actions {
   display: inline-flex;
   gap: 4px;
-  margin-left: 8px;
-  opacity: 0;
+  opacity: 1;
   transition: opacity 0.2s ease;
-  vertical-align: middle;
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
-/* 鼠标悬停时显示按钮 */
-body.sticky-note-mode li.task-list-item:hover .sticky-todo-actions {
+/* 便签模式下待办项时间默认隐藏 */
+body.sticky-note-mode li.task-list-item .task-datetime {
+  display: none;
+}
+
+/* 时间图标样式 */
+body.sticky-note-mode .task-time-icon {
+  font-size: 12px;
+  opacity: 0.5;
+  cursor: help;
+  flex-shrink: 0;
+  transition: opacity 0.2s ease;
+}
+
+body.sticky-note-mode li.task-list-item:hover .task-time-icon {
+  opacity: 0.8;
+}
+
+/* 通用tooltip悬浮窗口样式 */
+body.sticky-note-mode .task-tooltip {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 8px);
+  background: rgba(127, 127, 127, 0.7);
+  color: #fff;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 10000;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  max-width: 300px;
+  word-wrap: break-word;
+  white-space: normal;
+}
+
+/* 添加小箭头 */
+body.sticky-note-mode .task-tooltip::after {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  left: 12px;
+  border: 6px solid transparent;
+  border-bottom-color: rgba(127, 127, 127, 0.7);
+}
+
+/* 鼠标悬停时显示tooltip */
+body.sticky-note-mode li.task-list-item:hover .task-tooltip {
   opacity: 1;
+  transform: translateY(0);
+}
+
+/* 深色模式适配 */
+@media (prefers-color-scheme: dark) {
+  body.sticky-note-mode .task-tooltip {
+    background: rgba(60, 60, 60, 0.7);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+
+  body.sticky-note-mode .task-tooltip::after {
+    border-bottom-color: rgba(60, 60, 60, 0.7);
+  }
+}
+
+/* 夜间模式适配 */
+body.dark-mode.sticky-note-mode .task-tooltip {
+  background: rgba(60, 60, 60, 0.7);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+body.dark-mode.sticky-note-mode .task-tooltip::after {
+  border-bottom-color: rgba(60, 60, 60, 0.7);
 }
 
 /* 待办项按钮基础样式 */

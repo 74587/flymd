@@ -6773,9 +6773,46 @@ function addStickyTodoButtons() {
       // 避免重复添加按钮
       if (item.querySelector('.sticky-todo-actions')) return
 
-      // 获取待办项文本内容（去除复选框）
+      // 获取复选框
       const checkbox = item.querySelector('input.task-list-item-checkbox') as HTMLInputElement | null
-      const itemText = item.textContent?.trim() || ''
+
+      // 获取原始完整文本（包含时间）
+      const fullText = item.textContent?.trim() || ''
+
+      // 提取时间信息
+      const timePattern = /@\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}(:\d{2})?/
+      const timeMatch = fullText.match(timePattern)
+      const datetimeText = timeMatch ? timeMatch[0] : ''
+
+      // 移除时间后的文本
+      const textWithoutTime = datetimeText ? fullText.replace(timePattern, '').trim() : fullText
+
+      // 重构DOM结构
+      try {
+        // 清空item内容（保留复选框）
+        const childNodes = Array.from(item.childNodes)
+        childNodes.forEach(node => {
+          if (node !== checkbox) {
+            node.remove()
+          }
+        })
+
+        // 创建内容容器
+        const contentDiv = document.createElement('span')
+        contentDiv.className = 'task-content'
+        contentDiv.textContent = textWithoutTime
+        item.appendChild(contentDiv)
+
+        // 如果有时间，添加时间图标
+        if (datetimeText) {
+          const timeIcon = document.createElement('span')
+          timeIcon.className = 'task-time-icon'
+          timeIcon.textContent = '🕐'
+          item.appendChild(timeIcon)
+        }
+      } catch (e) {
+        console.error('[便签模式] 重构DOM失败:', e)
+      }
 
       // 创建按钮容器
       const actionsDiv = document.createElement('span')
@@ -6788,7 +6825,7 @@ function addStickyTodoButtons() {
       pushBtn.innerHTML = '📤'
       pushBtn.addEventListener('click', async (e) => {
         e.stopPropagation()
-        await handleStickyTodoPush(itemText, index)
+        await handleStickyTodoPush(fullText, index)
       })
 
       // 创建提醒按钮
@@ -6798,12 +6835,29 @@ function addStickyTodoButtons() {
       reminderBtn.innerHTML = '⏰'
       reminderBtn.addEventListener('click', async (e) => {
         e.stopPropagation()
-        await handleStickyTodoReminder(itemText, index)
+        await handleStickyTodoReminder(fullText, index)
       })
 
       actionsDiv.appendChild(pushBtn)
       actionsDiv.appendChild(reminderBtn)
       item.appendChild(actionsDiv)
+
+      // 创建tooltip显示完整内容
+      try {
+        const tooltip = document.createElement('div')
+        tooltip.className = 'task-tooltip'
+
+        // 如果有时间，显示"内容 + 时间"，否则只显示内容
+        if (datetimeText) {
+          tooltip.textContent = `${textWithoutTime} ${datetimeText}`
+        } else {
+          tooltip.textContent = textWithoutTime
+        }
+
+        item.appendChild(tooltip)
+      } catch (e) {
+        console.error('[便签模式] 创建tooltip失败:', e)
+      }
     })
   } catch (e) {
     console.error('[便签模式] 添加待办按钮失败:', e)
