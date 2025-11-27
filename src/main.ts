@@ -7398,8 +7398,15 @@ async function enterStickyNoteMode(filePath: string) {
     console.error('[便签模式] 进入专注模式失败:', e)
   }
 
-  // 3. 切换到阅读模式
+  // 3. 切换到阅读模式（先记住之前的编辑模式状态）
   try {
+    if (store) {
+      await store.set('editorModeBeforeSticky', {
+        mode: mode,
+        wysiwygV2Active: wysiwygV2Active
+      })
+      await store.save()
+    }
     mode = 'preview'
     try { preview.classList.remove('hidden') } catch {}
     try { await renderPreview() } catch {}
@@ -7424,6 +7431,23 @@ async function enterStickyNoteMode(filePath: string) {
   // 7. 调整窗口大小和位置（移动到右上角，缩小为便签尺寸）
   try {
     const win = getCurrentWindow()
+    const { LogicalSize, LogicalPosition } = await import('@tauri-apps/api/dpi')
+
+    // 先保存当前窗口大小和位置，供下次正常启动恢复
+    try {
+      const currentSize = await win.innerSize()
+      const currentPos = await win.outerPosition()
+      if (store && currentSize && currentPos) {
+        await store.set('windowStateBeforeSticky', {
+          width: currentSize.width,
+          height: currentSize.height,
+          x: currentPos.x,
+          y: currentPos.y
+        })
+        await store.save()
+      }
+    } catch {}
+
     // 便签尺寸：宽 400，高 300
     const stickyWidth = 400
     const stickyHeight = 300
@@ -7433,8 +7457,8 @@ async function enterStickyNoteMode(filePath: string) {
     const posX = availWidth - stickyWidth - 20
     const posY = 20
     // 设置窗口大小和位置
-    await win.setSize(new (await import('@tauri-apps/api/dpi')).LogicalSize(stickyWidth, stickyHeight))
-    await win.setPosition(new (await import('@tauri-apps/api/dpi')).LogicalPosition(posX, posY))
+    await win.setSize(new LogicalSize(stickyWidth, stickyHeight))
+    await win.setPosition(new LogicalPosition(posX, posY))
   } catch (e) {
     console.error('[便签模式] 调整窗口大小和位置失败:', e)
   }
@@ -10139,22 +10163,27 @@ function bindEvents() {
       console.warn('[便签模式] 检测启动参数失败:', e)
     }
 
-    // 非便签模式启动时，重置窗口到默认大小和位置（避免上次便签窗口状态被恢复）
+    // 非便签模式启动时，检查是否有便签前保存的状态需要恢复
     if (!isStickyNoteStartup) {
+      // 恢复便签前的窗口状态（大小+位置）
       try {
-        const win = getCurrentWindow()
-        const { LogicalSize, LogicalPosition } = await import('@tauri-apps/api/dpi')
-        // 默认窗口大小：与 tauri.conf.json 一致（960x640）
-        const defaultWidth = 960
-        const defaultHeight = 640
-        await win.setSize(new LogicalSize(defaultWidth, defaultHeight))
-        // 重置位置到屏幕中央
-        const { availWidth, availHeight } = window.screen
-        const posX = Math.round((availWidth - defaultWidth) / 2)
-        const posY = Math.round((availHeight - defaultHeight) / 2)
-        await win.setPosition(new LogicalPosition(posX, posY))
+        if (store) {
+          const savedState = await store.get('windowStateBeforeSticky') as { width: number; height: number; x: number; y: number } | null
+          if (savedState && savedState.width && savedState.height) {
+            // 有便签前状态记录：恢复大小和位置，并清除记录
+            const win = getCurrentWindow()
+            const { LogicalSize, LogicalPosition } = await import('@tauri-apps/api/dpi')
+            await win.setSize(new LogicalSize(savedState.width, savedState.height))
+            if (typeof savedState.x === 'number' && typeof savedState.y === 'number') {
+              await win.setPosition(new LogicalPosition(savedState.x, savedState.y))
+            }
+            await store.delete('windowStateBeforeSticky')
+            await store.save()
+          }
+          // 没有便签前状态记录：不干预，让 tauri-plugin-window-state 正常恢复
+        }
       } catch (e) {
-        console.warn('[启动] 重置窗口大小/位置失败:', e)
+        console.warn('[启动] 恢复窗口状态失败:', e)
       }
 
       // 恢复专注模式状态（优先使用便签前记录的状态）
@@ -10178,6 +10207,23 @@ function bindEvents() {
         }
       } catch (e) {
         console.warn('[启动] 恢复专注模式状态失败:', e)
+      }
+
+      // 恢复编辑模式状态（如果有便签前记录）
+      try {
+        if (store) {
+          const editorState = await store.get('editorModeBeforeSticky') as { mode: string; wysiwygV2Active: boolean } | null
+          if (editorState) {
+            // 恢复编辑模式，并清除记录
+            // 注意：这里只是恢复状态变量，UI 切换会在后续文件打开时自动处理
+            mode = editorState.mode as 'edit' | 'preview'
+            // wysiwygV2Active 的恢复需要等 UI 加载完成后处理，这里只清除记录
+            await store.delete('editorModeBeforeSticky')
+            await store.save()
+          }
+        }
+      } catch (e) {
+        console.warn('[启动] 恢复编辑模式状态失败:', e)
       }
     }
 
