@@ -763,6 +763,60 @@ context.setEditorValue(current + '\n\n附加的内容');
 - 更新标题栏和状态栏
 - 如果在预览模式，会自动重新渲染预览
 
+### context.getSelection
+
+获取当前编辑器**源码视图**中的选区信息。
+
+```javascript
+const sel = context.getSelection();
+console.log(sel.start, sel.end, sel.text);
+// sel.text 即当前选中的原始 Markdown 片段
+```
+
+**返回值：**
+- `start` / `end`：基于整篇 Markdown 源码的字符偏移（从 0 开始）
+- `text`：`[start, end)` 区间内的源码字符串
+
+### context.getSelectedMarkdown
+
+返回当前选中文本对应的**原始 Markdown 源码字符串**。
+
+```javascript
+const md = context.getSelectedMarkdown();
+if (md) {
+  console.log('选中的 Markdown:', md);
+}
+```
+
+**说明：**
+- 当前实现等价于 `context.getSelection().text`
+- 更语义化，后续版本可以在所见模式下提供更精确的映射
+- 当没有选区时返回空字符串
+
+### context.getSourceText
+
+返回当前文档的完整 Markdown 源码。
+
+```javascript
+const fullSource = context.getSourceText();
+// 可配合 context.getSelection() 或 context.getLineText() 使用
+```
+
+**说明：**
+- 当前实现等价于 `context.getEditorValue()`
+- 适合插件需要按行号或位置自行解析整篇文档的场景
+
+### context.getLineText
+
+按行号获取指定行的 Markdown 源码文本。
+
+```javascript
+const firstLine = context.getLineText(1);
+```
+
+**参数：**
+- `lineNumber`：行号，从 **1** 开始；越界时返回空字符串
+
 ### context.pickDocFiles
 
 在桌面版中弹出文件选择对话框，选择一个或多个 Markdown 文档（`md / markdown / txt`），返回绝对路径数组。

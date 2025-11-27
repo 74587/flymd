@@ -48,6 +48,38 @@ function hasSelectedText(selectedText) {
     }
 }
 
+// 统一获取选中的原始 Markdown 文本（优先使用宿主提供的新 API）
+function getSelectedMarkdownOrText(context, ctx) {
+    try {
+        // 1) 优先使用宿主提供的 getSelectedMarkdown（返回原始 Markdown）
+        if (context && typeof context.getSelectedMarkdown === 'function') {
+            const text = context.getSelectedMarkdown()
+            if (typeof text === 'string' && hasSelectedText(text)) {
+                return text
+            }
+        }
+
+        // 2) 回退到右键菜单提供的选中文本
+        if (ctx && typeof ctx.selectedText === 'string' && hasSelectedText(ctx.selectedText)) {
+            return ctx.selectedText
+        }
+
+        // 3) 最后回退到旧的 getSelection 接口
+        if (context && typeof context.getSelection === 'function') {
+            const sel = context.getSelection()
+            if (sel && typeof sel.text === 'string' && hasSelectedText(sel.text)) {
+                return sel.text
+            }
+            if (typeof sel === 'string' && hasSelectedText(sel)) {
+                return sel
+            }
+        }
+    } catch {
+        // ignore
+    }
+    return ''
+}
+
 // 注入设置面板样式（仿 AI 助手风格，简化版）
 function ensureXxtuiCss() {
     try {
@@ -1149,11 +1181,12 @@ async function registerContextMenus(context) {
         icon: '📤',
         condition,
         onClick: (ctx) => {
-            if (!hasSelectedText(ctx.selectedText)) {
+            const selectedText = getSelectedMarkdownOrText(context, ctx)
+            if (!hasSelectedText(selectedText)) {
                 showConfirm('请先选择要推送的文本内容').then(() => {});
                 return
             }
-            handlePushWithKeyPicker(context, ctx.selectedText)
+            handlePushWithKeyPicker(context, selectedText)
         }
     })
 
@@ -1163,11 +1196,12 @@ async function registerContextMenus(context) {
             icon: '⏰',
             condition,
             onClick: (ctx) => {
-                if (!hasSelectedText(ctx.selectedText)) {
+                const selectedText = getSelectedMarkdownOrText(context, ctx)
+                if (!hasSelectedText(selectedText)) {
                     showConfirm('请先选择要创建提醒的文本内容').then(() => {});
                     return
                 }
-                handleMenuAction(context, MENU_ACTIONS.CREATE_REMINDER, defaultKey, ctx.selectedText)
+                handleMenuAction(context, MENU_ACTIONS.CREATE_REMINDER, defaultKey, selectedText)
             }
         })
 
@@ -1202,8 +1236,7 @@ export function activate(context) {
                     label: '全部',
                     note: '含已完成/未完成',
                     onClick: (ctx) => {
-                        // 尝试从 ctx 获取选中的文本，如果获取不到则尝试从 context 获取
-                        const selectedText = ctx && ctx.selectedText || (context && context.getSelection && context.getSelection()) || ''
+                        const selectedText = getSelectedMarkdownOrText(context, ctx)
                         if (!hasSelectedText(selectedText)) {
                             showConfirm('请先选择要推送的文本内容').then(() => {});
                             return
@@ -1214,8 +1247,7 @@ export function activate(context) {
                 {
                     label: '已完成',
                     onClick: (ctx) => {
-                        // 尝试从 ctx 获取选中的文本，如果获取不到则尝试从 context 获取
-                        const selectedText = ctx && ctx.selectedText || (context && context.getSelection && context.getSelection()) || ''
+                        const selectedText = getSelectedMarkdownOrText(context, ctx)
                         if (!hasSelectedText(selectedText)) {
                             showConfirm('请先选择要推送的文本内容').then(() => {});
                             return
@@ -1226,8 +1258,7 @@ export function activate(context) {
                 {
                     label: '未完成',
                     onClick: (ctx) => {
-                        // 尝试从 ctx 获取选中的文本，如果获取不到则尝试从 context 获取
-                        const selectedText = ctx && ctx.selectedText || (context && context.getSelection && context.getSelection()) || ''
+                        const selectedText = getSelectedMarkdownOrText(context, ctx)
                         if (!hasSelectedText(selectedText)) {
                             showConfirm('请先选择要推送的文本内容').then(() => {});
                             return
@@ -1241,8 +1272,7 @@ export function activate(context) {
                     label: '创建提醒',
                     note: '@时间',
                     onClick: (ctx) => {
-                        // 尝试从 ctx 获取选中的文本，如果获取不到则尝试从 context 获取
-                        const selectedText = ctx && ctx.selectedText || (context && context.getSelection && context.getSelection()) || ''
+                        const selectedText = getSelectedMarkdownOrText(context, ctx)
                         if (!hasSelectedText(selectedText)) {
                             showConfirm('请先选择要创建提醒的文本内容').then(() => {});
                             return

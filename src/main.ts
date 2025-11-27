@@ -10582,6 +10582,33 @@ async function activatePlugin(p: InstalledPlugin): Promise<void> {
       new WebviewWindow(label, { url: 'index.html#ai-assistant', width: 860, height: 640, title: 'AI 助手' })
     } catch (e) { console.error('openAiWindow 失败', e) }
   }
+  const getSourceTextForPlugin = () => {
+    try { return String(editor.value || '') } catch { return '' }
+  }
+  const getSourceSelectionForPlugin = () => {
+    try {
+      const s = editor.selectionStart >>> 0
+      const e = editor.selectionEnd >>> 0
+      const a = Math.min(s, e)
+      const b = Math.max(s, e)
+      const text = getSourceTextForPlugin().slice(a, b)
+      return { start: a, end: b, text }
+    } catch {
+      return { start: 0, end: 0, text: '' }
+    }
+  }
+  const getLineTextForPlugin = (lineNumber: number): string => {
+    try {
+      const n = Number(lineNumber)
+      if (!Number.isFinite(n)) return ''
+      const idx = Math.max(1, Math.floor(n)) - 1
+      const lines = getSourceTextForPlugin().split(/\r?\n/)
+      if (idx < 0 || idx >= lines.length) return ''
+      return lines[idx]
+    } catch {
+      return ''
+    }
+  }
   const ctx = {
     http,
     invoke,
@@ -10668,9 +10695,12 @@ async function activatePlugin(p: InstalledPlugin): Promise<void> {
       // 确认对话框
       confirm: async (message: string) => { try { return await confirmNative(message, '确认') } catch { return false } }
     },
-    getEditorValue: () => editor.value,
+    getEditorValue: () => getSourceTextForPlugin(),
     setEditorValue: (v: string) => { try { editor.value = v; dirty = true; refreshTitle(); refreshStatus(); if (mode === 'preview') { void renderPreview() } else if (wysiwyg) { scheduleWysiwygRender() } } catch {} },
-    getSelection: () => { try { const s = editor.selectionStart >>> 0; const e = editor.selectionEnd >>> 0; const a = Math.min(s, e); const b = Math.max(s, e); return { start: a, end: b, text: editor.value.slice(a, b) } } catch { return { start: 0, end: 0, text: '' } } },
+    getSelection: () => getSourceSelectionForPlugin(),
+    getSelectedMarkdown: () => getSourceSelectionForPlugin().text,
+    getSourceText: () => getSourceTextForPlugin(),
+    getLineText: (lineNumber: number) => getLineTextForPlugin(lineNumber),
     replaceRange: (start: number, end: number, text: string) => { try { const v = String(editor.value || ''); const a = Math.max(0, Math.min(start >>> 0, end >>> 0)); const b = Math.max(start >>> 0, end >>> 0); editor.value = v.slice(0, a) + String(text || '') + v.slice(b); const caret = a + String(text || '').length; editor.selectionStart = editor.selectionEnd = caret; dirty = true; refreshTitle(); refreshStatus(); if (mode === 'preview') { void renderPreview() } else if (wysiwyg) { scheduleWysiwygRender() } } catch {} },
     insertAtCursor: (text: string) => { try { const s = editor.selectionStart >>> 0; const e = editor.selectionEnd >>> 0; const a = Math.min(s, e); const b = Math.max(s, e); const v = String(editor.value || ''); editor.value = v.slice(0, a) + String(text || '') + v.slice(b); const caret = a + String(text || '').length; editor.selectionStart = editor.selectionEnd = caret; dirty = true; refreshTitle(); refreshStatus(); if (mode === 'preview') { void renderPreview() } else if (wysiwyg) { scheduleWysiwygRender() } } catch {} },
     openFileByPath: async (path: string) => {
