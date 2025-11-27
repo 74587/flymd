@@ -320,7 +320,8 @@ fn main() {
       android_write_uri,
        android_persist_uri_permission,
        get_cli_args,
-       get_platform
+       get_platform,
+       open_as_sticky_note
     ])
     .setup(|app| {
       // Windows "打开方式/默认程序" 传入的文件参数处理
@@ -881,6 +882,23 @@ async fn android_persist_uri_permission(_uri: String) -> Result<(), String> {
   {
     Err("android_persist_uri_permission only available on Android".into())
   }
+}
+
+// 便签模式：以新实例打开文件并自动进入便签模式
+#[tauri::command]
+async fn open_as_sticky_note(path: String) -> Result<(), String> {
+  use std::process::Command;
+  use std::env;
+
+  let exe = env::current_exe().map_err(|e| format!("获取可执行文件路径失败: {e}"))?;
+
+  Command::new(exe)
+    .arg("--sticky-note")
+    .arg(&path)
+    .spawn()
+    .map_err(|e| format!("启动便签实例失败: {e}"))?;
+
+  Ok(())
 }
 
 #[tauri::command]

@@ -677,6 +677,10 @@ let _libLeaveTimer: number | null = null
 let focusMode = false
 let _focusTitlebarShowTimer: number | null = null
 let _focusTitlebarHideTimer: number | null = null
+// 便签模式：专注+阅读+无侧栏，顶部显示锁定/置顶按钮
+let stickyNoteMode = false
+let stickyNoteLocked = false   // 窗口位置锁定（禁止拖动）
+let stickyNoteOnTop = false    // 窗口置顶
 // 边缘唤醒热区元素（非固定且隐藏时显示，鼠标靠近自动展开库）
 let _libEdgeEl: HTMLDivElement | null = null
 let _libFloatToggleEl: HTMLButtonElement | null = null
@@ -6511,6 +6515,15 @@ try {
     ;(window as any).flymdOpenInNewInstance = async (path: string) => {
       try { await openPath(path) } catch {}
     }
+    // 便签模式：以新实例打开并自动进入便签模式
+    ;(window as any).flymdCreateStickyNote = async (path: string) => {
+      try {
+        await invoke('open_as_sticky_note', { path })
+      } catch (e) {
+        console.error('[便签] 创建便签失败:', e)
+        throw e
+      }
+    }
     // 确认对话框
     ;(window as any).flymdConfirmNative = confirmNative
     // 所见模式内容替换
@@ -7216,6 +7229,141 @@ window.addEventListener('flymd:theme:changed', () => updateFocusSidebarBg())
 ;(window as any).updateFocusSidebarBg = updateFocusSidebarBg
 
 // ========== 专注模式结束 ==========
+
+// ========== 便签模式 ==========
+
+// 锁定图标（图钉）
+function getStickyLockIcon(isLocked: boolean): string {
+  if (isLocked) {
+    // 锁定状态：实心图钉
+    return `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+      <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z"/>
+    </svg>`
+  }
+  // 未锁定：空心图钉
+  return `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5">
+    <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z"/>
+  </svg>`
+}
+
+// 置顶图标（箭头向上）
+function getStickyTopIcon(isOnTop: boolean): string {
+  if (isOnTop) {
+    return `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+      <path d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z"/>
+    </svg>`
+  }
+  return `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5">
+    <path d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z"/>
+  </svg>`
+}
+
+// 切换窗口拖动锁定
+function toggleStickyWindowLock(btn: HTMLButtonElement) {
+  stickyNoteLocked = !stickyNoteLocked
+  btn.innerHTML = getStickyLockIcon(stickyNoteLocked)
+  btn.classList.toggle('active', stickyNoteLocked)
+  btn.title = stickyNoteLocked ? '解除锁定' : '锁定窗口位置'
+
+  // 通过移除/添加 data-tauri-drag-region 属性控制拖动
+  const dragRegion = document.querySelector('.custom-titlebar-drag')
+  if (dragRegion) {
+    if (stickyNoteLocked) {
+      dragRegion.removeAttribute('data-tauri-drag-region')
+      ;(dragRegion as HTMLElement).style.cursor = 'default'
+    } else {
+      dragRegion.setAttribute('data-tauri-drag-region', '')
+      ;(dragRegion as HTMLElement).style.cursor = 'move'
+    }
+  }
+}
+
+// 切换窗口置顶
+async function toggleStickyWindowOnTop(btn: HTMLButtonElement) {
+  stickyNoteOnTop = !stickyNoteOnTop
+  btn.innerHTML = getStickyTopIcon(stickyNoteOnTop)
+  btn.classList.toggle('active', stickyNoteOnTop)
+  btn.title = stickyNoteOnTop ? '取消置顶' : '窗口置顶'
+
+  try {
+    const win = getCurrentWindow()
+    await win.setAlwaysOnTop(stickyNoteOnTop)
+  } catch (e) {
+    console.error('[便签模式] 设置置顶失败:', e)
+  }
+}
+
+// 创建便签控制按钮（锁定 + 置顶）
+function createStickyNoteControls() {
+  const existing = document.getElementById('sticky-note-controls')
+  if (existing) existing.remove()
+
+  const container = document.createElement('div')
+  container.id = 'sticky-note-controls'
+  container.className = 'sticky-note-controls'
+
+  // 图钉按钮（锁定位置）
+  const lockBtn = document.createElement('button')
+  lockBtn.className = 'sticky-note-btn sticky-note-lock-btn'
+  lockBtn.title = '锁定窗口位置'
+  lockBtn.innerHTML = getStickyLockIcon(false)
+  lockBtn.addEventListener('click', () => toggleStickyWindowLock(lockBtn))
+
+  // 置顶按钮
+  const topBtn = document.createElement('button')
+  topBtn.className = 'sticky-note-btn sticky-note-top-btn'
+  topBtn.title = '窗口置顶'
+  topBtn.innerHTML = getStickyTopIcon(false)
+  topBtn.addEventListener('click', async () => await toggleStickyWindowOnTop(topBtn))
+
+  container.appendChild(lockBtn)
+  container.appendChild(topBtn)
+  document.body.appendChild(container)
+}
+
+// 进入便签模式
+async function enterStickyNoteMode(filePath: string) {
+  stickyNoteMode = true
+
+  // 1. 打开文件
+  try {
+    await openFile2(filePath)
+  } catch (e) {
+    console.error('[便签模式] 打开文件失败:', e)
+  }
+
+  // 2. 进入专注模式
+  try {
+    await toggleFocusMode(true)
+  } catch (e) {
+    console.error('[便签模式] 进入专注模式失败:', e)
+  }
+
+  // 3. 切换到阅读模式
+  try {
+    mode = 'preview'
+    try { preview.classList.remove('hidden') } catch {}
+    try { await renderPreview() } catch {}
+    try { syncToggleButton() } catch {}
+  } catch (e) {
+    console.error('[便签模式] 切换阅读模式失败:', e)
+  }
+
+  // 4. 关闭库侧栏
+  try {
+    showLibrary(false, false)
+  } catch (e) {
+    console.error('[便签模式] 关闭库侧栏失败:', e)
+  }
+
+  // 5. 创建便签控制按钮
+  createStickyNoteControls()
+
+  // 6. 添加便签模式标识类
+  document.body.classList.add('sticky-note-mode')
+}
+
+// ========== 便签模式结束 ==========
 
 async function pickLibraryRoot(): Promise<string | null> {
   try {
@@ -9901,13 +10049,32 @@ function bindEvents() {
       })
     } catch {}
 
-    // 兜底：主动询问后端是否有“默认程序/打开方式”传入的待打开路径
+    // 便签模式检测：检查启动参数中是否有 --sticky-note
+    try {
+      const cliArgs = await invoke<string[]>('get_cli_args')
+      const stickyIndex = (cliArgs || []).findIndex(a => a === '--sticky-note')
+      if (stickyIndex >= 0) {
+        const stickyFilePath = cliArgs[stickyIndex + 1]
+        if (stickyFilePath && typeof stickyFilePath === 'string') {
+          // 延迟执行，确保 UI 初始化完成
+          setTimeout(async () => {
+            try { await enterStickyNoteMode(stickyFilePath) } catch (e) {
+              console.error('[便签模式] 进入便签模式失败:', e)
+            }
+          }, 300)
+        }
+      }
+    } catch (e) {
+      console.warn('[便签模式] 检测启动参数失败:', e)
+    }
+
+    // 兜底：主动询问后端是否有"默认程序/打开方式"传入的待打开路径
     try {
       const path = await invoke<string | null>('get_pending_open_path')
       if (path && typeof path === 'string') {
         void openFile2(path)
       } else {
-        // macOS 兜底：通过后端命令读取启动参数，获取 Finder “打开方式”传入的文件
+        // macOS 兜底：通过后端命令读取启动参数，获取 Finder "打开方式"传入的文件
         try {
           const ua = navigator.userAgent || ''
           const isMac = /Macintosh|Mac OS X/i.test(ua)

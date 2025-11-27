@@ -5284,3 +5284,79 @@ body.focus-mode #tabbar-container + .focus-trigger-zone + .container,
 body.focus-mode #tabbar-container + .container {
   height: calc(100% - 36px);
 }
+
+/* ============ 便签模式控制按钮 ============ */
+
+/* 按钮容器 - 窗口顶部中央 */
+.sticky-note-controls {
+  position: fixed;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10001;
+  display: none;
+  gap: 8px;
+  align-items: center;
+}
+
+body.sticky-note-mode .sticky-note-controls {
+  display: flex;
+}
+
+/* 通用按钮样式 */
+.sticky-note-btn {
+  background: rgba(127, 127, 127, 0.15);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: var(--muted);
+  -webkit-app-region: no-drag;
+  backdrop-filter: blur(8px);
+}
+
+.sticky-note-btn:hover {
+  background: rgba(127, 127, 127, 0.25);
+  color: var(--fg);
+  transform: scale(1.05);
+}
+
+/* 激活状态 */
+.sticky-note-btn.active {
+  background: rgba(37, 99, 235, 0.2);
+  border-color: rgba(37, 99, 235, 0.4);
+  color: #2563eb;
+}
+
+.sticky-note-btn.active:hover {
+  background: rgba(37, 99, 235, 0.3);
+}
+
+/* 深色模式适配 */
+@media (prefers-color-scheme: dark) {
+  .sticky-note-btn.active {
+    background: rgba(96, 165, 250, 0.2);
+    border-color: rgba(96, 165, 250, 0.4);
+    color: #60a5fa;
+  }
+
+  .sticky-note-btn.active:hover {
+    background: rgba(96, 165, 250, 0.3);
+  }
+}
+
+/* 夜间模式适配 */
+body.dark-mode .sticky-note-btn.active {
+  background: rgba(96, 165, 250, 0.2);
+  border-color: rgba(96, 165, 250, 0.4);
+  color: #60a5fa;
+}
+
+body.dark-mode .sticky-note-btn.active:hover {
+  background: rgba(96, 165, 250, 0.3);
+}

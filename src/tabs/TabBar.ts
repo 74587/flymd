@@ -301,8 +301,9 @@ export class TabBar {
     const menu = document.createElement('div')
     menu.className = 'tabbar-context-menu'
     menu.style.display = 'none'
-    const actions: Array<{ label: string; action: 'open-new-instance' | 'rename' | 'close-right' | 'close-others' | 'close-all' }> = [
+    const actions: Array<{ label: string; action: 'open-new-instance' | 'create-sticky-note' | 'rename' | 'close-right' | 'close-others' | 'close-all' }> = [
       { label: '在新实例中打开', action: 'open-new-instance' },
+      { label: '生成便签', action: 'create-sticky-note' },
       { label: '重命名文档…', action: 'rename' },
       { label: '关闭右侧所有标签', action: 'close-right' },
       { label: '关闭其他标签', action: 'close-others' },
@@ -326,12 +327,15 @@ export class TabBar {
   /**
    * 处理上下文菜单动作
    */
-  private async handleContextMenuAction(action: 'open-new-instance' | 'rename' | 'close-right' | 'close-others' | 'close-all'): Promise<void> {
+  private async handleContextMenuAction(action: 'open-new-instance' | 'create-sticky-note' | 'rename' | 'close-right' | 'close-others' | 'close-all'): Promise<void> {
     const targetId = this.contextMenuTargetTabId
     this.hideContextMenu()
     switch (action) {
       case 'open-new-instance':
         if (targetId) await this.openTabInNewInstance(targetId)
+        break
+      case 'create-sticky-note':
+        if (targetId) await this.createStickyNote(targetId)
         break
       case 'rename':
         if (targetId) await this.renameTabFile(targetId)
@@ -396,6 +400,33 @@ export class TabBar {
       await openFn(tab.filePath)
     } catch (e) {
       console.error('[TabBar] 新实例打开文档失败:', e)
+    }
+  }
+
+  /**
+   * 生成便签：在新实例中以便签模式打开当前文档
+   */
+  private async createStickyNote(tabId: string): Promise<void> {
+    const tab = this.tabManager.findTabById(tabId)
+    if (!tab) return
+    if (!tab.filePath) {
+      alert('当前标签尚未保存为文件，无法生成便签。\n请先保存到磁盘后再尝试。')
+      return
+    }
+    if (tab.dirty) {
+      alert('当前标签有未保存的更改，禁止生成便签。\n请先保存后再尝试。')
+      return
+    }
+    const flymd = (window as any)
+    const createFn = flymd?.flymdCreateStickyNote as ((path: string) => Promise<void>) | undefined
+    if (typeof createFn !== 'function') {
+      alert('当前环境不支持便签功能。')
+      return
+    }
+    try {
+      await createFn(tab.filePath)
+    } catch (e) {
+      console.error('[TabBar] 生成便签失败:', e)
     }
   }
 
