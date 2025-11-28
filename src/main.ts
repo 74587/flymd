@@ -12000,7 +12000,9 @@ async function refreshExtensionsUI(): Promise<void> {
         } catch (e) {
           try { btnInstall.textContent = '安装' } catch {}
           try { (btnInstall as HTMLButtonElement).disabled = false } catch {}
-          showError('安装扩展失败', e)
+          void appendLog('ERROR', '安装扩展失败', e)
+          const errMsg = (e instanceof Error) ? e.message : String(e)
+          pluginNotice('安装扩展失败' + (errMsg ? ': ' + errMsg : ''), 'err', 3000)
         }
       })
       actions.appendChild(btnInstall)
@@ -12075,7 +12077,9 @@ function ensureExtensionsOverlayMounted() {
       await refreshExtensionsUI()
       pluginNotice(t('ext.install.ok'), 'ok', 1500)
     } catch (e) {
-      showError(t('ext.install.fail'), e)
+      void appendLog('ERROR', t('ext.install.fail'), e)
+      const errMsg = (e instanceof Error) ? e.message : String(e)
+      pluginNotice(t('ext.install.fail') + (errMsg ? ': ' + errMsg : ''), 'err', 3000)
     }
   })
 
@@ -12113,7 +12117,9 @@ function ensureExtensionsOverlayMounted() {
       await refreshExtensionsUI()
       pluginNotice('本地扩展安装成功', 'ok', 1500)
     } catch (e) {
-      showError('本地安装失败', e)
+      void appendLog('ERROR', '本地安装失败', e)
+      const errMsg = (e instanceof Error) ? e.message : String(e)
+      pluginNotice('本地安装失败' + (errMsg ? ': ' + errMsg : ''), 'err', 3000)
     } finally {
       btnLocalInstall.textContent = '安装'
       btnLocalInstall.disabled = false
