@@ -2860,12 +2860,10 @@ body.focus-mode .lib-float-toggle.show { display: flex; }
 /* 树形缩进 */
 .library .lib-children { margin-left: 16px; padding-left: 6px; }
 
-/* PDF 文件区分：名字前红色小圆点 */
-.library .lib-node.file-ext-pdf .lib-name::before {
-  content: '● ';
-  color: #dc2626;
-  font-size: 8px;
-  vertical-align: middle;
+/* PDF 文件区分：使用淡红色字体 */
+.library .lib-node.file-ext-pdf .lib-name {
+  color: #ef4444;
+  opacity: 0.85;
 }
 /* TXT 文件区分：名字前灰色小圆点 */
 .library .lib-node.file-ext-txt .lib-name::before {
@@ -2875,7 +2873,10 @@ body.focus-mode .lib-float-toggle.show { display: flex; }
   vertical-align: middle;
 }
 @media (prefers-color-scheme: dark) {
-  .library .lib-node.file-ext-pdf .lib-name::before { color: #ef4444; }
+  .library .lib-node.file-ext-pdf .lib-name {
+    color: #f87171;
+    opacity: 0.9;
+  }
   .library .lib-node.file-ext-txt .lib-name::before { color: #6b7280; }
 }
 
