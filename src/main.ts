@@ -12180,6 +12180,16 @@ async function removeDirRecursive(dir: string): Promise<void> {
   } catch {}
 }
 
+// 简单判断一个字符串是否更像本地路径（用于区分本地/远程安装）
+function isLikelyLocalPath(input: string): boolean {
+  const v = (input || '').trim()
+  if (!v) return false
+  if (/^[A-Za-z]:[\\/]/.test(v)) return true  // Windows 盘符路径
+  if (/^\\\\/.test(v)) return true            // Windows UNC 路径
+  if (v.startsWith('/')) return true          // 类 Unix 绝对路径
+  return false
+}
+
 function ensureExtensionsOverlayMounted() {
   if (_extOverlayEl) return
   const overlay = document.createElement('div')
@@ -12196,12 +12206,8 @@ function ensureExtensionsOverlayMounted() {
           <div class=\"ext-subtitle\">${t('ext.install.section')}</div>
           <div class=\"ext-install\">
             <input type=\"text\" id=\"ext-install-input\" placeholder=\"${t('ext.install.placeholder')}\">
+            <button id=\"ext-browse-local-btn\">浏览...</button>
             <button class=\"primary\" id=\"ext-install-btn\">${t('ext.install.btn')}</button>
-          </div>
-          <div class=\"ext-subtitle\" style=\"margin-top: 16px;\">本地安装</div>
-          <div class=\"ext-install\">
-            <input type=\"text\" id=\"ext-local-path\" placeholder=\"点击选择本地扩展文件夹...\" readonly style=\"cursor: pointer;\">
-            <button class=\"primary\" id=\"ext-local-install-btn\">安装</button>
           </div>
         </div>
         <div class=\"ext-section\" id=\"ext-list-host\"></div>
@@ -12212,20 +12218,24 @@ function ensureExtensionsOverlayMounted() {
   _extOverlayEl = overlay
   _extListHost = overlay.querySelector('#ext-list-host') as HTMLDivElement | null
   _extInstallInput = overlay.querySelector('#ext-install-input') as HTMLInputElement | null
-  const extLocalPath = overlay.querySelector('#ext-local-path') as HTMLInputElement | null
   const btnClose = overlay.querySelector('#ext-close') as HTMLButtonElement | null
   const btnInstall = overlay.querySelector('#ext-install-btn') as HTMLButtonElement | null
-  const btnLocalInstall = overlay.querySelector('#ext-local-install-btn') as HTMLButtonElement | null
+  const btnBrowseLocal = overlay.querySelector('#ext-browse-local-btn') as HTMLButtonElement | null
 
   btnClose?.addEventListener('click', () => showExtensionsOverlay(false))
   overlay.addEventListener('click', (e) => { if (e.target === overlay) showExtensionsOverlay(false) })
 
-  // GitHub/URL 安装
+  // GitHub/URL/本地 安装（统一入口，根据输入内容区分）
   btnInstall?.addEventListener('click', async () => {
     const v = (_extInstallInput?.value || '').trim()
     if (!v) return
     try {
-      const rec = await installPluginFromGit(v)
+      let rec: InstalledPlugin
+      if (isLikelyLocalPath(v)) {
+        rec = await installPluginFromLocal(v)
+      } else {
+        rec = await installPluginFromGit(v)
+      }
       await activatePlugin(rec)
       _extInstallInput!.value = ''
       await refreshExtensionsUI()
@@ -12246,39 +12256,14 @@ function ensureExtensionsOverlayMounted() {
         title: '选择扩展文件夹'
       })
       if (selected && typeof selected === 'string') {
-        extLocalPath!.value = selected
+        if (_extInstallInput) _extInstallInput.value = selected
       }
     } catch (e) {
       console.error('选择文件夹失败', e)
     }
   }
 
-  extLocalPath?.addEventListener('click', browseLocalFolder)
-
-  // 本地安装
-  btnLocalInstall?.addEventListener('click', async () => {
-    const path = (extLocalPath?.value || '').trim()
-    if (!path) {
-      pluginNotice('请先选择扩展文件夹', 'err', 2000)
-      return
-    }
-    try {
-      btnLocalInstall.textContent = '安装中...'
-      btnLocalInstall.disabled = true
-      const rec = await installPluginFromLocal(path)
-      await activatePlugin(rec)
-      extLocalPath!.value = ''
-      await refreshExtensionsUI()
-      pluginNotice('本地扩展安装成功', 'ok', 1500)
-    } catch (e) {
-      void appendLog('ERROR', '本地安装失败', e)
-      const errMsg = (e instanceof Error) ? e.message : String(e)
-      pluginNotice('本地安装失败' + (errMsg ? ': ' + errMsg : ''), 'err', 3000)
-    } finally {
-      btnLocalInstall.textContent = '安装'
-      btnLocalInstall.disabled = false
-    }
-  })
+  btnBrowseLocal?.addEventListener('click', () => { void browseLocalFolder() })
 }
 
 async function showExtensionsOverlay(show: boolean): Promise<void> {

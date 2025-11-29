@@ -209,7 +209,7 @@ const dict = {
 
     // 扩展与插件
     'ext.title': '扩展与插件管理',
-    'ext.install.section': '安装扩展（GitHub 或 URL）',
+    'ext.install.section': '安装扩展（GitHub / URL / 本地）',
     'ext.install.placeholder': '输入 URL 或 username/repository@branch（branch 可省略）',
     'ext.install.btn': '安装',
     'ext.builtin': '内置扩展',
@@ -417,7 +417,7 @@ const dict = {
 
     // Extensions & Plugins
     'ext.title': 'Extensions & Plugins',
-    'ext.install.section': 'Install Extensions (GitHub or URL)',
+    'ext.install.section': 'Install Extensions (GitHub / URL / Local)',
     'ext.install.placeholder': 'Enter URL or username/repository@branch (branch optional)',
     'ext.install.btn': 'Install',
     'ext.builtin': 'Built-in Extensions',
