@@ -9189,6 +9189,64 @@ function bindEvents() {
     }
     const onDoc = () => hide()
     menu.innerHTML = ''
+
+    // 文件节点专属操作：在新实例中打开 / 生成便签
+    if (!isDir) {
+      // 在新实例中打开：若当前文档有未保存改动且路径相同，则阻止，避免用户误以为新实例包含未保存内容
+      menu.appendChild(mkItem(t('ctx.openNewInstance'), async () => {
+        try {
+          const win = (window as any)
+          const openFn = win?.flymdOpenInNewInstance as ((p: string) => Promise<void>) | undefined
+          if (typeof openFn !== 'function') {
+            alert('当前环境不支持新实例打开，请直接从系统中双击该文件。')
+            return
+          }
+          try {
+            const cur = currentFilePath ? normalizePath(currentFilePath) : ''
+            const target = normalizePath(path)
+            if (cur && cur === target && dirty) {
+              alert('当前文档有未保存的更改，禁止在新实例中打开。\n请先保存后再尝试。')
+              return
+            }
+          } catch {}
+          await openFn(path)
+        } catch (e) {
+          console.error('[库树] 新实例打开文档失败:', e)
+        }
+      }))
+
+      // 生成便签：若当前文档即该路径且有未保存改动，先尝试自动保存（与标签栏行为保持一致）
+      menu.appendChild(mkItem(t('ctx.createSticky'), async () => {
+        try {
+          const win = (window as any)
+          const createFn = win?.flymdCreateStickyNote as ((p: string) => Promise<void>) | undefined
+          if (typeof createFn !== 'function') {
+            alert('当前环境不支持便签功能。')
+            return
+          }
+          try {
+            const cur = currentFilePath ? normalizePath(currentFilePath) : ''
+            const target = normalizePath(path)
+            if (cur && cur === target && dirty) {
+              const saveFn = win?.flymdSaveFile as (() => Promise<void>) | undefined
+              if (typeof saveFn === 'function') {
+                try {
+                  await saveFn()
+                } catch (err) {
+                  console.error('[库树] 自动保存失败:', err)
+                  alert('自动保存失败，无法生成便签。')
+                  return
+                }
+              }
+            }
+          } catch {}
+          await createFn(path)
+        } catch (e) {
+          console.error('[库树] 生成便签失败:', e)
+        }
+      }))
+    }
+
     if (isDir) {
       menu.appendChild(mkItem(t('ctx.newFile'), async () => {
         try {
