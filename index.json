@@ -51,6 +51,17 @@
     },
     {
       "homepage": "https://github.com/flyhunterl/flymd",
+      "name": "Markdown 表格助手",
+      "description": "在光标处快速插入 Markdown 表格",
+      "author": "flyMD",
+      "id": "markdown-table",
+      "install": {
+        "ref": "https://raw.githubusercontent.com/flyhunterl/flymd/main/public/plugins/markdown-table/manifest.json",
+        "type": "manifest"
+      }
+    },
+    {
+      "homepage": "https://github.com/flyhunterl/flymd",
       "name": "协同编辑",
       "description": "连接协同服务器的简单多人协同插件",
       "author": "flyMD",
