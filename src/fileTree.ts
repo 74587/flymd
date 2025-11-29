@@ -267,6 +267,12 @@ function makeFolderIcon(path?: string): HTMLElement {
   return span as any
 }
 
+// 移除文件后缀名（用于简洁显示）
+function stripExt(name: string): string {
+  const idx = name.lastIndexOf('.')
+  return idx > 0 ? name.slice(0, idx) : name
+}
+
 async function buildDir(root: string, dir: string, parent: HTMLElement) {
   parent.innerHTML = ''
   const entries = await listDir(root, dir)
@@ -276,7 +282,8 @@ async function buildDir(root: string, dir: string, parent: HTMLElement) {
     ;(row as any).dataset.path = e.path
     const label = document.createElement('span')
     label.className = 'lib-name'
-    label.textContent = e.name
+    // 文件隐藏后缀名，文件夹保持原名
+    label.textContent = e.isDir ? e.name : stripExt(e.name)
 
     if (e.isDir) {
       const tg = makeTg()
