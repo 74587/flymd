@@ -347,11 +347,16 @@ FlyMD 支持通过扩展插件增强功能：
 
 ## 开源不易
 
+分享： 个人使用稳定的模型提供商
+
+
+⭐⭐⭐[rightcode](https://www.right.codes/register?aff=E8E36524) **:稳定性和性价比都极高的Claude和codex**
+
+
+⭐⭐⭐[PackyCode]（https://www.packyapi.com/register?aff=Rqk1）**同样高性价比的Claude、codex、Gemini**
+
+
 通过以下链接注册可以帮助我节省开发成本，您也能获得部分赠金：
-
-
-⭐⭐⭐[rightcode:稳定性和性价比都极高的Claude和codex中转](https://www.right.codes/register?aff=E8E36524)
-
 
 [OhMyGPT：一个优质的 AI 服务平台](https://x.dogenet.win/i/dXCKvZ6Q) **Gmail和QQ邮箱注册获得20美元赠金**
 

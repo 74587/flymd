@@ -87,6 +87,14 @@ Stay connected for the latest updates, preview builds, and tips:
 
 > 💡 The AI Assistant extension installs silently on first launch. If you uninstall it, FlyMD will never auto-install it again.
 
+### Smart Document Recognition & Desktop Sticky Notes
+
+**Ten color options**
+**Customizable transparency**
+**Interactive visual controls**
+
+<img width="400" height="300" alt="20251128_143927_883" src="https://github.com/user-attachments/assets/0cfa8789-93e0-4925-9da8-a1c0711ca55c" />
+
 ### 💻 Platform & Format
 
 - **Cross-Platform**: Windows / Linux / macOS
@@ -337,10 +345,13 @@ Not yet—`- [ ]` / `- [x]` checkboxes only work in source/preview modes for now
 
 ## Open Source Support
 
-Signing up through the following links helps me reduce development costs, and you also get partial credits:
+These are stable model providers I personally use. Signing up through the following links helps me reduce development costs, and you also get partial credits:
 
 
 ⭐⭐⭐[rightcode: Highly stable and cost-effective Claude and Codex relay service](https://www.right.codes/register?aff=E8E36524)
+
+
+⭐⭐⭐[PackyCode: Cost-effective Claude, Codex, and Gemini relay service](https://www.packyapi.com/register?aff=Rqk1)
 
 
 [OhMyGPT: A high-quality AI service platform](https://x.dogenet.win/i/dXCKvZ6Q) "Get a $20 bonus by registering with Gmail and QQ Mail."
