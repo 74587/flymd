@@ -100,6 +100,7 @@ FlyMD 是一款仅 **7MB** 的高性能 Markdown 编辑器，支持**所见所�
 
 - **全平台支持**：Windows / Linux / macOS
 - **多格式导出**：PDF / DOCX
+> ⚠️ Linux 提示：在 Arch / Manjaro 等基于 Arch 的发行版上，AppImage 可能受 WebKitGTK / 显卡驱动影响出现白屏等兼容问题，建议优先使用 deb → debtap / PKGBUILD 方案转换为 pacman 包安装，详细步骤见 [Arch 安装与排错说明](arch.md)。
 
 ### 🔐 安全与性能
 

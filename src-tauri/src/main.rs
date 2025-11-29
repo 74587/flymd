@@ -12,6 +12,15 @@ use sha2::Digest;
 use chrono::{DateTime, Utc};
 use std::time::Duration;
 
+#[cfg(target_os = "linux")]
+fn init_linux_render_env() {
+  // Linux 默认禁用 WebKitGTK 的 DMABUF 渲染，降低白屏概率；若用户显式设置则尊重用户配置
+  use std::env;
+  if env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+    env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+  }
+}
+
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -293,6 +302,9 @@ async fn http_xmlrpc_post(req: XmlHttpReq) -> Result<String, String> {
 }
 
 fn main() {
+  #[cfg(target_os = "linux")]
+  init_linux_render_env();
+
   tauri::Builder::default()
     .manage(PendingOpenPath::default())
     .plugin(tauri_plugin_dialog::init())
