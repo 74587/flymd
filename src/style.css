@@ -618,7 +618,8 @@ body {
   left: 0;
   right: 0;
   display: none;
-  overflow-y: auto;
+  /* 只作为容器本身，不再承担滚动职责，避免与内部 scrollView 嵌套产生双滚动条 */
+  overflow-y: hidden;
   overflow-x: hidden;
   z-index: 2;
   /* 添加侧栏展开的过渡动画 */
@@ -647,8 +648,12 @@ body {
 #md-wysiwyg-root .overlay-host .ov-mermaid > div,
 #md-wysiwyg-root .overlay-host .ov-katex > div,
 #md-wysiwyg-root .overlay-host .ov-codecopy > .code-copy { pointer-events: auto; }
-/* 保证所见 V2 的滚动容器占满并可滚动 */
-#md-wysiwyg-root .scrollView { height: 100%; overflow-y: auto; }
+/* 保证所见 V2 的滚动容器占满并可滚动（唯一滚动宿主，消除双滚动条） */
+#md-wysiwyg-root .scrollView {
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
 /* 兜底：Milkdown 根容器（通常为 .milkdown）与其第一级子元素占满高度 */
 #md-wysiwyg-root > .milkdown { display: block; min-height: 100%; height: 100%; }
 #md-wysiwyg-root > div { display: block; min-height: 100%; }
@@ -3568,17 +3573,22 @@ body::-webkit-scrollbar:horizontal,
 
 /* 为主要滚动容器显式展示竖向滚动条（跨浏览器） */
 /* Firefox */
-.preview, #md-wysiwyg-root, .library {
+.preview,
+#md-wysiwyg-root,
+#md-wysiwyg-root .scrollView,
+.library {
   scrollbar-width: thin;
   scrollbar-color: rgba(127,127,127,0.4) transparent;
 }
 /* WebKit/Chromium - 美化滚动条 */
 .preview::-webkit-scrollbar:vertical,
+#md-wysiwyg-root .scrollView::-webkit-scrollbar:vertical,
 #md-wysiwyg-root::-webkit-scrollbar:vertical,
 .library::-webkit-scrollbar:vertical {
   width: 12px;
 }
 .preview::-webkit-scrollbar-thumb,
+#md-wysiwyg-root .scrollView::-webkit-scrollbar-thumb,
 #md-wysiwyg-root::-webkit-scrollbar-thumb,
 .library::-webkit-scrollbar-thumb {
   background: rgba(127,127,127,0.3);
@@ -3588,12 +3598,14 @@ body::-webkit-scrollbar:horizontal,
   transition: background 0.2s ease;
 }
 .preview::-webkit-scrollbar-thumb:hover,
+#md-wysiwyg-root .scrollView::-webkit-scrollbar-thumb:hover,
 #md-wysiwyg-root::-webkit-scrollbar-thumb:hover,
 .library::-webkit-scrollbar-thumb:hover {
   background: rgba(127,127,127,0.5);
   background-clip: content-box;
 }
 .preview::-webkit-scrollbar-track,
+#md-wysiwyg-root .scrollView::-webkit-scrollbar-track,
 #md-wysiwyg-root::-webkit-scrollbar-track,
 .library::-webkit-scrollbar-track {
   background: transparent;
@@ -3863,6 +3875,7 @@ textarea:focus {
 /* 平滑滚动 */
 .preview,
 #md-wysiwyg-root,
+#md-wysiwyg-root .scrollView,
 .library {
   scroll-behavior: smooth;
 }

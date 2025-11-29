@@ -363,8 +363,10 @@ function createHooks(): TabManagerHooks {
       const wysiwyg = flymd.flymdGetWysiwygEnabled?.() ?? false
 
       if (wysiwyg) {
-        const wysiwygRoot = document.getElementById('md-wysiwyg-root')
-        return wysiwygRoot?.scrollTop ?? 0
+        // 所见 V2：优先使用内部 scrollView，避免出现双滚动容器状态不一致
+        const scrollEl = (document.querySelector('#md-wysiwyg-root .scrollView') as HTMLElement | null)
+          || (document.getElementById('md-wysiwyg-root') as HTMLElement | null)
+        return scrollEl?.scrollTop ?? 0
       } else if (mode === 'preview') {
         const preview = document.getElementById('preview')
         return preview?.scrollTop ?? 0
@@ -379,8 +381,9 @@ function createHooks(): TabManagerHooks {
       const wysiwyg = flymd.flymdGetWysiwygEnabled?.() ?? false
 
       if (wysiwyg) {
-        const wysiwygRoot = document.getElementById('md-wysiwyg-root')
-        if (wysiwygRoot) wysiwygRoot.scrollTop = top
+        const scrollEl = (document.querySelector('#md-wysiwyg-root .scrollView') as HTMLElement | null)
+          || (document.getElementById('md-wysiwyg-root') as HTMLElement | null)
+        if (scrollEl) scrollEl.scrollTop = top
       } else if (mode === 'preview') {
         const preview = document.getElementById('preview')
         if (preview) preview.scrollTop = top
