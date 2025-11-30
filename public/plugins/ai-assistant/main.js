@@ -20,6 +20,7 @@ const DEFAULT_CFG = {
   baseUrl: 'https://api.siliconflow.cn/v1',
   apiKey: '',
   model: 'gpt-4o-mini',
+  visionEnabled: false, // 视觉模式（默认关闭）
   win: { x: 60, y: 60, w: 400, h: 440 },
   dock: 'left', // 'left'=左侧停靠；'right'=右侧停靠；false=浮动窗口
   limits: { maxCtxChars: 6000 },
@@ -42,6 +43,7 @@ let __AI_LAST_DOC_HASH__ = '' // 缓存上次渲染时的文档哈希，避免�
 let __AI_FN_DEBOUNCE_TIMER__ = null // 文档名观察者防抖定时器
 let __AI_CONTEXT__ = null // 保存插件 context，供消息操作按钮使用
 let __AI_PENDING_ACTION__ = null // 标记待办/提醒快捷模式
+let __AI_PENDING_IMAGES__ = [] // 待发送的图片（来自对话框粘贴）
 let __AI_MD__ = null // Markdown 渲染器实例
 let __AI_HLJS__ = null // highlight.js 实例
 
@@ -372,6 +374,27 @@ function extractTodos(todos){
     .split('\n')
     .map(line => line.trim())
     .filter(line => line.startsWith('- [ ]') || line.startsWith('- [x]'))
+}
+
+// 根据配置判断是否启用视觉能力（当前仅自定义模型允许）
+function isVisionEnabledForConfig(cfg){
+  if (!cfg) return false
+  if (isFreeProvider(cfg)) return false
+  return !!cfg.visionEnabled
+}
+
+// 更新视觉按钮上的图片计数标记
+function updateVisionAttachmentIndicator(){
+  try {
+    const visionBtn = el('ai-vision-toggle')
+    if (!visionBtn) return
+    const count = Array.isArray(__AI_PENDING_IMAGES__) ? __AI_PENDING_IMAGES__.length : 0
+    if (count > 0) {
+      visionBtn.setAttribute('data-count', String(count))
+    } else {
+      visionBtn.removeAttribute('data-count')
+    }
+  } catch {}
 }
 
 async function callAIForPlugins(context, prompt, options = {}){
@@ -753,12 +776,18 @@ function ensureCss() {
     '.ai-quick-action-wrap{position:absolute;left:10px;bottom:8px;display:flex;align-items:center;gap:4px}',
     '.ai-quick-action-wrap select{background:transparent;border:none;color:#6b7280;font-size:13px;cursor:pointer;padding:4px 2px;outline:none}',
     '.ai-quick-action-wrap select option{padding:8px 12px;font-size:13px}',
+    '.ai-vision-toggle{min-width:26px;height:24px;padding:0 8px;border-radius:999px;border:1px solid #d1d5db;background:rgba(255,255,255,.95);color:#6b7280;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s}',
+    '.ai-vision-toggle.active{border-color:#2563eb;background:#dbeafe;color:#1d4ed8;box-shadow:0 0 0 1px rgba(37,99,235,.15)}',
+    '.ai-vision-toggle.disabled{opacity:.45;cursor:not-allowed;box-shadow:none}',
+    '.ai-vision-toggle[data-count]:after{content:attr(data-count);position:absolute;right:-2px;top:-2px;min-width:14px;height:14px;padding:0 3px;border-radius:999px;background:#ef4444;color:#fff;font-size:10px;line-height:14px;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 1px #fff;}',
     '#ai-assist-win.dark .ai-input-wrap{background:#0b1220;border-color:#1f2937}',
     '#ai-assist-win.dark .ai-input-wrap textarea{color:#e5e7eb}',
     '#ai-assist-win.dark .ai-input-wrap:focus-within{border-color:#3b82f6}',
     '#ai-assist-win.dark .ai-quick-action-wrap select{color:#9ca3af;background:transparent}',
     '#ai-assist-win.dark .ai-quick-action-wrap select option{background:#1f2937;color:#e5e7eb}',
     '#ai-assist-win.dark .ai-quick-action-wrap::after{color:#6b7280}',
+    '#ai-assist-win.dark .ai-vision-toggle{background:rgba(15,23,42,.95);border-color:#374151;color:#9ca3af}',
+    '#ai-assist-win.dark .ai-vision-toggle.active{background:#1e3a8a;border-color:#3b82f6;color:#bfdbfe}',
     // 快捷操作下拉框夜间模式
     '#ai-quick-action{background:transparent;border:none;color:#6b7280;font-size:13px;cursor:pointer;padding:4px 2px;outline:none}',
     '#ai-quick-action option{background:#fff;color:#0f172a;padding:8px 12px}',
@@ -1353,6 +1382,89 @@ async function refreshHeader(context){
       else modeLabelFree.classList.remove('active')
     }
   } catch {}
+  // 更新视觉模式开关
+  try {
+    const visionBtn = el('ai-vision-toggle')
+    if (visionBtn) {
+      const supported = !isFreeProvider(cfg)
+      const active = !!cfg.visionEnabled && supported
+      visionBtn.disabled = !supported
+      visionBtn.classList.toggle('disabled', !supported)
+      visionBtn.classList.toggle('active', active)
+      if (!supported) {
+        visionBtn.title = '当前模型暂不支持视觉能力'
+      } else if (active) {
+        visionBtn.title = '视觉模式已开启，将尝试读取文档中的图片'
+      } else {
+        visionBtn.title = '视觉模式：点击开启，让 AI 读取文档中的图片'
+      }
+      // 刷新图片计数展示
+      updateVisionAttachmentIndicator()
+    }
+  } catch {}
+}
+
+// 收集文档中的图片并构造视觉模型可用的 content 片段
+async function buildVisionContentBlocks(context, docCtx){
+  const blocks = [{ type: 'text', text: '文档上下文：\n\n' + docCtx }]
+  if (!context || typeof context.getPreviewElement !== 'function') return blocks
+  let root = null
+  try {
+    root = context.getPreviewElement()
+  } catch {}
+  if (!root) return blocks
+  try {
+    const imgs = root.querySelectorAll('img')
+    if (!imgs || !imgs.length) return blocks
+    const maxImages = 4
+    let used = 0
+    for (const elImg of imgs) {
+      if (used >= maxImages) break
+      try {
+        const img = elImg
+        const srcAttr = img.getAttribute('src') || ''
+        const rawSrc = img.getAttribute('data-raw-src') || srcAttr
+        const absPath = img.getAttribute('data-abs-path') || ''
+        let url = ''
+        if (/^data:image\//i.test(srcAttr) || /^data:image\//i.test(rawSrc)) {
+          url = srcAttr || rawSrc
+        } else if (/^https?:\/\//i.test(srcAttr) || /^https?:\/\//i.test(rawSrc)) {
+          url = srcAttr || rawSrc
+        } else if (absPath && typeof context.readImageAsDataUrl === 'function') {
+          try {
+            url = await context.readImageAsDataUrl(absPath)
+          } catch {}
+        }
+        if (!url) continue
+        const alt = img.getAttribute('alt') || ''
+        const label = alt ? `图片 ${used + 1}：${alt}` : `图片 ${used + 1}`
+        blocks.push({ type: 'text', text: '\n\n' + label })
+        blocks.push({ type: 'image_url', image_url: { url } })
+        used++
+      } catch {}
+    }
+  } catch {
+    // 忽略预览图片收集错误，继续返回已有文本块和附件图片
+  }
+  // 追加附件图片（来自对话框粘贴）
+  try {
+    const pending = Array.isArray(__AI_PENDING_IMAGES__) ? __AI_PENDING_IMAGES__ : []
+    if (pending.length) {
+      const maxAttach = 4
+      let usedAttach = 0
+      for (const img of pending) {
+        if (usedAttach >= maxAttach) break
+        if (!img || !img.url) continue
+        const label = img.name
+          ? `附件图片 ${usedAttach + 1}：${img.name}`
+          : `附件图片 ${usedAttach + 1}`
+        blocks.push({ type: 'text', text: '\n\n' + label })
+        blocks.push({ type: 'image_url', image_url: { url: img.url } })
+        usedAttach++
+      }
+    }
+  } catch {}
+  return blocks
 }
 
 async function refreshSessionSelect(context) {
@@ -1548,22 +1660,23 @@ async function mountWindow(context){
     ' </div>',
     ' <div id="ai-chat"></div>',
     // 输入框区域：左下角快捷操作下拉
-    ' <div id="ai-input">',
-    '  <div class="ai-input-wrap">',
-    '   <textarea id="ai-text" placeholder="输入与 AI 对话..."></textarea>',
-    '   <div class="ai-quick-action-wrap">',
-    '    <select id="ai-quick-action" title="快捷操作">',
-    '     <option value="">智能问答</option>',
-    '     <option value="续写">续写</option>',
-    '     <option value="润色">润色</option>',
-    '     <option value="纠错">纠错</option>',
-    '     <option value="提纲">提纲</option>',
-    '     <option value="待办">待办</option>',
-    '     <option value="提醒">提醒</option>',
-    '    </select>',
-    '   </div>',
-    '   <button id="ai-send" title="发送消息">↵</button>',
-    '  </div>',
+     ' <div id="ai-input">',
+     '  <div class="ai-input-wrap">',
+     '   <textarea id="ai-text" placeholder="输入与 AI 对话..."></textarea>',
+     '   <div class="ai-quick-action-wrap">',
+     '    <select id="ai-quick-action" title="快捷操作">',
+     '     <option value="">智能问答</option>',
+     '     <option value="续写">续写</option>',
+     '     <option value="润色">润色</option>',
+     '     <option value="纠错">纠错</option>',
+     '     <option value="提纲">提纲</option>',
+     '     <option value="待办">待办</option>',
+     '     <option value="提醒">提醒</option>',
+     '    </select>',
+     '    <button id="ai-vision-toggle" class="ai-vision-toggle" title="视觉模式：点击开启，让 AI 读取文档中的图片">👁</button>',
+     '   </div>',
+     '   <button id="ai-send" title="发送消息">↵</button>',
+     '  </div>',
     ' </div>',
     '</div><div id="ai-vresizer" title="拖动调整宽度"></div><div id="ai-resizer" title="拖动调整尺寸"></div>'
   ].join('')
@@ -1668,10 +1781,66 @@ async function mountWindow(context){
       context.ui.notice(providerToggle.checked ? '已切换到免费模式' : '已切换到自定义模式', 'ok', 1600)
     })
   } catch {}
+  // 视觉模式开关
+  try {
+    const visionBtn = el.querySelector('#ai-vision-toggle')
+    if (visionBtn) {
+      visionBtn.addEventListener('click', async () => {
+        try {
+          const cfg = await loadCfg(context)
+          const isFree = isFreeProvider(cfg)
+          if (isFree) {
+            try { context.ui.notice('当前免费模型暂不支持视觉能力', 'warn', 2000) } catch {}
+            return
+          }
+          cfg.visionEnabled = !cfg.visionEnabled
+          await saveCfg(context, cfg)
+          await refreshHeader(context)
+          try {
+            context.ui.notice(cfg.visionEnabled ? '视觉模式已开启，将尝试读取文档中的图片' : '视觉模式已关闭，将仅使用文本上下文', 'ok', 2200)
+          } catch {}
+        } catch (e) {
+          console.error('切换视觉模式失败：', e)
+        }
+      })
+    }
+  } catch {}
 
   // 发送按钮和回车发送
   el.querySelector('#ai-send').addEventListener('click',()=>{ sendFromInputWithAction(context) })
-  try { const ta = el.querySelector('#ai-text'); ta?.addEventListener('keydown', (e)=>{ if (e.key==='Enter' && !e.shiftKey){ e.preventDefault(); try { sendFromInputWithAction(context) } catch {} } }) } catch {}
+  try {
+    const ta = el.querySelector('#ai-text')
+    ta?.addEventListener('keydown', (e)=>{ if (e.key==='Enter' && !e.shiftKey){ e.preventDefault(); try { sendFromInputWithAction(context) } catch {} } })
+    // 对话框内粘贴图片支持
+    ta?.addEventListener('paste', (e) => {
+      try {
+        const evt = e
+        const dt = evt.clipboardData || window.clipboardData
+        if (!dt || !dt.items || !dt.items.length) return
+        const items = Array.from(dt.items)
+        const imgItems = items.filter(it => it.kind === 'file' && it.type && /^image\//i.test(it.type))
+        if (!imgItems.length) return
+        imgItems.forEach(it => {
+          try {
+            const file = it.getAsFile()
+            if (!file) return
+            const fr = new FileReader()
+            fr.onerror = () => {}
+            fr.onload = () => {
+              try {
+                const url = String(fr.result || '')
+                if (!url.startsWith('data:image/')) return
+                if (!Array.isArray(__AI_PENDING_IMAGES__)) __AI_PENDING_IMAGES__ = []
+                __AI_PENDING_IMAGES__.push({ url, name: file.name || '', mime: file.type || '' })
+                updateVisionAttachmentIndicator()
+              } catch {}
+            }
+            fr.readAsDataURL(file)
+          } catch {}
+        })
+      } catch {}
+    })
+  } catch {}
 
   // 快捷操作选择即发送
   try {
@@ -2510,45 +2679,62 @@ async function sendFromInputWithAction(context){
     const isFree = isFreeProvider(cfg)
     if (!cfg.apiKey && !isFree) { context.ui.notice('请先在“设置”中配置 OpenAI API Key', 'err', 3000); return }
     if (!cfg.model && !isFree) { context.ui.notice('请先选择模型', 'err', 2000); return }
-  __AI_SENDING__ = true
-  try {
-    await ensureSessionForDoc(context)
-    const doc = String(context.getEditorValue() || '')
-    const docCtx = clampCtx(doc, Number(cfg.limits?.maxCtxChars||6000))
+    __AI_SENDING__ = true
+    try {
+      await ensureSessionForDoc(context)
+      const doc = String(context.getEditorValue() || '')
+      const docCtx = clampCtx(doc, Number(cfg.limits?.maxCtxChars || 6000))
 
-    // 添加当前时间上下文
-    const now = new Date()
-    const weekdays = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六']
-    const currentDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
-    const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
-    const weekday = weekdays[now.getDay()]
-    const timeContext = `今天是 ${currentDate} ${weekday} ${currentTime}`
+      // 添加当前时间上下文
+      const now = new Date()
+      const weekdays = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六']
+      const currentDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+      const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+      const weekday = weekdays[now.getDay()]
+      const timeContext = `今天是 ${currentDate} ${weekday} ${currentTime}`
 
-    const system = `你是专业的中文写作助手，回答要简洁、实用、可直接落地。当前时间：${timeContext}`
-    const userMsgs = __AI_SESSION__.messages
-    const finalMsgs = [ { role:'system', content: system }, { role:'user', content: '文档上下文：\n\n' + docCtx } ]
-    userMsgs.forEach(m => finalMsgs.push(m))
+      const system = `你是专业的中文写作助手，回答要简洁、实用、可直接落地。当前时间：${timeContext}`
+      const userMsgs = __AI_SESSION__.messages
+
+      const visionOn = isVisionEnabledForConfig(cfg)
+      let userMsg
+      if (visionOn) {
+        try {
+          const blocks = await buildVisionContentBlocks(context, docCtx)
+          if (blocks && Array.isArray(blocks) && blocks.length) {
+            userMsg = { role: 'user', content: blocks }
+          }
+        } catch (e) {
+          console.error('构造视觉上下文失败：', e)
+        }
+      }
+      if (!userMsg) {
+        userMsg = { role: 'user', content: '文档上下文：\n\n' + docCtx }
+      }
+
+      const finalMsgs = [{ role: 'system', content: system }, userMsg]
+      userMsgs.forEach(m => finalMsgs.push(m))
 
       const url = buildApiUrl(cfg)
       const bodyObj = { model: resolveModelId(cfg), messages: finalMsgs, stream: !isFree }
       const headers = buildApiHeaders(cfg)
 
-    const chatEl = el('ai-chat')
+      const chatEl = el('ai-chat')
 
-    // 显示思考中动画
-    const thinkingWrapper = document.createElement('div')
-    thinkingWrapper.className = 'msg-wrapper'
-    thinkingWrapper.id = 'ai-thinking-indicator'
-    const thinkingBubble = document.createElement('div')
-    thinkingBubble.className = 'msg a ai-thinking'
-    thinkingBubble.innerHTML = '<span class="ai-thinking-dot"></span><span class="ai-thinking-dot"></span><span class="ai-thinking-dot"></span>'
-    thinkingWrapper.appendChild(thinkingBubble)
-    chatEl.appendChild(thinkingWrapper)
-    chatEl.scrollTop = chatEl.scrollHeight
+      // 显示思考中动画
+      const thinkingWrapper = document.createElement('div')
+      thinkingWrapper.className = 'msg-wrapper'
+      thinkingWrapper.id = 'ai-thinking-indicator'
+      const thinkingBubble = document.createElement('div')
+      thinkingBubble.className = 'msg a ai-thinking'
+      thinkingBubble.innerHTML = '<span class="ai-thinking-dot"></span><span class="ai-thinking-dot"></span><span class="ai-thinking-dot"></span>'
+      thinkingWrapper.appendChild(thinkingBubble)
+      chatEl.appendChild(thinkingWrapper)
+      chatEl.scrollTop = chatEl.scrollHeight
 
-    // 创建回复草稿元素（初始隐藏）
-    const draft = document.createElement('div'); draft.className = 'msg a'; draft.textContent = ''; draft.style.display = 'none'
-    chatEl.appendChild(draft)
+      // 创建回复草稿元素（初始隐藏）
+      const draft = document.createElement('div'); draft.className = 'msg a'; draft.textContent = ''; draft.style.display = 'none'
+      chatEl.appendChild(draft)
 
       let finalText = ''
       // 移除思考中动画的辅助函数
@@ -2560,7 +2746,7 @@ async function sendFromInputWithAction(context){
 
       if (isFree) {
         // 免费代理模式：直接走非流式一次性请求，由后端持有真实 Key
-        const r = await fetchWithRetry(url, { method:'POST', headers, body: JSON.stringify({ ...bodyObj, stream: false }) })
+        const r = await fetchWithRetry(url, { method: 'POST', headers, body: JSON.stringify({ ...bodyObj, stream: false }) })
         removeThinking()
         const text = await r.text()
         const data = text ? JSON.parse(text) : null
@@ -2571,7 +2757,7 @@ async function sendFromInputWithAction(context){
         const body = JSON.stringify(bodyObj)
         let firstChunkReceived = false
         try {
-          const r2 = await fetchWithRetry(url, { method:'POST', headers, body })
+          const r2 = await fetchWithRetry(url, { method: 'POST', headers, body })
           if (!r2.ok || !r2.body) { throw new Error('HTTP ' + r2.status) }
           const reader = r2.body.getReader()
           const decoder = new TextDecoder('utf-8')
@@ -2609,7 +2795,7 @@ async function sendFromInputWithAction(context){
         } catch (e) {
           // 流式失败兜底：改非流式一次性请求
           try {
-            const r3 = await fetchWithRetry(url, { method:'POST', headers, body: JSON.stringify({ ...bodyObj, stream: false }) })
+            const r3 = await fetchWithRetry(url, { method: 'POST', headers, body: JSON.stringify({ ...bodyObj, stream: false }) })
             removeThinking()
             const text = await r3.text()
             const data = text ? JSON.parse(text) : null
@@ -2623,20 +2809,25 @@ async function sendFromInputWithAction(context){
         }
       }
 
-    __AI_LAST_REPLY__ = finalText || ''
-    pushMsg('assistant', __AI_LAST_REPLY__ || '[空响应]')
-    renderMsgs(el('ai-chat'))
-    // 同步会话库：写回当前文档的 active 会话
-    try {
-      await syncCurrentSessionToDB(context)
-    } catch {}
-    try { await maybeNameCurrentSession(context, cfg, finalText) } catch {}
-    try { const elw = el('ai-assist-win'); if (elw) autoFitWindow(context, elw) } catch {}
-  } catch (e) {
-    console.error(e)
-    context.ui.notice('AI 调用失败：' + (e && e.message ? e.message : '未知错误'), 'err', 4000)
-  } finally { __AI_SENDING__ = false }
-}
+      __AI_LAST_REPLY__ = finalText || ''
+      pushMsg('assistant', __AI_LAST_REPLY__ || '[空响应]')
+      renderMsgs(el('ai-chat'))
+      // 同步会话库：写回当前文档的 active 会话
+      try {
+        await syncCurrentSessionToDB(context)
+      } catch {}
+      try { await maybeNameCurrentSession(context, cfg, finalText) } catch {}
+      try { const elw = el('ai-assist-win'); if (elw) autoFitWindow(context, elw) } catch {}
+    } catch (e) {
+      console.error(e)
+      context.ui.notice('AI 调用失败：' + (e && e.message ? e.message : '未知错误'), 'err', 4000)
+    } finally {
+      __AI_SENDING__ = false
+      // 每次请求结束后清空待发送图片
+      __AI_PENDING_IMAGES__ = []
+      updateVisionAttachmentIndicator()
+    }
+  }
 
 async function applyLastToDoc(context){
   const s = String(__AI_LAST_REPLY__||'').trim()
