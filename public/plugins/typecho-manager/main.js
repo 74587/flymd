@@ -253,6 +253,7 @@ const sessionState = {
   dateFrom: '',
   dateTo: '',
   filterCategory: '',
+  searchText: '',
   pageSize: 50,
   pageIndex: 0,
   conflictChoice: null // null | 'overwrite' | 'skip'
@@ -272,6 +273,8 @@ let alwaysUseDefaultCheckbox = null
 let pageInfoEl = null
 let prevPageBtn = null
 let nextPageBtn = null
+let relatedOverlayEl = null
+let statsOverlayEl = null
 
 // 设置窗口 DOM 引用
 let settingsOverlayEl = null
@@ -390,12 +393,24 @@ function buildManagerDialog() {
   btnSettings.textContent = '连接 / 下载设置'
   btnSettings.addEventListener('click', () => { void openSettingsDialog(globalContextRef) })
 
+  const btnRelated = document.createElement('button')
+  btnRelated.className = 'tm-typecho-btn'
+  btnRelated.textContent = '相关文章'
+  btnRelated.addEventListener('click', () => { void openRelatedPostsDialog(globalContextRef) })
+
+  const btnStats = document.createElement('button')
+  btnStats.className = 'tm-typecho-btn'
+  btnStats.textContent = '统计 / 健康'
+  btnStats.addEventListener('click', () => { void openStatsDialog(globalContextRef) })
+
   const btnClose = document.createElement('button')
   btnClose.className = 'tm-typecho-btn'
   btnClose.textContent = '关闭'
   btnClose.addEventListener('click', () => { closeOverlay() })
 
   headerRight.appendChild(btnRefresh)
+  headerRight.appendChild(btnRelated)
+  headerRight.appendChild(btnStats)
   headerRight.appendChild(btnSettings)
   headerRight.appendChild(btnClose)
 
@@ -491,6 +506,26 @@ function buildManagerDialog() {
   catGroup.appendChild(catLabel)
   catGroup.appendChild(categorySelect)
   filters.appendChild(catGroup)
+
+  // 关键字搜索
+  const searchGroup = document.createElement('div')
+  searchGroup.className = 'tm-typecho-filter-group'
+  const searchLabel = document.createElement('span')
+  searchLabel.className = 'tm-typecho-label-muted'
+  searchLabel.textContent = '关键字'
+  const searchInput = document.createElement('input')
+  searchInput.type = 'text'
+  searchInput.className = 'tm-typecho-input'
+  searchInput.placeholder = '标题 / 内容包含...'
+  searchInput.value = sessionState.searchText || ''
+  searchInput.addEventListener('input', () => {
+    sessionState.searchText = searchInput.value || ''
+    sessionState.pageIndex = 0
+    void renderPostTable()
+  })
+  searchGroup.appendChild(searchLabel)
+  searchGroup.appendChild(searchInput)
+  filters.appendChild(searchGroup)
 
   body.appendChild(filters)
 
@@ -674,6 +709,48 @@ function extractCategoriesFromPosts(posts) {
   return Array.from(set.values()).sort()
 }
 
+function buildRelatedPosts(currentMeta, posts) {
+  const results = []
+  if (!currentMeta || !posts || !posts.length) return results
+  const title = String(currentMeta.title || '').trim().toLowerCase()
+  const cats = Array.isArray(currentMeta.categories) ? currentMeta.categories.map((x) => String(x || '').trim().toLowerCase()) : []
+  const tags = Array.isArray(currentMeta.tags) ? currentMeta.tags.map((x) => String(x || '').trim().toLowerCase()) : []
+  const keywords = new Set()
+  for (const t of tags) if (t) keywords.add(t)
+  for (const c of cats) if (c) keywords.add(c)
+  const titleWords = title ? title.split(/\s+/).filter(Boolean) : []
+  for (const w of titleWords) keywords.add(w)
+  if (!keywords.size && !title) return results
+
+  for (const p of posts) {
+    const cid = p.postid || p.postId || p.cid || p.id
+    const pTitle = String(p.title || '').trim()
+    const pTitleLower = pTitle.toLowerCase()
+    const pCats = p.categories || p.category || []
+    const pTagsRaw = p.tags || p.mt_keywords || ''
+    const pTags = Array.isArray(pTagsRaw)
+      ? pTagsRaw.map((x) => String(x || '').trim())
+      : (pTagsRaw ? String(pTagsRaw).split(',').map((x) => x.trim()) : [])
+
+    let score = 0
+    for (const c of (Array.isArray(pCats) ? pCats : [pCats])) {
+      const s = String(c || '').trim().toLowerCase()
+      if (s && keywords.has(s)) score += 3
+    }
+    for (const t of pTags) {
+      const s = String(t || '').trim().toLowerCase()
+      if (s && keywords.has(s)) score += 2
+    }
+    if (title && pTitleLower && (pTitleLower.includes(title) || title.includes(pTitleLower))) {
+      score += 4
+    }
+    if (!score) continue
+    results.push({ post: p, score, cid, title: pTitle })
+  }
+  results.sort((a, b) => b.score - a.score)
+  return results.slice(0, 20)
+}
+
 // 拉取与渲染文章列表（逻辑部分）
 
 async function loadAllPosts(context, settings) {
@@ -735,10 +812,308 @@ async function refreshPosts(context) {
   }
 }
 
+async function openRelatedPostsDialog(context) {
+  if (!context) return
+  ensureStyle()
+  if (relatedOverlayEl) {
+    try { relatedOverlayEl.parentNode && relatedOverlayEl.parentNode.removeChild(relatedOverlayEl) } catch {}
+    relatedOverlayEl = null
+  }
+  const overlay = document.createElement('div')
+  overlay.className = 'tm-typecho-settings-overlay'
+
+  const dlg = document.createElement('div')
+  dlg.className = 'tm-typecho-settings-dialog'
+  overlay.appendChild(dlg)
+
+  const header = document.createElement('div')
+  header.className = 'tm-typecho-settings-header'
+  header.textContent = '相关文章助手'
+  dlg.appendChild(header)
+
+  const body = document.createElement('div')
+  body.className = 'tm-typecho-settings-body'
+  dlg.appendChild(body)
+
+  let meta = null
+  try { meta = context.getDocMeta && context.getDocMeta() } catch {}
+  meta = meta || {}
+
+  if (!sessionState.posts || !sessionState.posts.length) {
+    const p = document.createElement('div')
+    p.style.fontSize = '12px'
+    p.style.color = 'var(--muted)'
+    p.textContent = '尚未加载远端文章，请先在主窗口中点击“刷新列表”。'
+    body.appendChild(p)
+  } else {
+    const list = document.createElement('div')
+    list.style.maxHeight = '320px'
+    list.style.overflow = 'auto'
+    const related = buildRelatedPosts(meta, sessionState.posts)
+    if (!related.length) {
+      const p = document.createElement('div')
+      p.style.fontSize = '12px'
+      p.style.color = 'var(--muted)'
+      p.textContent = '根据当前文档的标题 / 分类 / 标签，未找到明显相关的文章。'
+      body.appendChild(p)
+    } else {
+      for (const item of related) {
+        const p = item.post
+        const row = document.createElement('div')
+        row.style.display = 'flex'
+        row.style.flexDirection = 'column'
+        row.style.padding = '6px 4px'
+        row.style.borderBottom = '1px solid var(--border)'
+
+        const line1 = document.createElement('div')
+        line1.style.display = 'flex'
+        line1.style.justifyContent = 'space-between'
+        line1.style.alignItems = 'center'
+        const titleSpan = document.createElement('span')
+        titleSpan.textContent = item.title || '(未命名)'
+        titleSpan.style.fontSize = '13px'
+        titleSpan.style.fontWeight = '600'
+        const scoreSpan = document.createElement('span')
+        scoreSpan.style.fontSize = '11px'
+        scoreSpan.style.color = 'var(--muted)'
+        scoreSpan.textContent = '匹配分: ' + item.score
+        line1.appendChild(titleSpan)
+        line1.appendChild(scoreSpan)
+        row.appendChild(line1)
+
+        const cidSpan = document.createElement('div')
+        cidSpan.style.fontSize = '11px'
+        cidSpan.style.color = 'var(--muted)'
+        cidSpan.textContent = 'ID=' + (item.cid || '')
+        row.appendChild(cidSpan)
+
+        const actRow = document.createElement('div')
+        actRow.style.display = 'flex'
+        actRow.style.gap = '6px'
+        actRow.style.marginTop = '4px'
+        const btnInsertLink = document.createElement('button')
+        btnInsertLink.type = 'button'
+        btnInsertLink.className = 'tm-typecho-btn'
+        btnInsertLink.textContent = '插入链接'
+        btnInsertLink.addEventListener('click', () => {
+          try {
+            const cid = item.cid || p.postid || p.postId || p.cid || p.id || ''
+            const slug = p.wp_slug || p.slug || cid || ''
+            const urlBase = sessionState.settings.baseUrl || ''
+            let url = slug
+            if (urlBase) {
+              const sep = urlBase.endsWith('/') ? '' : '/'
+              url = urlBase + sep + String(slug || cid || '')
+            }
+            const titleText = item.title || '(未命名)'
+            const linkMd = `[${titleText}](${url})`
+            if (context.insertAtCursor) context.insertAtCursor(linkMd)
+            else if (context.setEditorValue && context.getEditorValue) {
+              const v = String(context.getEditorValue() || '')
+              context.setEditorValue(v + '\n\n' + linkMd + '\n')
+            }
+            context.ui.notice('已插入相关文章链接', 'ok', 2000)
+          } catch (e) {
+            console.error('[Typecho Manager] 插入相关文章链接失败', e)
+            try {
+              const msg = e && e.message ? String(e.message) : String(e || '未知错误')
+              context.ui.notice('插入链接失败：' + msg, 'err', 2600)
+            } catch {}
+          }
+        })
+        const btnDownload = document.createElement('button')
+        btnDownload.type = 'button'
+        btnDownload.className = 'tm-typecho-btn'
+        btnDownload.textContent = '下载到本地'
+        btnDownload.addEventListener('click', () => { void downloadSinglePost(context, p) })
+        actRow.appendChild(btnInsertLink)
+        actRow.appendChild(btnDownload)
+        row.appendChild(actRow)
+
+        list.appendChild(row)
+      }
+      body.appendChild(list)
+    }
+  }
+
+  const footer = document.createElement('div')
+  footer.className = 'tm-typecho-settings-footer'
+  const btnClose = document.createElement('button')
+  btnClose.className = 'tm-typecho-btn'
+  btnClose.textContent = '关闭'
+  btnClose.addEventListener('click', () => {
+    try { overlay.parentNode && overlay.parentNode.removeChild(overlay) } catch {}
+    relatedOverlayEl = null
+  })
+  footer.appendChild(btnClose)
+  dlg.appendChild(footer)
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) {
+      try { overlay.parentNode && overlay.parentNode.removeChild(overlay) } catch {}
+      relatedOverlayEl = null
+    }
+  })
+
+  document.body.appendChild(overlay)
+  relatedOverlayEl = overlay
+}
+
+async function openStatsDialog(context) {
+  if (!context) return
+  ensureStyle()
+  if (statsOverlayEl) {
+    try { statsOverlayEl.parentNode && statsOverlayEl.parentNode.removeChild(statsOverlayEl) } catch {}
+    statsOverlayEl = null
+  }
+  const overlay = document.createElement('div')
+  overlay.className = 'tm-typecho-settings-overlay'
+
+  const dlg = document.createElement('div')
+  dlg.className = 'tm-typecho-settings-dialog'
+  overlay.appendChild(dlg)
+
+  const header = document.createElement('div')
+  header.className = 'tm-typecho-settings-header'
+  header.textContent = '统计 / 健康检查'
+  dlg.appendChild(header)
+
+  const body = document.createElement('div')
+  body.className = 'tm-typecho-settings-body'
+  dlg.appendChild(body)
+
+  const posts = Array.isArray(sessionState.posts) ? sessionState.posts : []
+  if (!posts.length) {
+    const p = document.createElement('div')
+    p.style.fontSize = '12px'
+    p.style.color = 'var(--muted)'
+    p.textContent = '尚未加载远端文章，请先在主窗口中点击“刷新列表”。'
+    body.appendChild(p)
+  } else {
+    const total = posts.length
+    let published = 0
+    let drafts = 0
+    const cats = new Map()
+    const tags = new Map()
+    let noCategory = 0
+    let noTags = 0
+
+    for (const p of posts) {
+      const status = String(p.post_status || p.postStatus || p.status || '').toLowerCase()
+      if (status === 'draft') drafts++
+      else published++
+
+      const pcats = p.categories || p.category || []
+      const catArr = Array.isArray(pcats) ? pcats : (pcats ? [pcats] : [])
+      if (!catArr.length) noCategory++
+      for (const c of catArr) {
+        const s = String(c || '').trim()
+        if (!s) continue
+        cats.set(s, (cats.get(s) || 0) + 1)
+      }
+
+      const pTagsRaw = p.tags || p.mt_keywords || ''
+      const pTags = Array.isArray(pTagsRaw)
+        ? pTagsRaw.map((x) => String(x || '').trim())
+        : (pTagsRaw ? String(pTagsRaw).split(',').map((x) => x.trim()) : [])
+      if (!pTags.length) noTags++
+      for (const t of pTags) {
+        const s = String(t || '').trim()
+        if (!s) continue
+        tags.set(s, (tags.get(s) || 0) + 1)
+      }
+    }
+
+    const statsList = document.createElement('div')
+    statsList.style.fontSize = '12px'
+    statsList.style.display = 'flex'
+    statsList.style.flexDirection = 'column'
+    statsList.style.gap = '4px'
+
+    const addLine = (text) => {
+      const line = document.createElement('div')
+      line.textContent = text
+      statsList.appendChild(line)
+    }
+
+    addLine('总文章数：' + total)
+    addLine('已发布：' + published)
+    addLine('草稿：' + drafts)
+    addLine('无分类文章：' + noCategory)
+    addLine('无标签文章：' + noTags)
+
+    body.appendChild(statsList)
+
+    // 分类 / 标签 Top N 列表
+    const topWrap = document.createElement('div')
+    topWrap.style.display = 'flex'
+    topWrap.style.gap = '16px'
+    topWrap.style.marginTop = '10px'
+
+    const buildTopList = (title, map) => {
+      const box = document.createElement('div')
+      const h = document.createElement('div')
+      h.style.fontSize = '12px'
+      h.style.fontWeight = '600'
+      h.style.marginBottom = '4px'
+      h.textContent = title
+      box.appendChild(h)
+      const ul = document.createElement('div')
+      ul.style.fontSize = '12px'
+      ul.style.display = 'flex'
+      ul.style.flexDirection = 'column'
+      ul.style.gap = '2px'
+      const arr = Array.from(map.entries()).sort((a, b) => b[1] - a[1]).slice(0, 20)
+      if (!arr.length) {
+        const empty = document.createElement('div')
+        empty.style.color = 'var(--muted)'
+        empty.textContent = '无数据'
+        ul.appendChild(empty)
+      } else {
+        for (const [name, count] of arr) {
+          const li = document.createElement('div')
+          li.textContent = `${name} (${count})`
+          ul.appendChild(li)
+        }
+      }
+      box.appendChild(ul)
+      return box
+    }
+
+    topWrap.appendChild(buildTopList('分类 Top', cats))
+    topWrap.appendChild(buildTopList('标签 Top', tags))
+
+    body.appendChild(topWrap)
+  }
+
+  const footer = document.createElement('div')
+  footer.className = 'tm-typecho-settings-footer'
+  const btnClose = document.createElement('button')
+  btnClose.className = 'tm-typecho-btn'
+  btnClose.textContent = '关闭'
+  btnClose.addEventListener('click', () => {
+    try { overlay.parentNode && overlay.parentNode.removeChild(overlay) } catch {}
+    statsOverlayEl = null
+  })
+  footer.appendChild(btnClose)
+  dlg.appendChild(footer)
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) {
+      try { overlay.parentNode && overlay.parentNode.removeChild(overlay) } catch {}
+      statsOverlayEl = null
+    }
+  })
+
+  document.body.appendChild(overlay)
+  statsOverlayEl = overlay
+}
+
 async function renderPostTable() {
   if (!listBodyEl) return
   let items = sessionState.posts.slice()
   const mode = sessionState.filterMode
+  const q = (sessionState.searchText || '').trim().toLowerCase()
 
   // 时间筛选
   if (mode === 'date') {
@@ -771,6 +1146,19 @@ async function renderPostTable() {
         return String(cats || '').trim() === target
       }
       return false
+    })
+  }
+
+  // 关键字过滤：标题 / 摘要 / 内容中包含
+  if (q) {
+    items = items.filter((p) => {
+      try {
+        const title = String(p.title || '').toLowerCase()
+        const desc = String(p.description || p.content || '').toLowerCase()
+        return title.includes(q) || desc.includes(q)
+      } catch {
+        return false
+      }
     })
   }
 
@@ -1190,6 +1578,17 @@ async function downloadSinglePost(context, post) {
     return fmLines.join('\n')
   }
 
+  function parseDateSafe(raw) {
+    if (!raw) return null
+    try {
+      const d = raw instanceof Date ? raw : new Date(raw)
+      if (!d || isNaN(d.getTime())) return null
+      return d
+    } catch {
+      return null
+    }
+  }
+
   // 发布前的基础元数据校验（保持保守，避免破坏旧行为）
   function validatePublishMeta(meta) {
     const errors = []
@@ -1481,11 +1880,11 @@ async function publishCurrentDocument(context) {
   let slug = String(meta.slug || meta.typechoSlug || '').trim()
   let coverUrl = String(meta.cover || meta.thumbnail || meta.thumb || '').trim()
 
-    let dtRaw = meta.dateCreated || meta.date || meta.typechoUpdatedAt || null
-    let dt = dtRaw ? new Date(dtRaw) : new Date()
-    if (!dt || isNaN(dt.getTime())) dt = new Date()
-  
-    const hasCid = (cid || cid === 0)
+  let dtRaw = meta.dateCreated || meta.date || meta.typechoUpdatedAt || null
+  let dt = dtRaw ? new Date(dtRaw) : new Date()
+  if (!dt || isNaN(dt.getTime())) dt = new Date()
+
+  const hasCid = (cid || cid === 0)
   
     // 发布前弹 JS 窗口：分类 / 状态 / 时间 / slug / 头图
   try {
@@ -1511,6 +1910,43 @@ async function publishCurrentDocument(context) {
       if (uiOpts.cover !== undefined) coverUrl = String(uiOpts.cover || '').trim()
     }
   } catch {}
+
+  // 有远端 ID 时：在真正提交前做一次远端快照，用于简单冲突检测
+  let remoteSnapshot = null
+  if (hasCid) {
+    try {
+      remoteSnapshot = await xmlRpcCall(context, s, 'metaWeblog.getPost', [
+        String(cid),
+        s.username,
+        s.password
+      ])
+    } catch (e) {
+      remoteSnapshot = null
+    }
+    try {
+      const remoteDt = parseDateSafe(
+        remoteSnapshot?.dateCreated ||
+        remoteSnapshot?.date_created ||
+        remoteSnapshot?.mt_modified ||
+        remoteSnapshot?.modified ||
+        remoteSnapshot?.pubDate ||
+        remoteSnapshot?.date ||
+        null
+      )
+      const localDt = parseDateSafe(meta.typechoUpdatedAt || meta.dateCreated || meta.date || null)
+      if (remoteDt && localDt && remoteDt.getTime() - localDt.getTime() > 1000) {
+        const remoteStr = remoteDt.toISOString()
+        const localStr = localDt.toISOString()
+        const ok = await context.ui.confirm(
+          `检测到远端文章可能已被更新：\n\n` +
+          `远端时间：${remoteStr}\n` +
+          `本地记录：${localStr}\n\n` +
+          `继续发布将覆盖远端的修改，是否仍要继续？`
+        )
+        if (!ok) return
+      }
+    } catch {}
+  }
 
   const metaValidationErrors = validatePublishMeta({
     title,
