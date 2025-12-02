@@ -2,6 +2,16 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v0.5.6
+- Added: Official "Typecho Post Manager" extension that uses XML-RPC to fetch posts from Typecho, filter by date/category, and download them as local Markdown files, and it is now listed in the built-in extension marketplace.
+- Added: Typecho Manager now supports creating and publishing posts directly from flyMD, editing slug/cover/custom fields, and lazily loading categories from the remote site on first publish to reduce manual configuration.
+- Added: New `context.htmlToMarkdown` API for extensions, allowing plugins to convert HTML returned by Typecho, WordPress or arbitrary web APIs into Markdown with optional `baseUrl` to resolve relative links.
+- Added: Built-in free Gemini Vision model in the AI Assistant so you can choose "Gemini Vision" under the free provider, with a dedicated "Bohe Gongyi" badge and link when that channel is used.
+- Improved: Error handling for free models — when you hit rate limits or the daily free quota, the assistant now shows clear messages with the reason and suggested wait time instead of blindly retrying 429 responses.
+- Improved: Applied a 1MB size limit to local images used in Vision mode and paste; oversized images are skipped with explicit warnings to avoid overloading requests, and fixed AI plugin docking so hidden windows no longer keep squeezing the editor area.
+- Improved: Outline panel can be detached from the library into its own column, letting you switch between "Library | Outline | Editor" and "Library | Editor | Outline" layouts; when a plugin window docks on the right, the outline automatically shifts left, alongside visual polish to the library/sidebar, scrollbars, status bar and a Linux fix that forces an opaque background to avoid transparent/blank windows on Arch-like distributions.
+- Fixed: Installed local fonts are now re-registered on launch so font selections like "Local: XXX" continue to work correctly after upgrading or restarting.
+
 ## Update v0.5.5
 - Added: AI vision capabilities that let the assistant directly read local images and call vision models for understanding and analysis, including a time-limited free vision model to make it easier to try.
 - Added: New window layout APIs for the extension system, enabling a three-column layout ("library sidebar + AI panel on the left + editor") and dynamic plugin positioning so right-docked and bottom-docked plugin panes avoid overlapping each other.
