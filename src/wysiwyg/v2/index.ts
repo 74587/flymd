@@ -284,6 +284,8 @@ export async function enableWysiwygV2(root: HTMLElement, initialMd: string, onCh
       pm.style.display = 'block'
       pm.style.minHeight = '100%'
       pm.style.width = '100%'
+      // 所见模式内：中英文括号/引号成对补全/跳过/成对删除（仅限 ProseMirror 视图）
+      try { setupBracketPairingForWysiwyg(pm) } catch {}
       // 滚动时刷新覆盖渲染（重定位 Mermaid 预览块）- 已由 Milkdown 插件处理
       // try { pm.addEventListener('scroll', () => { try { scheduleMermaidRender() } catch {} }) } catch {}
       // 鼠标/光标触发 Mermaid 渲染（非实时）- 注释掉按需渲染，改用全局渲染
@@ -480,6 +482,200 @@ function updateFirstLinkLabel(oldLabel: string, newLabel: string, href: string) 
     const tr = st.tr.insertText(newLabel, target.from, target.to).scrollIntoView()
     view.dispatch(tr)
   } catch {}
+}
+
+// 所见模式：中英文括号/引号成对补全 / 跳过右侧 / 成对删除（仅作用于 ProseMirror 视图，不影响源码模式逻辑）
+function setupBracketPairingForWysiwyg(pm: HTMLElement | null) {
+  try {
+    if (!pm) return
+  } catch { return }
+
+  // 仅包含括号/引号类标点，不处理 * / _ / ~ 等 Markdown 语法
+  const OPEN_TO_CLOSE: Record<string, string> = {
+    '(': ')',
+    '[': ']',
+    '{': '}',
+    '"': '"',
+    "'": "'",
+    '（': '）',
+    '【': '】',
+    '《': '》',
+    '「': '」',
+    '『': '』',
+    '“': '”',
+    '‘': '’',
+  }
+  const CLOSERS = new Set<string>(Object.values(OPEN_TO_CLOSE))
+  let prevSelFrom = 0
+  let prevSelTo = 0
+  let prevSelText = ''
+
+  const snapshotSelection = () => {
+    try {
+      const view = _getView()
+      if (!view) return
+      const st = view.state
+      const sel = st.selection
+      if (!(sel instanceof TextSelection)) return
+      prevSelFrom = sel.from >>> 0
+      prevSelTo = sel.to >>> 0
+      if (prevSelFrom < prevSelTo) {
+        prevSelText = st.doc.textBetween(prevSelFrom, prevSelTo, undefined, '\n')
+      } else {
+        prevSelText = ''
+      }
+    } catch {}
+  }
+
+  const handleBeforeInput = (ev: InputEvent) => {
+    try {
+      snapshotSelection()
+      const data = (ev as any).data as string || ''
+      if (!data || data.length !== 1) return
+      // 组合输入阶段全部交给 IME；后续在 input(Composition*) 中统一处理
+      if ((ev as any).isComposing) return
+
+      const ch = data
+      const isOpen = Object.prototype.hasOwnProperty.call(OPEN_TO_CLOSE, ch)
+      const isClose = CLOSERS.has(ch)
+      if (!isOpen && !isClose) return
+
+      const view = _getView()
+      if (!view) return
+      const state = view.state
+      const sel = state.selection
+      if (!(sel instanceof TextSelection)) return
+      const from = sel.from >>> 0
+      const to = sel.to >>> 0
+
+      // 成对/环抱补全：插入 open+close，或用 open/close 环绕选区
+      if (isOpen) {
+        const closeCh = OPEN_TO_CLOSE[ch]
+        ev.preventDefault()
+        try { ev.stopPropagation() } catch {}
+        let tr = state.tr
+        if (from === to) {
+          tr = tr.insertText(ch + closeCh, from, to)
+          tr = tr.setSelection(TextSelection.create(tr.doc, from + ch.length)) as any
+        } else {
+          tr = tr.insertText(ch, from)
+          tr = tr.insertText(closeCh, to + ch.length)
+          const endPos = to + ch.length + closeCh.length
+          tr = tr.setSelection(TextSelection.create(tr.doc, endPos)) as any
+        }
+        view.dispatch(tr)
+        try { view.focus() } catch {}
+        prevSelFrom = 0; prevSelTo = 0; prevSelText = ''
+        return
+      }
+
+      // 右侧已存在相同闭合标点时：仅移动光标跳过，而不重复插入
+      if (isClose && from === to) {
+        const next = state.doc.textBetween(from, from + 1, undefined, '\n')
+        if (next === ch) {
+          ev.preventDefault()
+          try { ev.stopPropagation() } catch {}
+          const tr = state.tr.setSelection(TextSelection.create(state.doc, from + ch.length)) as any
+          view.dispatch(tr)
+          try { view.focus() } catch {}
+        }
+      }
+    } catch {}
+  }
+
+  // 中文输入法等通过组合提交的括号/引号：在 input(Composition*) 阶段补全
+  const handleInput = (ev: InputEvent) => {
+    try {
+      const data = (ev as any).data as string || ''
+      if (!data) return
+      const it = String((ev as any).inputType || '')
+      // 仅处理组合相关提交，避免与普通按键路径重复
+      if (!/Composition/i.test(it)) return
+
+      const ch = data.length > 0 ? data[0] : ''
+      const closeCh = OPEN_TO_CLOSE[ch]
+      if (!closeCh) return
+
+      const view = _getView()
+      if (!view) return
+      const state = view.state
+      const sel = state.selection
+      if (!(sel instanceof TextSelection)) return
+
+      // 组合输入 + 之前存在选区：环抱补全（ch + 选中文本 + closeCh）
+      if (prevSelFrom < prevSelTo && prevSelText) {
+        const from = prevSelFrom >>> 0
+        const to = from + ch.length
+        const seg = state.doc.textBetween(from, to, undefined, '\n')
+        if (seg === ch) {
+          let tr = state.tr.insertText(ch + prevSelText + closeCh, from, to)
+          let endPos = from + ch.length + prevSelText.length + closeCh.length
+          try {
+            const extra = tr.doc.textBetween(endPos, endPos + ch.length + closeCh.length, undefined, '\n')
+            if (extra === (ch + closeCh)) {
+              tr = tr.delete(endPos, endPos + ch.length + closeCh.length)
+            }
+          } catch {}
+          // 成对环抱后，将光标移到闭合符号之后
+          tr = tr.setSelection(TextSelection.create(tr.doc, endPos)) as any
+          view.dispatch(tr)
+          prevSelFrom = 0; prevSelTo = 0; prevSelText = ''
+          try { view.focus() } catch {}
+          return
+        }
+      }
+
+      // 无选区：组合输入后在右侧补全闭合符
+      if (sel.empty) {
+        const pos = sel.from >>> 0
+        if (pos <= 0) return
+        const prev = state.doc.textBetween(pos - 1, pos, undefined, '\n')
+        if (prev !== ch) return
+        const next = state.doc.textBetween(pos, pos + 1, undefined, '\n')
+        if (next === closeCh) return
+        let tr = state.tr.insertText(closeCh, pos, pos)
+        tr = tr.setSelection(TextSelection.create(tr.doc, pos)) as any
+        view.dispatch(tr)
+        try { view.focus() } catch {}
+      }
+    } catch {}
+  }
+
+  const handleKeydown = (ev: KeyboardEvent) => {
+    try {
+      if (ev.key !== 'Backspace') return
+      if (ev.ctrlKey || ev.metaKey || ev.altKey) return
+      // 组合输入阶段不介入
+      if ((ev as any).isComposing) return
+
+      const view = _getView()
+      if (!view) return
+      const state = view.state
+      const sel = state.selection
+      if (!(sel instanceof TextSelection)) return
+      if (!sel.empty) return
+
+      const pos = sel.from >>> 0
+      if (pos === 0) return
+      const prev = state.doc.textBetween(pos - 1, pos, undefined, '\n')
+      const next = state.doc.textBetween(pos, pos + 1, undefined, '\n')
+      if (!prev || !next) return
+      const expectedClose = OPEN_TO_CLOSE[prev]
+      if (!expectedClose || expectedClose !== next) return
+
+      ev.preventDefault()
+      try { ev.stopPropagation() } catch {}
+      let tr = state.tr.delete(pos - 1, pos + 1)
+      const newPos = Math.max(0, pos - 1)
+      tr = tr.setSelection(TextSelection.create(tr.doc, newPos)) as any
+      view.dispatch(tr)
+      try { view.focus() } catch {}
+    } catch {}
+  }
+
+  try { pm.addEventListener('beforeinput', (e) => { try { handleBeforeInput(e as any) } catch {} }, true) } catch {}
+  try { pm.addEventListener('input', (e) => { try { handleInput(e as any) } catch {} }, true) } catch {}
+  try { pm.addEventListener('keydown', (e) => { try { handleKeydown(e as any) } catch {} }, true) } catch {}
 }
 function exitInlineCodeToRight(focusView = true): boolean {
   try {
