@@ -2711,10 +2711,10 @@ async function setWysiwygEnabled(enable: boolean) {
       try { (editor as any).style.paddingBottom = '40px' } catch {}
       restoreScrollPosition(2, 50)  // 带重试机制恢复滚动位置
     }
-    // 更新按钮提示
+    // 更新按钮提示（统一为简单说明，移除无用快捷键提示）
     try {
       const b = document.getElementById('btn-wysiwyg') as HTMLDivElement | null
-      if (b) b.title = (wysiwyg ? '\u9000\u51fa' : '\u5f00\u542f') + '\u6240\u89c1\u6a21\u5f0f (Ctrl+W)\n' + (wysiwygEnterToRenderOnly ? '\u5f53\u524d: \u56de\u8f66\u518d\u6e32\u67d3 (Ctrl+Shift+R \u5207\u6362)' : '\u5f53\u524d: \u5373\u65f6\u6e32\u67d3 (Ctrl+Shift+R \u5207\u6362)')
+      if (b) b.title = (wysiwyg ? '\u9000\u51fa' : '\u5f00\u542f') + '\u6240\u89c1\u6a21\u5f0f (Ctrl+W)'
     } catch {}
     // 触发模式变更事件（专注模式侧栏背景跟随）
     try { window.dispatchEvent(new CustomEvent('flymd:mode:changed', { detail: { wysiwyg } })) } catch {}
@@ -3019,112 +3019,100 @@ function autoNewlineAfterInlineDollarInWysiwyg() {
   } catch {}
 }
 
-// 动态添加"最近文件"菜单项
+// 动态添加菜单栏补充项（库 / 关于 / 语言等）
 const menubar = document.querySelector('.menubar') as HTMLDivElement
 if (menubar) {
-  // 顶级“文件”按钮文案
+  // 顶级“文件”按钮文案统一走 i18n
   const btnOpen0 = document.getElementById('btn-open') as HTMLDivElement | null
   if (btnOpen0) { btnOpen0.textContent = t('menu.file'); btnOpen0.title = t('menu.file') }
-  const recentBtn = document.createElement('div')
-  recentBtn.id = 'btn-recent'
-  recentBtn.className = 'menu-item'
-  recentBtn.title = t('menu.recent')
-  recentBtn.textContent = t('menu.recent')
-  menubar.appendChild(recentBtn)
-  const uplBtn = document.createElement('div')
-  uplBtn.id = 'btn-uploader'
-  uplBtn.className = 'menu-item'
-  uplBtn.title = t('menu.uploader')
-  uplBtn.textContent = t('menu.uploader')
-      menubar.appendChild(uplBtn)
-      // 扩展按钮（如未在首屏模板中渲染，则此处补充）
-      try {
-        const exists = document.getElementById('btn-extensions') as HTMLDivElement | null
-        if (!exists) {
-          const extBtn = document.createElement('div')
-          extBtn.id = 'btn-extensions'
-          extBtn.className = 'menu-item'
-          extBtn.title = t('menu.extensions')
-          extBtn.textContent = t('menu.extensions')
-          menubar.appendChild(extBtn)
-        }
-      } catch {}
-      // 取消单独的“所见”顶栏按钮，改入“模式”菜单
+
+  // 扩展按钮（如未在首屏模板中渲染，则此处补充）
+  try {
+    const exists = document.getElementById('btn-extensions') as HTMLDivElement | null
+    if (!exists) {
+      const extBtn = document.createElement('div')
+      extBtn.id = 'btn-extensions'
+      extBtn.className = 'menu-item'
+      extBtn.title = t('menu.extensions')
+      extBtn.textContent = t('menu.extensions')
+      menubar.appendChild(extBtn)
+    }
+  } catch {}
+
+  // “库”按钮：插入到“文件”按钮左侧
   const libBtn = document.createElement('div')
   libBtn.id = 'btn-library'
   libBtn.className = 'menu-item'
   libBtn.title = t('lib.menu')
   libBtn.textContent = t('lib.menu')
-  // 将“库”按钮插入到“打开”按钮左侧（若获取不到则放到最左）
   const openBtnRef = document.getElementById('btn-open') as HTMLDivElement | null
   if (openBtnRef && openBtnRef.parentElement === menubar) {
     menubar.insertBefore(libBtn, openBtnRef)
   } else {
     menubar.insertBefore(libBtn, menubar.firstChild)
   }
-    // ensure new button is after library button
+
+  // 确保“新建”按钮紧随库按钮之后
   try {
     const newBtnRef = document.getElementById('btn-new') as HTMLDivElement | null
     if (newBtnRef && newBtnRef.parentElement === menubar) {
       menubar.insertBefore(newBtnRef, libBtn.nextSibling)
     }
   } catch {}
-const aboutBtn = document.createElement('div')
+
+  // 关于 / 更新按钮
+  const aboutBtn = document.createElement('div')
   aboutBtn.id = 'btn-about'
   aboutBtn.className = 'menu-item'
   aboutBtn.title = t('menu.about')
-      aboutBtn.textContent = t('menu.about')
-      // 顶层的“模式”按钮已在模板中渲染，这里无需添加
-      // 检查更新按钮
-      const updBtn = document.createElement('div')
-      updBtn.id = 'btn-update'
-      updBtn.className = 'menu-item'
-      updBtn.title = t('menu.update')
-      updBtn.textContent = t('menu.update')
-      menubar.appendChild(updBtn)
-      menubar.appendChild(aboutBtn)
-      const langBtn = document.createElement('div')
-      langBtn.id = 'btn-lang'
-      langBtn.className = 'menu-item'
-      langBtn.title = t('menu.language')
-      langBtn.textContent = '🌍'
-      // 将“扩展/语言/主题”按钮移到窗口最右侧（紧随文件名标签之后，靠右）
-      try {
-        const titlebar = document.querySelector('.titlebar') as HTMLDivElement | null
-        const extBtn = document.getElementById('btn-extensions') as HTMLDivElement | null
-        const themeBtn = document.getElementById('btn-theme') as HTMLDivElement | null
-        const fileNameEl = document.querySelector('.titlebar .filename') as HTMLDivElement | null
-          if (titlebar && extBtn) {
-            try { extBtn.remove() } catch {}
-            if (themeBtn) { try { themeBtn.remove() } catch {} }
-            if (fileNameEl && fileNameEl.parentElement === titlebar) {
-              // 顺序：主题 | 扩展 | 语言
-              // 先插入扩展按钮在文件名之后
-              titlebar.insertBefore(extBtn, fileNameEl.nextSibling)
-              // 在扩展按钮左侧插入主题按钮（紧挨扩展）
-              if (themeBtn) titlebar.insertBefore(themeBtn, extBtn)
-              // 再插入语言图标在扩展按钮之后
-              titlebar.insertBefore(langBtn, extBtn.nextSibling)
-            } else {
-              if (themeBtn) titlebar.appendChild(themeBtn)
-              titlebar.appendChild(extBtn)
-              titlebar.appendChild(langBtn)
-            }
-          } else if (titlebar) {
-            // 兜底：找不到扩展按钮时，将语言图标与主题放在文件名后
-            if (fileNameEl && fileNameEl.parentElement === titlebar) {
-              if (themeBtn) titlebar.insertBefore(themeBtn, fileNameEl.nextSibling)
-              titlebar.insertBefore(langBtn, (themeBtn || fileNameEl).nextSibling)
-            } else {
-              if (themeBtn) titlebar.appendChild(themeBtn)
-              titlebar.appendChild(langBtn)
-            }
-          } else {
-            // 再兜底：仍未获取到 titlebar，则临时放回 menubar 末尾
-            if (themeBtn) menubar.appendChild(themeBtn)
-            menubar.appendChild(langBtn)
-          }
-      } catch {}
+  aboutBtn.textContent = t('menu.about')
+  const updBtn = document.createElement('div')
+  updBtn.id = 'btn-update'
+  updBtn.className = 'menu-item'
+  updBtn.title = t('menu.update')
+  updBtn.textContent = t('menu.update')
+  menubar.appendChild(updBtn)
+  menubar.appendChild(aboutBtn)
+
+  // 语言切换按钮：移动到标题栏右侧（紧随文件名之后）
+  const langBtn = document.createElement('div')
+  langBtn.id = 'btn-lang'
+  langBtn.className = 'menu-item'
+  langBtn.title = t('menu.language')
+  langBtn.textContent = '🌍'
+  try {
+    const titlebar = document.querySelector('.titlebar') as HTMLDivElement | null
+    const extBtn = document.getElementById('btn-extensions') as HTMLDivElement | null
+    const themeBtn = document.getElementById('btn-theme') as HTMLDivElement | null
+    const fileNameEl = document.querySelector('.titlebar .filename') as HTMLDivElement | null
+    if (titlebar && extBtn) {
+      try { extBtn.remove() } catch {}
+      if (themeBtn) { try { themeBtn.remove() } catch {} }
+      if (fileNameEl && fileNameEl.parentElement === titlebar) {
+        // 顺序：主题 | 扩展 | 语言
+        titlebar.insertBefore(extBtn, fileNameEl.nextSibling)
+        if (themeBtn) titlebar.insertBefore(themeBtn, extBtn)
+        titlebar.insertBefore(langBtn, extBtn.nextSibling)
+      } else {
+        if (themeBtn) titlebar.appendChild(themeBtn)
+        titlebar.appendChild(extBtn)
+        titlebar.appendChild(langBtn)
+      }
+    } else if (titlebar) {
+      // 兜底：找不到扩展按钮时，将语言图标与主题放在文件名后
+      if (fileNameEl && fileNameEl.parentElement === titlebar) {
+        if (themeBtn) titlebar.insertBefore(themeBtn, fileNameEl.nextSibling)
+        titlebar.insertBefore(langBtn, (themeBtn || fileNameEl).nextSibling)
+      } else {
+        if (themeBtn) titlebar.appendChild(themeBtn)
+        titlebar.appendChild(langBtn)
+      }
+    } else {
+      // 再兜底：仍未获取到 titlebar，则临时放回 menubar 末尾
+      if (themeBtn) menubar.appendChild(themeBtn)
+      menubar.appendChild(langBtn)
+    }
+  } catch {}
 }
 const containerEl = document.querySelector('.container') as HTMLDivElement
 // Ctrl/Cmd + 滚轮：缩放/放大编辑、预览、所见模式字号；Shift + 滚轮：调整阅读宽度
@@ -8711,12 +8699,15 @@ function showTopMenu(anchor: HTMLElement, items: TopMenuItemSpec[]) {
 function showFileMenu() {
   const anchor = document.getElementById('btn-open') as HTMLDivElement | null
   if (!anchor) return
-  showTopMenu(anchor, [
+  const items: TopMenuItemSpec[] = [
     { label: t('file.new'), accel: 'Ctrl+N', action: () => { void newFile() } },
     { label: t('file.open'), accel: 'Ctrl+O', action: () => { void openFile2() } },
+    // “最近文件”入口移入 文件 菜单
+    { label: t('menu.recent'), accel: 'Ctrl+Shift+R', action: () => { void renderRecentPanel(true) } },
     { label: t('file.save'), accel: 'Ctrl+S', action: () => { void saveFile() } },
     { label: t('file.saveas'), accel: 'Ctrl+Shift+S', action: () => { void saveAs() } },
-  ])
+  ]
+  showTopMenu(anchor, items)
 }
 
 function showModeMenu() {
@@ -10258,7 +10249,12 @@ function bindEvents() {
       setTimeout(() => updateFocusSidebarBg(), 100);
       return
     }
-    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'r') { e.preventDefault(); wysiwygEnterToRenderOnly = !wysiwygEnterToRenderOnly; try { const b = document.getElementById('btn-wysiwyg') as HTMLDivElement | null; if (b) b.title = (wysiwyg ? '\u6240\u89c1\u6a21\u5f0f' : '') + (wysiwygEnterToRenderOnly ? ' - \u56de\u8f66\u518d\u6e32\u67d3' : ' - \u5373\u65f6\u6e32\u67d3') + ' (Ctrl+W)'; } catch {}; return }
+    // Ctrl+Shift+R：打开最近文件面板
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'r') {
+      e.preventDefault()
+      try { await renderRecentPanel(true) } catch {}
+      return
+    }
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'r') {
       e.preventDefault();
       try { e.stopPropagation(); /* 防止编辑器内部再次处理 */ } catch {}
@@ -10890,8 +10886,9 @@ function bindEvents() {
   document.addEventListener('click', (e) => {
     const panel = document.getElementById('recent-panel') as HTMLDivElement
     if (!panel || panel.classList.contains('hidden')) return
-    const btn = document.getElementById('btn-recent')
-    if (btn && !panel.contains(e.target as Node) && e.target !== btn) {
+    const target = e.target as Node | null
+    // 只要点击在面板外部，就关闭最近文件面板
+    if (target && !panel.contains(target)) {
       panel.classList.add('hidden')
     }
   })

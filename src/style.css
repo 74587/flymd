@@ -452,6 +452,7 @@ body.compact-titlebar .window-controls {
   text-overflow: ellipsis;
   letter-spacing: 0.01em;
   transition: color 0.2s ease;
+  visibility: hidden; /* 仅隐藏文本显示，保留结构以兼容依赖逻辑 */
 }
 
 .titlebar .filename:hover {
