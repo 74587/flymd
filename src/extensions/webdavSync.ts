@@ -298,6 +298,40 @@ async function syncLog(msg: string): Promise<void> {
   } catch {}
 }
 
+// HTTP 请求重试：最多 3 次，指数退避 + 抖动
+const MAX_HTTP_RETRIES = 3
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+async function withHttpRetry<T>(label: string, fn: (attempt: number) => Promise<T>): Promise<T> {
+  let lastErr: any = null
+  for (let attempt = 1; attempt <= MAX_HTTP_RETRIES; attempt++) {
+    try {
+      if (attempt > 1) {
+        try { await syncLog(`[retry] ${label} attempt=${attempt}`) } catch {}
+      }
+      const result = await fn(attempt)
+      if (attempt > 1) {
+        try { await syncLog(`[retry-ok] ${label} succeed attempt=${attempt}`) } catch {}
+      }
+      return result
+    } catch (e) {
+      lastErr = e
+      if (attempt >= MAX_HTTP_RETRIES) break
+      const base = 500
+      const backoff = base * (2 ** (attempt - 1))
+      const jitter = Math.random() * backoff * 0.5
+      const delay = backoff + jitter
+      try {
+        await syncLog(`[retry-wait] ${label} failed attempt=${attempt}, nextDelay≈${Math.round(delay)}ms: ` + ((e as any)?.message || e))
+      } catch {}
+      await sleep(delay)
+    }
+  }
+  throw lastErr
+}
 export async function openSyncLog(): Promise<void> {
   try {
     const localDataDir = await appLocalDataDir()
@@ -806,20 +840,24 @@ async function listRemoteDir(baseUrl: string, auth: { username: string; password
   const authStr = btoa(`${auth.username}:${auth.password}`)
   headers['Authorization'] = `Basic ${authStr}`
   let text = ''
-  try {
-    const resp = await http.fetch(url, { method: 'PROPFIND', headers, body })
-    if (resp?.ok === true || (typeof resp.status === 'number' && resp.status >= 200 && resp.status < 300)) {
-      text = typeof resp.text === 'function' ? await resp.text() : (resp.data || '')
-    } else {
-      throw new Error('HTTP ' + (resp?.status || ''))
+
+  await withHttpRetry('[propfind] ' + remotePath, async () => {
+    try {
+      const resp = await http.fetch(url, { method: 'PROPFIND', headers, body })
+      if (resp?.ok === true || (typeof resp.status === 'number' && resp.status >= 200 && resp.status < 300)) {
+        text = typeof resp.text === 'function' ? await resp.text() : (resp.data || '')
+      } else {
+        throw new Error('HTTP ' + (resp?.status || ''))
+      }
+    } catch (e) {
+      // 回退：部分服务可能需要 application/xml + charset
+      const resp = await http.fetch(url, { method: 'PROPFIND', headers: { ...headers, 'Content-Type': 'text/xml; charset=utf-8' }, body })
+      if (resp?.ok === true || (typeof resp.status === 'number' && resp.status >= 200 && resp.status < 300)) {
+        text = typeof resp.text === 'function' ? await resp.text() : (resp.data || '')
+      } else { throw e }
     }
-  } catch (e) {
-    // 回退：部分服务可能需要 application/xml + charset
-    const resp = await http.fetch(url, { method: 'PROPFIND', headers: { ...headers, 'Content-Type': 'text/xml; charset=utf-8' }, body })
-    if (resp?.ok === true || (typeof resp.status === 'number' && resp.status >= 200 && resp.status < 300)) {
-      text = typeof resp.text === 'function' ? await resp.text() : (resp.data || '')
-    } else { throw e }
-  }
+    return true as any
+  })
   const files: { name: string; isDir: boolean; mtime?: number; etag?: string }[] = []
   try {
     const doc = new DOMParser().parseFromString(String(text || ''), 'application/xml')
@@ -896,12 +934,26 @@ async function tryListRemoteInfinity(baseUrl: string, auth: { username: string; 
     const authStr = btoa(`${auth.username}:${auth.password}`)
     headers['Authorization'] = `Basic ${authStr}`
 
-    const resp = await http.fetch(url, { method: 'PROPFIND', headers, body })
-    if (!(resp?.ok === true || (typeof resp.status === 'number' && resp.status >= 200 && resp.status < 300))) {
-      return null  // 服务器不支持
-    }
+    let text = ''
+    const ok = await withHttpRetry('[propfind-infinity] ' + rootPath, async () => {
+      const resp = await http.fetch(url, { method: 'PROPFIND', headers, body })
+      const status = Number((resp as any)?.status || 0)
+      const isOk = resp?.ok === true || (typeof status === 'number' && status >= 200 && status < 300)
+      const isClientError = status >= 400 && status < 500
 
-    const text = typeof resp.text === 'function' ? await resp.text() : (resp.data || '')
+      if (!isOk) {
+        // Depth: infinity 的 4xx（例如 403）通常表示服务器不支持此模式，直接视为“不可用”，不重试
+        if (isClientError) {
+          await syncLog('[propfind-infinity-skip] ' + rootPath + ' status=' + status + ' (treat as unsupported, no retry)')
+          return false as any
+        }
+        throw new Error('HTTP ' + (status || ''))
+      }
+
+      text = typeof (resp as any).text === 'function' ? await (resp as any).text() : ((resp as any).data || '')
+      return true as any
+    }).catch(() => false as any)
+    if (!ok) return null
     const doc = new DOMParser().parseFromString(String(text || ''), 'application/xml')
     const respNodes = Array.from(doc.getElementsByTagNameNS('*','response'))
 
@@ -1002,8 +1054,8 @@ async function listRemoteRecursively(
       }
     }
 
-    // 并发扫描子目录 (每次最多5个)
-    const DIR_CONCURRENCY = 5
+    // 并发扫描子目录 (每次最多8个)
+    const DIR_CONCURRENCY = 8
     for (let i = 0; i < subDirs.length; i += DIR_CONCURRENCY) {
       const batch = subDirs.slice(i, i + DIR_CONCURRENCY)
       await Promise.all(batch.map(d => walk(d.rel)))
@@ -1019,11 +1071,16 @@ async function downloadFile(baseUrl: string, auth: { username: string; password:
   const url = joinUrl(baseUrl, remotePath)
   const authStr = btoa(`${auth.username}:${auth.password}`)
   const headers: Record<string,string> = { Authorization: `Basic ${authStr}` }
-  const resp = await http.fetch(url, { method: 'GET', headers, responseType: (http as any).ResponseType?.Binary })
-  const ok = resp?.ok === true || (typeof resp.status === 'number' && resp.status >= 200 && resp.status < 300)
-  if (!ok) throw new Error('HTTP ' + (resp?.status || ''))
-  const buf: any = (typeof resp.arrayBuffer === 'function') ? await resp.arrayBuffer() : resp.data
-  const u8 = buf instanceof ArrayBuffer ? new Uint8Array(buf) : (buf as Uint8Array)
+  let u8: Uint8Array | null = null
+  await withHttpRetry('[download] ' + remotePath, async () => {
+    const resp = await http.fetch(url, { method: 'GET', headers, responseType: (http as any).ResponseType?.Binary })
+    const ok = resp?.ok === true || (typeof resp.status === 'number' && resp.status >= 200 && resp.status < 300)
+    if (!ok) throw new Error('HTTP ' + (resp?.status || ''))
+    const buf: any = (typeof resp.arrayBuffer === 'function') ? await resp.arrayBuffer() : resp.data
+    u8 = buf instanceof ArrayBuffer ? new Uint8Array(buf) : (buf as Uint8Array)
+    return true as any
+  })
+  if (!u8) throw new Error('download failed without data')
   return u8
 }
 
@@ -1033,9 +1090,12 @@ async function uploadFile(baseUrl: string, auth: { username: string; password: s
   const authStr = btoa(`${auth.username}:${auth.password}`)
   const headers: Record<string,string> = { Authorization: `Basic ${authStr}`, 'Content-Type': 'application/octet-stream' }
   const body = (http as any).Body?.bytes ? (http as any).Body.bytes(data) : data
-  const resp = await http.fetch(url, { method: 'PUT', headers, body })
-  const ok = resp?.ok === true || (typeof resp.status === 'number' && resp.status >= 200 && resp.status < 300)
-  if (!ok) throw new Error('HTTP ' + (resp?.status || ''))
+  await withHttpRetry('[upload] ' + remotePath, async () => {
+    const resp = await http.fetch(url, { method: 'PUT', headers, body })
+    const ok = resp?.ok === true || (typeof resp.status === 'number' && resp.status >= 200 && resp.status < 300)
+    if (!ok) throw new Error('HTTP ' + (resp?.status || ''))
+    return true as any
+  })
 }
 
 async function deleteRemoteFile(baseUrl: string, auth: { username: string; password: string }, remotePath: string): Promise<void> {
@@ -1043,9 +1103,12 @@ async function deleteRemoteFile(baseUrl: string, auth: { username: string; passw
   const url = joinUrl(baseUrl, remotePath)
   const authStr = btoa(`${auth.username}:${auth.password}`)
   const headers: Record<string,string> = { Authorization: `Basic ${authStr}` }
-  const resp = await http.fetch(url, { method: 'DELETE', headers })
-  const ok = resp?.ok === true || (typeof resp.status === 'number' && resp.status >= 200 && resp.status < 300)
-  if (!ok) throw new Error('HTTP ' + (resp?.status || ''))
+  await withHttpRetry('[delete] ' + remotePath, async () => {
+    const resp = await http.fetch(url, { method: 'DELETE', headers })
+    const ok = resp?.ok === true || (typeof resp.status === 'number' && resp.status >= 200 && resp.status < 300)
+    if (!ok) throw new Error('HTTP ' + (resp?.status || ''))
+    return true as any
+  })
 }
 
 // WebDAV 内容加密：使用 AES-GCM + PBKDF2 派生密钥
@@ -1629,7 +1692,7 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
     }
 
     // 并发控制：将任务分组并发执行
-    const CONCURRENCY = 8  // 同时处理8个文件
+    const CONCURRENCY = 10  // 同时处理10个文件
     const processTask = async (act: typeof plan[0]) => {
       if (Date.now() > deadline) {
         await syncLog('[timeout] 超时中断')
@@ -2482,7 +2545,18 @@ async function mkcol(baseUrl: string, auth: { username: string; password: string
   const url = joinUrl(baseUrl, remotePath)
   const authStr = btoa(`${auth.username}:${auth.password}`)
   const headers: Record<string,string> = { Authorization: `Basic ${authStr}`}
-  try { const resp = await (http as any).fetch(url, { method: 'MKCOL', headers }); return Number((resp as any)?.status || 0) } catch { return 0 }
+  try {
+    let status = 0
+    await withHttpRetry('[mkcol] ' + remotePath, async () => {
+      const resp = await (http as any).fetch(url, { method: 'MKCOL', headers })
+      status = Number((resp as any)?.status || 0)
+      // MKCOL 多次调用是幂等的，这里只要能拿到状态码就认为成功一次尝试
+      return true as any
+    })
+    return status
+  } catch {
+    return 0
+  }
 }
 
 async function ensureRemoteDir(baseUrl: string, auth: { username: string; password: string }, remoteDir: string): Promise<void> {
