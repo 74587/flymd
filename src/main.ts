@@ -1954,6 +1954,8 @@ try { applySavedTheme() } catch {}
 try { initThemeUI() } catch {}
 // 初始化专注模式事件
 try { initFocusModeEvents() } catch {}
+// 初始化窗口拖拽（为 mac / Linux 上的紧凑标题栏补齐拖动支持）
+try { initWindowDrag() } catch {}
 // 恢复专注模式状态（需要等 store 初始化后执行，见下方 store 初始化处）
 
 const editor = document.getElementById('editor') as HTMLTextAreaElement
@@ -7065,6 +7067,35 @@ function initFocusModeEvents() {
       if (enabled !== wysiwyg) {
         await setWysiwygEnabled(enabled)
       }
+    } catch {}
+  })
+}
+// 窗口拖拽初始化：为 mac / Linux 上的紧凑标题栏补齐拖动支持
+function initWindowDrag() {
+  const titlebar = document.querySelector('.titlebar') as HTMLElement | null
+  if (!titlebar) return
+
+  const platform = (navigator.platform || '').toLowerCase()
+  const isMac = platform.includes('mac')
+  const isLinux = platform.includes('linux')
+  // Windows 上原生 + -webkit-app-region 已足够，这里只为 mac/Linux 打补丁
+  if (!isMac && !isLinux) return
+
+  const shouldIgnoreTarget = (target: EventTarget | null): boolean => {
+    const el = target as HTMLElement | null
+    if (!el) return false
+    return !!el.closest('.window-controls, .menu-item, button, a, input, textarea, [data-tauri-drag-ignore]')
+  }
+
+  titlebar.addEventListener('mousedown', (ev: MouseEvent) => {
+    if (ev.button !== 0) return
+    // 便签锁定或未开启紧凑/专注标题栏时，不处理拖动
+    if (stickyNoteLocked) return
+    if (!(compactTitlebar || focusMode || stickyNoteMode)) return
+    if (shouldIgnoreTarget(ev.target)) return
+    try {
+      const win = getCurrentWindow()
+      void win.startDragging()
     } catch {}
   })
 }
