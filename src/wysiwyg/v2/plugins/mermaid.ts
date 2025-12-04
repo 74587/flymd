@@ -144,6 +144,8 @@ class MermaidNodeView implements NodeView {
   private view: EditorView
   private getPos: () => number | undefined
   private toolbar: HTMLElement
+  private isEditing: boolean = false  // 编辑模式标志，编辑时跳过渲染
+  private justEnteredEdit: number = 0  // 防止双击后 clickOutside 立即关闭
 
   constructor(node: Node, view: EditorView, getPos: () => number | undefined) {
     console.log('[Mermaid Plugin] 创建 NodeView, language:', node.attrs.language)
@@ -211,6 +213,7 @@ class MermaidNodeView implements NodeView {
     // 按 Escape 键退出源码编辑模式
     const exitEditMode = () => {
       console.log('[Mermaid Plugin] 退出源码编辑模式')
+      this.isEditing = false  // 标记退出编辑模式
       this.preWrapper.style.display = 'none'
       this.chartContainer.style.display = 'block'
       this.toolbar.style.display = 'none'
@@ -236,9 +239,31 @@ class MermaidNodeView implements NodeView {
     // 初始渲染：空内容时自动进入编辑模式
     const code = this.node.textContent
     if (!code || !code.trim()) {
-      // 延迟进入编辑模式，确保 DOM 已挂载
+      // 空内容：直接设置编辑模式状态，避免显示"渲染中..."
+      this.isEditing = true
+      this.justEnteredEdit = Date.now()
+      this.chartContainer.style.display = 'none'
+      this.preWrapper.style.display = 'block'
+      const dark = isDarkMode()
+      this.preWrapper.style.border = dark ? '1px solid #3c3c3c' : '1px solid #ccc'
+      this.preWrapper.style.padding = '8px'
+      this.preWrapper.style.borderRadius = '4px'
+      this.preWrapper.style.background = dark ? '#1e1e1e' : '#fff'
+      this.preWrapper.style.color = dark ? '#d4d4d4' : '#1e1e1e'
+      this.toolbar.style.display = 'block'
+      // 延迟聚焦，确保 DOM 已挂载
       requestAnimationFrame(() => {
-        this.enterEditMode()
+        try {
+          const range = document.createRange()
+          const sel = window.getSelection()
+          if (this.contentDOM && sel) {
+            range.selectNodeContents(this.contentDOM)
+            range.collapse(false)
+            sel.removeAllRanges()
+            sel.addRange(range)
+            ;(this.contentDOM as HTMLElement).focus()
+          }
+        } catch {}
       })
     } else {
       this.renderChart()
@@ -247,6 +272,8 @@ class MermaidNodeView implements NodeView {
 
   private enterEditMode() {
     console.log('[Mermaid Plugin] 进入源代码编辑模式')
+    this.isEditing = true  // 标记进入编辑模式
+    this.justEnteredEdit = Date.now()  // 记录进入时间，防止 clickOutside 立即关闭
     // 显示源代码，隐藏图表
     this.preWrapper.style.display = 'block'
     // 根据夜间模式设置样式
@@ -295,17 +322,15 @@ class MermaidNodeView implements NodeView {
   }
 
   update(node: Node) {
-    console.log('[Mermaid Plugin] update 被调用')
+    console.log('[Mermaid Plugin] update 被调用, isEditing:', this.isEditing)
     if (node.type !== this.node.type) return false
-
-    const oldCode = this.node.textContent
-    const newCode = node.textContent
 
     this.node = node
 
-    if (oldCode !== newCode) {
-      console.log('[Mermaid Plugin] 代码变化，重新渲染')
-      this.renderChart()
+    // 编辑模式下不渲染，等退出编辑模式后再渲染
+    if (this.isEditing) {
+      console.log('[Mermaid Plugin] 编辑模式中，跳过渲染')
+      return true
     }
 
     return true
@@ -320,9 +345,13 @@ class MermaidNodeView implements NodeView {
   }
 
   private handleClickOutside = (e: Event) => {
+    // 防止刚进入编辑模式就被关闭（双击事件后的 click 事件）
+    if (Date.now() - this.justEnteredEdit < 500) return
+
     if (this.preWrapper.style.display !== 'none') {
       const target = e.target as HTMLElement
       if (!this.dom.contains(target)) {
+        this.isEditing = false  // 标记退出编辑模式
         this.preWrapper.style.display = 'none'
         this.chartContainer.style.display = 'block'
         this.toolbar.style.display = 'none'
@@ -333,8 +362,21 @@ class MermaidNodeView implements NodeView {
     }
   }
 
-  ignoreMutation() {
-    return true
+  ignoreMutation(mutation: any) {
+    // 忽略图表容器的任何变化
+    if (mutation.target === this.chartContainer || this.chartContainer.contains(mutation.target as globalThis.Node)) {
+      return true
+    }
+    // 忽略工具栏的任何变化
+    if (mutation.target === this.toolbar || this.toolbar.contains(mutation.target as globalThis.Node)) {
+      return true
+    }
+    // 忽略 preWrapper 的样式/属性变化（防止切换编辑模式时闪烁）
+    if (mutation.target === this.preWrapper && mutation.type === 'attributes') {
+      return true
+    }
+    // contentDOM (代码编辑区) 的内容变化需要通知 ProseMirror 以同步到文档
+    return false
   }
 
   private deleteSelf() {
