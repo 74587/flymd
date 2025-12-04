@@ -741,6 +741,27 @@ body.compact-titlebar .window-btn.window-close:hover {
 #md-wysiwyg-root .overlay-host .ov-mermaid > div,
 #md-wysiwyg-root .overlay-host .ov-katex > div,
 #md-wysiwyg-root .overlay-host .ov-codecopy > .code-copy { pointer-events: auto; }
+/* 所见模式：隔离 mermaid DOM 子树，避免全局段落/排版样式影响节点标签，导致中文最后一个字被裁剪 */
+#md-wysiwyg-root .mermaid-chart-display foreignObject,
+#md-wysiwyg-root .ov-mermaid .mmd-figure foreignObject {
+  overflow: visible;
+}
+#md-wysiwyg-root .mermaid-chart-display p,
+#md-wysiwyg-root .ov-mermaid .mmd-figure p {
+  margin: 0;
+  padding: 0;
+  text-indent: 0;
+  text-align: center;
+  text-justify: auto;
+}
+/* 所见模式：强制 mermaid 标签水平排版，禁止竖排/自动换行，保持与阅读模式一致 */
+#md-wysiwyg-root .mermaid-chart-display,
+#md-wysiwyg-root .mermaid-chart-display * ,
+#md-wysiwyg-root .ov-mermaid .mmd-figure,
+#md-wysiwyg-root .ov-mermaid .mmd-figure * {
+  writing-mode: horizontal-tb !important;
+  white-space: nowrap !important;
+}
 /* 保证所见 V2 的滚动容器占满并可滚动（唯一滚动宿主，消除双滚动条） */
 #md-wysiwyg-root .scrollView {
   height: 100%;
