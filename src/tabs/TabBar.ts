@@ -96,7 +96,17 @@ export class TabBar {
     newTabBtn.title = '新建标签 (Ctrl+T)'
     newTabBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>'
     newTabBtn.addEventListener('click', () => {
-      this.tabManager.createNewTab()
+      // 优先走全局的 newFile 钩子，这样行为与 Ctrl+T 保持一致：
+      // - 触发原始 newFile 逻辑（预览刷新等）
+      // - 经过 tabs/integration 中的 hookNewFile，创建并激活新标签
+      const flymd = (window as any)
+      const newFileFn = flymd?.flymdNewFile as (() => Promise<void>) | undefined
+      if (typeof newFileFn === 'function') {
+        void newFileFn()
+      } else {
+        // 退化路径：在极端情况下（未初始化标签系统）仍然保证能新建标签
+        this.tabManager.createNewTab()
+      }
     })
     this.tabsContainer.appendChild(newTabBtn)
   }
