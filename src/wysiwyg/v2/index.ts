@@ -510,6 +510,7 @@ function setupBracketPairingForWysiwyg(pm: HTMLElement | null) {
   let prevSelFrom = 0
   let prevSelTo = 0
   let prevSelText = ''
+  let _lastWrapTs = 0  // 记录上次环抱补全的时间戳，用于防抖
 
   const snapshotSelection = () => {
     try {
@@ -530,6 +531,8 @@ function setupBracketPairingForWysiwyg(pm: HTMLElement | null) {
 
   const handleBeforeInput = (ev: InputEvent) => {
     try {
+      // 防抖：如果刚刚执行过环抱补全，跳过后续的 beforeinput 事件
+      if (Date.now() - _lastWrapTs < 100) return
       snapshotSelection()
       const data = (ev as any).data as string || ''
       if (!data || data.length !== 1) return
@@ -621,6 +624,7 @@ function setupBracketPairingForWysiwyg(pm: HTMLElement | null) {
           tr = tr.setSelection(TextSelection.create(tr.doc, endPos)) as any
           view.dispatch(tr)
           prevSelFrom = 0; prevSelTo = 0; prevSelText = ''
+          _lastWrapTs = Date.now()  // 记录环抱补全时间，用于防抖
           try { view.focus() } catch {}
           return
         }
