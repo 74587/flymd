@@ -59,6 +59,7 @@ import type { InstallableItem } from './extensions/market'
 import { listDirOnce, type LibEntry } from './core/libraryFs'
 import { normSep, isInside, ensureDir, moveFileSafe, renameFileSafe } from './core/fsSafe'
 import { getLibrarySort, setLibrarySort, type LibSortMode } from './core/librarySort'
+import { createCustomTitleBar, removeCustomTitleBar, applyWindowDecorationsCore } from './modes/focusMode'
 import {
   type StickyNoteColor,
   type StickyNoteReminderMap,
@@ -6455,134 +6456,6 @@ async function getLibrarySide(): Promise<LibrarySide> {
 // ========== 专注模式（Focus Mode）==========
 // 隐藏顶栏，鼠标移到顶部边缘时自动显示
 
-// 创建自定义标题栏控件
-function createCustomTitleBar() {
-  // 如果已存在，先移除
-  removeCustomTitleBar()
-
-  // 创建容器
-  const titleBar = document.createElement('div')
-  titleBar.id = 'custom-titlebar'
-  titleBar.className = 'custom-titlebar'
-
-  // 创建拖动区域
-  const dragRegion = document.createElement('div')
-  dragRegion.className = 'custom-titlebar-drag'
-  dragRegion.setAttribute('data-tauri-drag-region', '')
-
-  // 创建控制按钮容器
-  const controls = document.createElement('div')
-  controls.className = 'custom-titlebar-controls'
-
-  // 退出专注模式按钮
-  const exitFocusBtn = document.createElement('button')
-  exitFocusBtn.className = 'custom-titlebar-btn custom-titlebar-exit-focus'
-  exitFocusBtn.innerHTML = '&lt;/&gt;'
-  exitFocusBtn.title = '退出专注模式'
-  exitFocusBtn.addEventListener('click', async () => {
-    try {
-      await toggleFocusMode(false)
-    } catch (err) {
-      console.error('退出专注模式失败:', err)
-    }
-  })
-
-  // 分隔线
-  const separator = document.createElement('span')
-  separator.className = 'custom-titlebar-separator'
-
-  // 最小化按钮
-  const minBtn = document.createElement('button')
-  minBtn.className = 'custom-titlebar-btn custom-titlebar-minimize'
-  minBtn.innerHTML = '－'
-  minBtn.title = '最小化'
-  minBtn.addEventListener('click', async () => {
-    try {
-      await getCurrentWindow().minimize()
-    } catch (err) {
-      console.error('最小化失败:', err)
-    }
-  })
-
-  // 最大化/还原按钮
-  const maxBtn = document.createElement('button')
-  maxBtn.className = 'custom-titlebar-btn custom-titlebar-maximize'
-  maxBtn.innerHTML = '＋'
-  maxBtn.title = '最大化'
-  maxBtn.addEventListener('click', async () => {
-    try {
-      const win = getCurrentWindow()
-      const isMaximized = await win.isMaximized()
-      if (isMaximized) {
-        await win.unmaximize()
-        maxBtn.innerHTML = '＋'
-        maxBtn.title = '最大化'
-      } else {
-        await win.maximize()
-        maxBtn.innerHTML = '□'
-        maxBtn.title = '还原'
-      }
-    } catch (err) {
-      console.error('最大化/还原失败:', err)
-    }
-  })
-
-  // 关闭按钮
-  const closeBtn = document.createElement('button')
-  closeBtn.className = 'custom-titlebar-btn custom-titlebar-close'
-  closeBtn.innerHTML = '×'
-  closeBtn.title = '关闭'
-  closeBtn.addEventListener('click', async () => {
-    try {
-      // 触发正常的关闭流程（会检查是否需要保存）
-      const win = getCurrentWindow()
-      await win.close()
-    } catch (err) {
-      console.error('关闭窗口失败:', err)
-    }
-  })
-
-  // 组装元素
-  controls.appendChild(exitFocusBtn)
-  controls.appendChild(separator)
-  controls.appendChild(minBtn)
-  controls.appendChild(maxBtn)
-  controls.appendChild(closeBtn)
-  titleBar.appendChild(dragRegion)
-  titleBar.appendChild(controls)
-
-  // 添加到页面顶部
-  document.body.insertBefore(titleBar, document.body.firstChild)
-
-  // 添加标记类
-  document.body.classList.add('custom-titlebar-active')
-  syncCustomTitlebarPlacement()
-}
-
-// 移除自定义标题栏
-function removeCustomTitleBar() {
-  const titleBar = document.getElementById('custom-titlebar')
-  if (titleBar) {
-    titleBar.remove()
-  }
-
-  // 移除标记类
-  document.body.classList.remove('custom-titlebar-active')
-}
-
-// 根据当前状态统一更新窗口是否显示原生标题栏
-async function applyWindowDecorations(): Promise<void> {
-  try {
-    const win = getCurrentWindow()
-    const hideNative = focusMode || compactTitlebar
-    await win.setDecorations(!hideNative)
-    // 同步更新 body class，用于 CSS 判断是否显示自定义窗口控制按钮
-    document.body.classList.toggle('no-native-decorations', hideNative)
-  } catch (err) {
-    console.warn('切换窗口装饰失败:', err)
-  }
-}
-
 async function toggleFocusMode(enabled?: boolean) {
   focusMode = enabled !== undefined ? enabled : !focusMode
   document.body.classList.toggle('focus-mode', focusMode)
@@ -6590,11 +6463,15 @@ async function toggleFocusMode(enabled?: boolean) {
   // 专注模式：启用自定义标题栏；普通模式：移除，仅保留紧凑标题栏按钮
   try {
     if (focusMode) {
-      createCustomTitleBar()
+      createCustomTitleBar({
+        getCurrentWindow,
+        onExitFocus: () => toggleFocusMode(false),
+      })
     } else {
       removeCustomTitleBar()
     }
-    await applyWindowDecorations()
+    await applyWindowDecorationsCore(getCurrentWindow, focusMode, compactTitlebar)
+    try { syncCustomTitlebarPlacement() } catch {}
   } catch {}
 
   // 如果退出专注模式，确保 titlebar 可见
@@ -6633,7 +6510,7 @@ async function setCompactTitlebar(enabled: boolean, persist = true): Promise<voi
       await store.save()
     } catch {}
   }
-  try { await applyWindowDecorations() } catch {}
+  try { await applyWindowDecorationsCore(getCurrentWindow, focusMode, compactTitlebar) } catch {}
 }
 
 // 暴露给主题面板调用
@@ -7793,7 +7670,10 @@ async function resetFocusModeDecorations(): Promise<void> {
     focusMode = false
     document.body.classList.remove('focus-mode')
     try { removeCustomTitleBar() } catch {}
-    try { await applyWindowDecorations() } catch {}
+    try {
+      await applyWindowDecorationsCore(getCurrentWindow, focusMode, compactTitlebar)
+      try { syncCustomTitlebarPlacement() } catch {}
+    } catch {}
   } catch {}
 }
 
