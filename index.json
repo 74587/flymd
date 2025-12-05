@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2025-11-23T12:00:00Z",
+  "updatedAt": "2025-12-05T12:00:00Z",
   "ttlSeconds": 3600,
   "items": [
     {
@@ -46,6 +46,18 @@
       "id": "batch-pdf",
       "install": {
         "ref": "https://raw.githubusercontent.com/flyhunterl/flymd/main/public/plugins/batch-pdf/manifest.json",
+        "type": "manifest"
+      }
+    },
+    {
+      "homepage": "https://github.com/flyhunterl/flymd",
+      "name": "PDF 高精度解析",
+      "description": "使用大模型高精度识别解析 PDF 为 Markdown 或 docx，支持手写、布局、公式和表格识别。",
+      "author": "flyMD",
+      "id": "pdf2doc",
+      "featured": true,
+      "install": {
+        "ref": "https://raw.githubusercontent.com/flyhunterl/flymd/main/public/plugins/pdf2doc/manifest.json",
         "type": "manifest"
       }
     },

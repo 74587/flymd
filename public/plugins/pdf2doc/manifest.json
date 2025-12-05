@@ -1,0 +1,10 @@
+{
+  "id": "pdf2doc",
+  "name": "PDF 高精度解析",
+  "version": "0.1.0",
+  "author": "flyMD",
+  "description": "使用大模型高精度识别解析PDF为Markdown或Docx。支持识别手写、布局还原（仅MD）、公式识别、表格识别",
+  "main": "main.js",
+  "minHostVersion": "0.3.5"
+}
+
