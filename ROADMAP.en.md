@@ -2,6 +2,17 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v0.6.3
+- Added: Published the official “MinerU PDF/Image Parser” extension, which uses the MinerU API to structurally parse PDFs and images, providing an alternative pipeline for complex scans and mixed image+text documents.
+- Added: Published the “Send to Blinko” extension, adding a context-menu entry to send the current content to Blinko in one click.
+- Improved: Upgraded the “PDF & Image High-Precision Parser” extension to support direct image parsing and one-click PDF translation, making it more effective on handwritten, complex-layout and multi-language documents.
+- Improved: Updated the AI assistant extension and its model list, removing support for the Qwen3-Omni model.
+- Improved: Removed the logic that force-enables dark theme when the OS is in dark mode; theme light/dark now strictly follows flyMD’s own setting so users have full control regardless of system appearance.
+- Improved: Library sidebar now forcibly disables background grid patterns and always uses a solid background, keeping document lists readable under all themes.
+- Fixed: Incorrect title extraction in WYSIWYG mode that could cause the window title to diverge from the actual document title.
+- Fixed: The xxtui todo-push extension now preserves the original Markdown text when sending tasks and reminders instead of losing formatting.
+- Refactored: Split the file library, todo mode, focus mode, sticky notes, plugin host & settings panels, image-hosting configuration, context menus, update window and more into dedicated runtime/UI modules, consolidating core capabilities into reusable extension-style building blocks that reduce coupling and prepare for a richer extension ecosystem.
+
 ## Update v0.6.2
 - Added: Published the official “PDF High-Precision Parser” extension powered by large models, which converts PDFs into Markdown or docx with better layout preservation and support for handwriting, formulas and tables, including one-click “To MD / To Docx” actions for the currently opened PDF.
 - Added: Extension runtime now exposes `getCurrentFilePath` and `readFileBinary` APIs so plugins can read the current document as raw bytes by absolute path, enabling scenarios such as PDF parsing and image processing.
