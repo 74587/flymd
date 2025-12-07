@@ -4,6 +4,6 @@
   "version": "0.1.0",
   "author": "flyMD",
   "description": "为当前库和文档提供 Git 快照与历史查看侧栏。",
-  "main": "main.js"
+  "main": "main.js",
+  "minHostVersion": "0.6.7"
 }
-

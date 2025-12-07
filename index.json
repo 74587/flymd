@@ -153,6 +153,17 @@
         "ref": "Vita0519/AI-Copywriting-All-Rounder@main",
         "type": "github"
       }
+    },
+    {
+      "homepage": "https://github.com/flyhunterl/flymd",
+      "name": "Git 版本管理",
+      "description": "为当前库和文档提供 Git 快照与历史查看侧栏，并支持一键回滚到指定版本。",
+      "author": "flyMD",
+      "id": "git-history",
+      "install": {
+        "ref": "https://raw.githubusercontent.com/flyhunterl/flymd/main/public/plugins/git-history/manifest.json",
+        "type": "manifest"
+      }
     }
   ]
 }
