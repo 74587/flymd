@@ -21,6 +21,65 @@ fn init_linux_render_env() {
   }
 }
 
+// 判定是否为受支持的文档扩展名（md/markdown/txt/pdf），并确保路径存在
+fn is_supported_doc_path(path: &std::path::Path) -> bool {
+  use std::path::Path;
+  let p: &Path = path;
+  if !p.exists() {
+    return false;
+  }
+  match p.extension().and_then(|s| s.to_str()).map(|s| s.to_ascii_lowercase()) {
+    Some(ext) => ext == "md" || ext == "markdown" || ext == "txt" || ext == "pdf",
+    None => false,
+  }
+}
+
+// 统一的“打开方式/默认程序”事件分发：写入 PendingOpenPath，并向前端发送 open-file 事件
+fn dispatch_open_file_event<R: tauri::Runtime>(app: &tauri::AppHandle<R>, path: &std::path::Path) {
+  if !is_supported_doc_path(path) {
+    return;
+  }
+  if let Some(win) = app.get_webview_window("main") {
+    let path_str = path.to_string_lossy().to_string();
+    // 同时把路径写入共享状态，前端可在启动后主动拉取
+    if let Some(state) = app.try_state::<PendingOpenPath>() {
+      if let Ok(mut slot) = state.0.lock() {
+        *slot = Some(path_str.clone());
+      }
+    }
+    // 延迟发送事件，确保渲染侧事件监听已注册
+    let win_clone = win.clone();
+    std::thread::spawn(move || {
+      std::thread::sleep(std::time::Duration::from_millis(500));
+      let _ = win_clone.emit("open-file", path_str);
+      let _ = win_clone.set_focus();
+    });
+  }
+}
+
+// macOS：通过 RunEvent::Opened 捕获 Finder/Launch Services 传入的文件 URL，并复用统一分发逻辑
+#[cfg(target_os = "macos")]
+fn init_macos_open_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+  use tauri::plugin::{Builder as PluginBuilder, TauriPlugin};
+  use tauri::RunEvent;
+
+  PluginBuilder::new("macos-open-handler")
+    .on_event(|app, event| {
+      if let RunEvent::Opened { urls } = event {
+        for url in urls {
+          // 仅处理 file:// URL，其它协议（如自定义 URL Scheme）暂不介入
+          if url.scheme() != "file" {
+            continue;
+          }
+          if let Ok(path) = url.to_file_path() {
+            dispatch_open_file_event(app, &path);
+          }
+        }
+      }
+    })
+    .build()
+}
+
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -305,14 +364,19 @@ fn main() {
   #[cfg(target_os = "linux")]
   init_linux_render_env();
 
-  tauri::Builder::default()
+  let builder = tauri::Builder::default()
     .manage(PendingOpenPath::default())
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_fs::init())
     .plugin(tauri_plugin_store::Builder::default().build())
     .plugin(tauri_plugin_opener::init())
     .plugin(tauri_plugin_http::init())
-    .plugin(tauri_plugin_window_state::Builder::default().build())
+    .plugin(tauri_plugin_window_state::Builder::default().build());
+
+  #[cfg(target_os = "macos")]
+  let builder = builder.plugin(init_macos_open_plugin());
+
+  let builder = builder
     .invoke_handler(tauri::generate_handler![
       upload_to_s3,
       presign_put,
@@ -347,29 +411,10 @@ fn main() {
       {
         use std::env;
         use std::path::PathBuf;
-        use std::time::Duration;
-        if let Some(win) = app.get_webview_window("main") {
-          let args: Vec<PathBuf> = env::args_os().skip(1).map(PathBuf::from).collect();
-          if let Some(p) = args.into_iter().find(|p| {
-            if !p.exists() { return false; }
-            match p.extension().and_then(|s| s.to_str()).map(|s| s.to_ascii_lowercase()) {
-              Some(ext) => ext == "md" || ext == "markdown" || ext == "txt" || ext == "pdf",
-              None => false,
-            }
-          }) {
-            // 延迟发送事件，确保渲染侧事件监听已注册
-            let win_clone = win.clone();
-            let path = p.to_string_lossy().to_string();
-            // 同时把路径写入共享状态，前端可在启动后主动拉取
-            if let Some(state) = app.try_state::<PendingOpenPath>() {
-              if let Ok(mut slot) = state.0.lock() { *slot = Some(path.clone()); }
-            }
-            std::thread::spawn(move || {
-              std::thread::sleep(Duration::from_millis(500));
-              let _ = win_clone.emit("open-file", path);
-              let _ = win_clone.set_focus();
-            });
-          }
+        let args: Vec<PathBuf> = env::args_os().skip(1).map(PathBuf::from).collect();
+        if let Some(p) = args.into_iter().find(|p| crate::is_supported_doc_path(p)) {
+          let app_handle = app.handle();
+          dispatch_open_file_event(&app_handle, &p);
         }
       }
       // macOS：Finder 通过“打开方式/双击”传入的文件参数处理
@@ -377,27 +422,10 @@ fn main() {
       {
         use std::env;
         use std::path::PathBuf;
-        use std::time::Duration;
-        if let Some(win) = app.get_webview_window("main") {
-          let args: Vec<PathBuf> = env::args_os().skip(1).map(PathBuf::from).collect();
-          if let Some(p) = args.into_iter().find(|p| {
-            if !p.exists() { return false; }
-            match p.extension().and_then(|s| s.to_str()).map(|s| s.to_ascii_lowercase()) {
-              Some(ext) => ext == "md" || ext == "markdown" || ext == "txt" || ext == "pdf",
-              None => false,
-            }
-          }) {
-            let win_clone = win.clone();
-            let path = p.to_string_lossy().to_string();
-            if let Some(state) = app.try_state::<PendingOpenPath>() {
-              if let Ok(mut slot) = state.0.lock() { *slot = Some(path.clone()); }
-            }
-            std::thread::spawn(move || {
-              std::thread::sleep(Duration::from_millis(500));
-              let _ = win_clone.emit("open-file", path);
-              let _ = win_clone.set_focus();
-            });
-          }
+        let args: Vec<PathBuf> = env::args_os().skip(1).map(PathBuf::from).collect();
+        if let Some(p) = args.into_iter().find(|p| crate::is_supported_doc_path(p)) {
+          let app_handle = app.handle();
+          dispatch_open_file_event(&app_handle, &p);
         }
       }
       // 其它初始化逻辑
@@ -419,7 +447,9 @@ fn main() {
         }
       }
       Ok(())
-    })
+    });
+
+  builder
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }
