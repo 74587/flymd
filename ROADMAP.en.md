@@ -2,6 +2,13 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v0.6.8
+- Added: A “Paste as plain text” entry in the context menu so you can insert stripped text in any mode without bringing over messy styles from web pages or rich-text editors.
+- Improved: The source-mode paste conversion pipeline for HTML → Markdown, reducing extra blank lines, broken lists and other formatting glitches so pasted content stays closer to the original semantics.
+- Added: Published the “Word/Excel Importer” extension that parses common Office documents and imports them as Markdown into your current library, making it easier to consolidate scattered materials.
+- Improved: Moved the “Config backup” and “Portable mode” switches into the File menu, simplifying the context menu and keeping frequent actions under a clearer entry point.
+- Fixed: A portable-mode issue that could lead to the document library path being lost or unintentionally cleared, improving safety when running from USB drives or portable bundles.
+
 ## Update v0.6.7
 - Added: Markdown footnote syntax support (`[^1]` / `[^name]`) so both source and reading modes render proper footnote sections, keeping annotations structured in long documents.
 - Improved: Footnote markers in reading mode now show a tooltip with the full footnote content near the reference, reducing scroll back-and-forth when looking up notes.
