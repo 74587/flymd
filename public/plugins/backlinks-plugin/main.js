@@ -26,6 +26,17 @@ let _panelHandle = null
 const _aiRelatedCache = new Map()
 // 文档内容签名缓存：normPath -> hash，用于增量更新当前文档索引
 const _docHashCache = new Map()
+// 内联链接补全状态与编辑器监听
+let _linkSuggestBox = null
+let _linkSuggestState = {
+  active: false,
+  from: 0,
+  to: 0,
+  items: [],
+  index: 0,
+}
+let _editorKeydownHandler = null
+let _editorKeyupHandler = null
 
 // 规范化路径：统一为 / 分隔，去掉多余空白，避免 Windows 与 Tauri 不同风格导致匹配失败
 function normalizePath(path) {
@@ -60,6 +71,39 @@ function hashText(str) {
   } catch {
     return ''
   }
+}
+
+// 创建/获取链接补全下拉框 DOM
+function ensureLinkSuggestBox() {
+  if (_linkSuggestBox) return _linkSuggestBox
+  const box = document.createElement('div')
+  box.id = 'backlinks-link-suggest'
+  box.style.position = 'absolute'
+  // 提示框层级要压过库侧栏/预览浮层
+  box.style.zIndex = '99999'
+  box.style.minWidth = '220px'
+  box.style.maxHeight = '260px'
+  box.style.overflowY = 'auto'
+  box.style.background = 'var(--bg, #fff)'
+  box.style.border = '1px solid rgba(0,0,0,0.15)'
+  box.style.borderRadius = '4px'
+  box.style.boxShadow = '0 4px 12px rgba(0,0,0,0.12)'
+  box.style.fontSize = '13px'
+  box.style.display = 'none'
+
+  const container = document.querySelector('.container')
+  if (container) container.appendChild(box)
+  else document.body.appendChild(box)
+
+  _linkSuggestBox = box
+  return box
+}
+
+function hideLinkSuggest() {
+  _linkSuggestState.active = false
+  _linkSuggestState.items = []
+  const box = _linkSuggestBox
+  if (box) box.style.display = 'none'
 }
 
 // 将 Map/Set 转为可序列化对象，用于 storage
@@ -663,6 +707,264 @@ function updateIndexForCurrentDocIfNeeded(context) {
   }
 }
 
+// 绑定源码编辑器事件，实现 [[标题]] 自动补全
+function bindEditorForLinkSuggest(context) {
+  try {
+    const ed =
+      document.getElementById('editor') ||
+      document.querySelector('textarea.editor')
+    if (!ed) return
+
+    const editor = ed
+    const box = ensureLinkSuggestBox()
+
+    _editorKeydownHandler = (e) => {
+      if (!_linkSuggestState.active) return
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter' || e.key === 'Tab' || e.key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
+      } else {
+        return
+      }
+
+      if (!_linkSuggestState.items.length) {
+        hideLinkSuggest()
+        return
+      }
+
+      if (e.key === 'ArrowDown') {
+        _linkSuggestState.index =
+          (_linkSuggestState.index + 1) % _linkSuggestState.items.length
+        renderLinkSuggestBox(editor)
+      } else if (e.key === 'ArrowUp') {
+        _linkSuggestState.index =
+          (_linkSuggestState.index - 1 + _linkSuggestState.items.length) %
+          _linkSuggestState.items.length
+        renderLinkSuggestBox(editor)
+      } else if (e.key === 'Enter' || e.key === 'Tab') {
+        applyLinkSuggestion(context)
+      } else if (e.key === 'Escape') {
+        hideLinkSuggest()
+      }
+    }
+
+    _editorKeyupHandler = () => {
+      // 所见模式下不处理
+      if (document.body.classList.contains('wysiwyg-v2')) {
+        hideLinkSuggest()
+        return
+      }
+      updateLinkSuggestForEditor(context, editor)
+    }
+
+    editor.addEventListener('keydown', _editorKeydownHandler, true)
+    editor.addEventListener('keyup', _editorKeyupHandler, true)
+
+    editor.addEventListener(
+      'blur',
+      () => {
+        hideLinkSuggest()
+      },
+      true,
+    )
+  } catch (e) {
+    console.error('[backlinks] 绑定编辑器补全事件失败', e)
+  }
+}
+
+// 计算当前光标是否处于 [[...]] 内部，并更新补全列表
+function updateLinkSuggestForEditor(context, editor) {
+  try {
+    if (!editor || typeof editor.value !== 'string') {
+      hideLinkSuggest()
+      return
+    }
+    const text = editor.value
+    const caret = editor.selectionStart >>> 0
+  const before = text.slice(0, caret)
+  const openIdx = before.lastIndexOf('[[')
+  if (openIdx < 0) {
+    hideLinkSuggest()
+    return
+  }
+  // 若 [[ 之前是转义符号 \，视为字面量，忽略补全
+  if (openIdx > 0 && before.charAt(openIdx - 1) === '\\') {
+    hideLinkSuggest()
+    return
+  }
+    // [[ 与光标之间不能已有 ]]
+    if (before.indexOf(']]', openIdx + 2) !== -1) {
+      hideLinkSuggest()
+      return
+    }
+    const query = before.slice(openIdx + 2)
+    if (!query || /\n/.test(query)) {
+      hideLinkSuggest()
+      return
+    }
+
+    // 构造候选：从 docs 中按名称匹配
+    if (!indexState.docs || !indexState.docs.size) {
+      hideLinkSuggest()
+      return
+    }
+
+    const qNorm = normalizeNameForMatch(query)
+    if (!qNorm) {
+      hideLinkSuggest()
+      return
+    }
+
+    const items = []
+    for (const [, info] of indexState.docs.entries()) {
+      const nameNorm = normalizeNameForMatch(info.name || '')
+      const titleNorm = normalizeNameForMatch(info.title || '')
+      let score = 0
+      if (nameNorm === qNorm) score += 5
+      if (titleNorm === qNorm) score += 5
+      if (!score && nameNorm && nameNorm.includes(qNorm)) score += 3
+      if (!score && titleNorm && titleNorm.includes(qNorm)) score += 3
+      if (!score && qNorm && (qNorm.includes(nameNorm) || qNorm.includes(titleNorm))) score += 1
+      if (score > 0) {
+        items.push({
+          score,
+          title: info.title || info.name || '',
+          name: info.name || '',
+        })
+      }
+    }
+
+    if (!items.length) {
+      hideLinkSuggest()
+      return
+    }
+
+    items.sort((a, b) => b.score - a.score)
+    _linkSuggestState.active = true
+    _linkSuggestState.from = openIdx
+    _linkSuggestState.to = caret
+    _linkSuggestState.items = items.slice(0, 20)
+    _linkSuggestState.index = 0
+    renderLinkSuggestBox(editor)
+  } catch (e) {
+    console.error('[backlinks] updateLinkSuggestForEditor error', e)
+    hideLinkSuggest()
+  }
+}
+
+// 渲染下拉框 UI
+function renderLinkSuggestBox(editor) {
+  const box = ensureLinkSuggestBox()
+  const { items, index } = _linkSuggestState
+  if (!items || !items.length) {
+    box.style.display = 'none'
+    return
+  }
+
+  box.innerHTML = ''
+  items.forEach((item, i) => {
+    const row = document.createElement('div')
+    row.style.padding = '4px 8px'
+    row.style.cursor = 'pointer'
+    row.style.whiteSpace = 'nowrap'
+    if (i === index) {
+      row.style.background = 'rgba(56, 189, 248, 0.12)'
+    }
+    const t = document.createElement('div')
+    t.textContent = item.title
+    t.style.fontWeight = '500'
+    const n = document.createElement('div')
+    n.textContent = item.name
+    n.style.fontSize = '11px'
+    n.style.color = '#888'
+    row.appendChild(t)
+    row.appendChild(n)
+    row.addEventListener('mouseenter', () => {
+      _linkSuggestState.index = i
+      renderLinkSuggestBox(editor)
+    })
+    row.addEventListener('mousedown', (ev) => {
+      ev.preventDefault()
+      ev.stopPropagation()
+      _linkSuggestState.index = i
+      applyLinkSuggestionForEditor(editor, window.__backlinksContext || null)
+    })
+    box.appendChild(row)
+  })
+
+  const rect = editor.getBoundingClientRect()
+  // 简单放在编辑器左上角偏下一点，避免过于突兀
+  box.style.left = rect.left + 24 + 'px'
+  box.style.top = rect.top + 32 + 'px'
+  box.style.display = 'block'
+}
+
+// 将当前选中的补全项写回编辑器/文档
+function applyLinkSuggestion(context) {
+  try {
+    const ed =
+      document.getElementById('editor') ||
+      document.querySelector('textarea.editor')
+    if (!ed) {
+      hideLinkSuggest()
+      return
+    }
+    applyLinkSuggestionForEditor(ed, context)
+  } catch (e) {
+    console.error('[backlinks] applyLinkSuggestion error', e)
+    hideLinkSuggest()
+  }
+}
+
+function applyLinkSuggestionForEditor(editor, context) {
+  const state = _linkSuggestState
+  if (!state.active || !state.items || !state.items.length) {
+    hideLinkSuggest()
+    return
+  }
+  const item = state.items[state.index] || state.items[0]
+  if (!item) {
+    hideLinkSuggest()
+    return
+  }
+  const label = item.title || item.name
+  if (!label) {
+    hideLinkSuggest()
+    return
+  }
+  const from = state.from >>> 0
+  const text = String(editor.value || '')
+  const beforeWhole = text.slice(0, from)
+  const sub = text.slice(from)
+  const closeRel = sub.indexOf(']]')
+
+  let newValue = ''
+  let caret = 0
+  const wrapped = '[[' + label + ']]'
+
+  if (closeRel >= 0) {
+    // 已经存在 ]]，只替换 [[ 和 ]] 之间的内容
+    const after = sub.slice(closeRel + 2)
+    newValue = beforeWhole + wrapped + after
+    caret = beforeWhole.length + wrapped.length
+  } else {
+    // 没有现成的 ]]，直接在光标处插入完整 [[title]]
+    const to = state.to >>> 0
+    const before = text.slice(0, from)
+    const after = text.slice(to)
+    newValue = before + wrapped + after
+    caret = before.length + wrapped.length
+  }
+
+  editor.value = newValue
+  editor.selectionStart = caret
+  editor.selectionEnd = caret
+  if (context && typeof context.setEditorValue === 'function') {
+    context.setEditorValue(editor.value)
+  }
+  hideLinkSuggest()
+}
+
 // 在 Panel 中渲染一个极简的反向链接列表
 function renderBacklinksPanel(context, panelRoot) {
   const container = panelRoot
@@ -1015,6 +1317,15 @@ export async function activate(context) {
   // 初始渲染
   renderBacklinksPanel(context, panelRoot)
 
+  // 绑定编辑器 [[标题]] 补全
+  try {
+    // 暴露 context 给内部补全逻辑使用
+    window.__backlinksContext = context
+    bindEditorForLinkSuggest(context)
+  } catch (e) {
+    console.error('[backlinks] 初始化链接补全失败', e)
+  }
+
   // 文档切换自动刷新：定期检查当前文件路径变化
   try {
     if (_pollTimer) {
@@ -1087,6 +1398,33 @@ export async function activate(context) {
     ],
   })
 
+  // 编辑器右键菜单：根据选中文本插入 [[双向链接]]
+  try {
+    context.addContextMenuItem({
+      label: '插入双向链接',
+      icon: '🔗',
+      condition: (ctx) => {
+        return ctx.mode === 'edit' && !!ctx.selectedText && ctx.selectedText.trim().length > 0
+      },
+      onClick: () => {
+        try {
+          const sel = context.getSelection()
+          const raw = (sel && sel.text) || ''
+          const label = String(raw).trim()
+          if (!label) return
+          const wrapped = `[[${label}]]`
+          context.replaceRange(sel.start, sel.end, wrapped)
+          context.ui.notice('已插入双向链接：' + wrapped, 'ok', 1600)
+        } catch (e) {
+          console.error('[backlinks] 插入双向链接失败', e)
+          context.ui.notice('插入双向链接失败，请在源码模式下重试', 'err', 2000)
+        }
+      },
+    })
+  } catch (e) {
+    console.error('[backlinks] 注册右键“插入双向链接”失败', e)
+  }
+
   // 选区变化时轻量刷新（用于当前文件切换时手动触发）
   context.onSelectionChange &&
     context.onSelectionChange(() => {
@@ -1105,9 +1443,23 @@ export function deactivate() {
     if (_panelRoot && _panelRoot.parentNode) {
       _panelRoot.parentNode.removeChild(_panelRoot)
     }
+    const ed =
+      document.getElementById('editor') ||
+      document.querySelector('textarea.editor')
+    if (ed) {
+      if (_editorKeydownHandler) {
+        ed.removeEventListener('keydown', _editorKeydownHandler, true)
+      }
+      if (_editorKeyupHandler) {
+        ed.removeEventListener('keyup', _editorKeyupHandler, true)
+      }
+    }
   } catch {
     // 忽略清理错误
   }
   _panelRoot = null
   _panelHandle = null
+  _editorKeydownHandler = null
+  _editorKeyupHandler = null
+  hideLinkSuggest()
 }
