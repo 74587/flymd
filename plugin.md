@@ -1135,6 +1135,44 @@ try {
 - 如果当前没有打开文件或路径不在当前库中，则退回到库根目录；
 - 始终保证目标路径在当前库内，不会写出库目录之外。
 
+### context.saveBinaryToCurrentFolder
+
+将一段二进制数据（`Uint8Array / ArrayBuffer / number[]`）安全地保存到“当前文档所在目录”或库根目录下的子目录中，并返回“绝对路径 + 相对当前文档的引用路径”。  
+典型用途：Word/HTML 导入时把内嵌的 `data:` 图片落到 `images/` 子目录，并在 Markdown 中插入相对路径。
+
+```javascript
+// 例：将 data:URL 图片还原成二进制并落地到 images 子目录
+const { data, fileName } = dataUrlToBytes(dataUrl, 'example', 1);
+
+const { fullPath, relativePath } = await context.saveBinaryToCurrentFolder({
+  fileName,           // 如 'example-001.png'
+  data,               // Uint8Array / ArrayBuffer / number[]
+  subDir: 'images',   // 可选，默认直接写到当前文件夹
+  onConflict: 'renameAuto', // 'overwrite' | 'renameAuto' | 'error'
+});
+
+// 在当前文档中写入相对引用，例如：
+// ![说明文字](/相对当前文档的路径)
+const md = `![image](${relativePath})`;
+```
+
+**参数说明：**
+- `fileName`：目标文件名（不含路径），内部会自动做路径非法字符清理；
+- `data`：要写入的二进制数据，支持 `Uint8Array` / `ArrayBuffer` / `number[]`；
+- `subDir`（可选）：相对于“基准目录”的子目录，如 `images` 或 `assets/images`；
+- `onConflict`（可选）：文件名冲突时的行为：
+  - `'overwrite'`：直接覆盖已有文件；
+  - `'renameAuto'`（默认）：自动追加 `-1`、`-2` 等后缀直到不冲突；
+  - `'error'`：如目标已存在则抛出错误。
+
+**行为细节：**
+- 基准目录优先为“当前编辑器打开文件所在目录”，否则退回到当前库根目录；
+- 当指定 `subDir` 时，会尝试自动创建该目录（递归），目录创建失败时会在写文件阶段报错或由调用方兜底；
+- 始终保证写入路径在当前库内部，不允许写到库外的任意位置；
+- 返回值：
+  - `fullPath`：写入的绝对路径；
+  - `relativePath`：相对当前文档适合用于 Markdown 引用的路径，如 `images/foo.png`。
+
 ### context.openFileByPath
 
 按给定绝对路径打开本地文档，相当于用户在界面中打开该文件。

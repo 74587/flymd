@@ -806,6 +806,44 @@ try {
 - If there is no current file or it is outside the active library, falls back to the library root;
 - The implementation ensures the final path stays inside the current library.
 
+### context.saveBinaryToCurrentFolder
+
+Safely save binary data (`Uint8Array / ArrayBuffer / number[]`) into the folder of the current document (or the library root), optionally under a subdirectory, and return both the absolute path and a path suitable for use in the current Markdown document.  
+Typical use case: when importing Word/HTML, extract embedded `data:` images into an `images/` subfolder and insert relative paths into Markdown.
+
+```javascript
+// Example: decode a data:URL image, write it to images subfolder
+const { data, fileName } = dataUrlToBytes(dataUrl, 'example', 1);
+
+const { fullPath, relativePath } = await context.saveBinaryToCurrentFolder({
+  fileName,              // e.g. 'example-001.png'
+  data,                  // Uint8Array / ArrayBuffer / number[]
+  subDir: 'images',      // optional, default is the base folder itself
+  onConflict: 'renameAuto', // 'overwrite' | 'renameAuto' | 'error'
+});
+
+// Then write a relative reference in the current document:
+// ![alt text](/relative/path/from/current/doc)
+const md = `![image](${relativePath})`;
+```
+
+**Parameters:**
+- `fileName`: target file name (no path); invalid path characters will be sanitized;
+- `data`: binary payload to write, supports `Uint8Array` / `ArrayBuffer` / `number[]`;
+- `subDir` (optional): subdirectory relative to the base folder, e.g. `images` or `assets/images`;
+- `onConflict` (optional): how to handle name conflicts:
+  - `'overwrite'`: overwrite existing file;
+  - `'renameAuto'` (default): append `-1`, `-2`, etc. until no conflict;
+  - `'error'`: throw if the target already exists.
+
+**Behavior:**
+- Base folder is the directory of the currently open document when possible; otherwise falls back to the library root;
+- When `subDir` is specified, the implementation attempts to create it recursively; failures are surfaced via write errors or left to callers to handle;
+- The final write path is always constrained to stay inside the current library, never outside;
+- Return value:
+  - `fullPath`: absolute path of the written file;
+  - `relativePath`: path relative to the current document, suitable for Markdown references such as `images/foo.png`.
+
 ### context.openFileByPath
 
 Open local document by given absolute path, equivalent to user opening the file in the interface.

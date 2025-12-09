@@ -2,6 +2,14 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v0.7.0
+- Added: The Word/Excel Importer now extracts `data:`-URL images from the converted HTML, saves them as standalone files under an `images/` subfolder next to the current document, and inserts relative paths in the generated Markdown; the plugin runtime also exposes a new `saveBinaryToCurrentFolder` API so extensions can safely write binaries beside the current file and get back a path suitable for Markdown.
+- Improved: In WYSIWYG mode, pasting images into an unsaved document no longer inlines them as base64 inside the text; instead they fall back to being stored in the system Pictures directory (matching source-mode behaviour), which keeps documents smaller and reduces memory spikes while editing.
+- Added: The Backlinks plugin now decorates `[[name]]` text in the reading preview as clickable links that jump directly to the target note, with more robust parsing for patterns such as `[[Title]]`, `[[Title|Alias]]` and even WYSIWYG-escaped `\\[\\[...\\]\\]`.
+- Improved: The Backlinks side panel is now closed by default and can be toggled from a unified “Show/Hide backlinks panel” entry in the editor/preview/WYSIWYG context menus, while fixes around preview-root handling make occasional broken link clicks far less likely.
+- Fixed: On setups with multiple monitors or corrupted window state, the main window could grow beyond the virtual desktop or restore to absurd sizes; window sizing is now clamped against a Rust-side “virtual screen size” calculation while still enforcing a minimum of 960×640.
+- Fixed: On macOS, the auto-updater now matches assets by preferring `.dmg` / `.pkg` / `.app.zip` and recognising “universal” builds, avoiding accidentally picking up Windows portable ZIPs and leading to more reliable in-app updates.
+
 ## Update v0.6.9
 - Added: New “Backlinks” plugin built on `[[Title]]` wiki-style syntax that automatically builds forward and backward links between notes and exposes a side panel to inspect which notes reference the current document, with a one-click “rebuild index” action.
 - Added: Backlinks panel now integrates AI-powered semantic related-note suggestions; under the current document you can see AI-picked related notes, left-click to open the note, or right-click to insert a `[[link]]` to it at the cursor.

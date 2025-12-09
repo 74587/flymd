@@ -3376,12 +3376,19 @@ async function renderPreview() {
   } catch (e) {
     // 所见模式：完全静默；预览模式保留错误日志
     if (!wysiwyg) console.error('Mermaid 渲染失败：', e)
+  }
+
+  // 阅读/预览模式：在 Mermaid 渲染完成后统一依据当前全局缩放重算一次 SVG 宽度
+  // 等价于用户手动点击一次工具条上的“R”，但不会修改缩放值本身，避免每次打开都需要手动复位
+  try {
+    if (!wysiwyg) adjustExistingMermaidSvgsForScale()
+  } catch {}
+
   // 代码块装饰：委托到统一的 decorateCodeBlocks，避免重复实现导致行为不一致
   try { decorateCodeBlocks(preview) } catch {}
 
   // 首次预览完成打点
   try { if (!(renderPreview as any)._firstDone) { (renderPreview as any)._firstDone = true; logInfo('打点:首次预览完成') } } catch {}
-}
 }
 
 // 拖拽支持：
