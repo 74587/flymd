@@ -292,6 +292,11 @@ function createToolbarIfNeeded() {
 
 function showToolbar() {
   if (state.toolbarEl) {
+    // 阅读模式永远隐藏
+    if (isReadingModeDom()) {
+      state.toolbarEl.style.display = 'none';
+      return;
+    }
     state.toolbarEl.style.display = 'flex';
   }
 }
@@ -306,14 +311,32 @@ function isReadingModeDom() {
   try {
     const container = document.querySelector('.container');
     if (!container) return false;
-    // 所见模式有 wysiwyg-v2 类，阅读模式没有
+    // 所见模式：有 wysiwyg-v2 类
     if (container.classList.contains('wysiwyg-v2')) return false;
+    // 分屏模式：源码 + 预览同时可见
+    if (container.classList.contains('split-preview')) return false;
+
     const previewEl = container.querySelector('.preview');
+    const editorEl = container.querySelector('.editor');
     if (!previewEl) return false;
-    const cs = window.getComputedStyle(previewEl);
-    const hiddenByClass = previewEl.classList.contains('hidden');
-    const hiddenByStyle = cs.display === 'none' || cs.visibility === 'hidden';
-    return !hiddenByClass && !hiddenByStyle;
+
+    const pcs = window.getComputedStyle(previewEl);
+    const previewHiddenByClass = previewEl.classList.contains('hidden');
+    const previewHiddenByStyle =
+      pcs.display === 'none' || pcs.visibility === 'hidden';
+    const previewVisible = !previewHiddenByClass && !previewHiddenByStyle;
+
+    let editorVisible = false;
+    if (editorEl) {
+      const ecs = window.getComputedStyle(editorEl);
+      const editorHiddenByClass = editorEl.classList.contains('hidden');
+      const editorHiddenByStyle =
+        ecs.display === 'none' || ecs.visibility === 'hidden';
+      editorVisible = !editorHiddenByClass && !editorHiddenByStyle;
+    }
+
+    // 阅读模式：预览可见且编辑器不可见
+    return previewVisible && !editorVisible;
   } catch {
     return false;
   }
@@ -422,6 +445,18 @@ function registerSelectionWatcher() {
 
   document.addEventListener('selectionchange', handler);
   state.selectionHandler = handler;
+
+  // 源码模式下，使用宿主提供的 onSelectionChange 精准监听编辑器选区变化
+  try {
+    const ctx = state.context;
+    if (ctx && typeof ctx.onSelectionChange === 'function') {
+      ctx.onSelectionChange(() => {
+        updateToolbarVisibilityBySelection();
+      });
+    }
+  } catch {
+    // 忽略注册失败
+  }
 }
 
 function onToolbarMouseDown(e) {
