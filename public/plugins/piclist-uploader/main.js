@@ -278,6 +278,36 @@ function isPastedLocalImage(info) {
   return true
 }
 
+// 在整篇 Markdown 源码里，查找最后一个“pasted- 本地图片”对应的 Markdown 片段
+function findLastPastedImageInSource(context) {
+  try {
+    const full =
+      (typeof context.getSourceText === 'function' && context.getSourceText()) ||
+      (typeof context.getEditorValue === 'function' && context.getEditorValue()) ||
+      ''
+    const text = String(full || '')
+    if (!text) return null
+
+    const re = /!\[[^\]]*]\(([^)]+)\)/g
+    let m
+    let last = null
+    while ((m = re.exec(text)) != null) {
+      const fullMatch = m[0]
+      const start = m.index >>> 0
+      const end = start + fullMatch.length
+      const info = extractImageInfoFromSelection(fullMatch)
+      if (!info || !info.path) continue
+      if (!isPastedLocalImage(info)) continue
+      last = { text: fullMatch, start, end, info }
+    }
+    debugLog('findLastPastedImageInSource: result =', last)
+    return last
+  } catch (e) {
+    debugLog('findLastPastedImageInSource: error', e)
+    return null
+  }
+}
+
 async function autoUploadOnePastedImage(context) {
   if (!context || typeof context.getEditorValue !== 'function') return false
   const text = String(context.getEditorValue() || '')
@@ -525,35 +555,63 @@ export async function activate(context) {
     context.addContextMenuItem({
       label: '使用 PicList 上传图片',
       condition: (ctx) => {
-        // 只要有选中文本且像图片语法，就显示菜单（不再依赖具体模式）
         if (!ctx) return false
         const s = (ctx.selectedText || '').trim()
-        if (!s) return false
-        return looksLikeImageText(s)
+        // 源码模式：有选中文本且像图片语法时显示
+        if (s && looksLikeImageText(s)) return true
+        // 所见模式：即便选中文本为空，也允许显示菜单，由点击逻辑去解析最近的图片
+        if (ctx.mode === 'wysiwyg') return true
+        return false
       },
       onClick: async (ctx) => {
         try {
           debugLog('contextMenu.uploadSelected: clicked ctx =', ctx)
           if (!ctx) return
-          const selected = (ctx.selectedText || '').trim()
-          debugLog('contextMenu.uploadSelected: selected =', selected)
-          if (!selected) {
-            context.ui.notice('请先选中图片路径或 Markdown 图片语法', 'err', 2400)
-            return
-          }
-          if (!looksLikeImageText(selected)) {
-            context.ui.notice('选中文本不像是图片路径或 Markdown 图片语法', 'err', 2600)
-            return
+          let selected = (ctx.selectedText || '').trim()
+          debugLog('contextMenu.uploadSelected: selected =', selected, 'mode =', ctx.mode)
+
+          const fullSource =
+            (typeof context.getSourceText === 'function' && context.getSourceText()) ||
+            (typeof context.getEditorValue === 'function' && context.getEditorValue()) ||
+            ''
+          const full = String(fullSource || '')
+
+          let info = null
+          let range = null
+
+          if (selected && looksLikeImageText(selected)) {
+            info = extractImageInfoFromSelection(selected)
+            debugLog('contextMenu.uploadSelected: parsed from selection =', info)
+            if (!info || !info.path) {
+              context.ui.notice('无法从选中文本解析出图片路径', 'err', 2600)
+              return
+            }
+            const idx = full.indexOf(selected)
+            if (idx >= 0) {
+              range = { start: idx, end: idx + selected.length }
+            }
+          } else {
+            // 所见模式或选中文本为空：回退为使用文档中最后一个 pasted- 本地图片
+            const found = findLastPastedImageInSource(context)
+            if (!found || !found.info || !found.info.path) {
+              context.ui.notice('未找到可上传的本地图片，请先粘贴图片或在源码模式中选中图片语法', 'err', 3200)
+              return
+            }
+            info = found.info
+            selected = found.text
+            range = { start: found.start, end: found.end }
+            debugLog('contextMenu.uploadSelected: fallback to last pasted image =', found)
           }
 
-          const info = extractImageInfoFromSelection(selected)
-          debugLog('contextMenu.uploadSelected: parsed info =', info)
           if (!info || !info.path) {
-            context.ui.notice('无法从选中文本解析出图片路径', 'err', 2600)
+            context.ui.notice('无法解析图片路径', 'err', 2600)
             return
           }
 
-          const filePath = ctx.filePath || (typeof context.getCurrentFilePath === 'function' && context.getCurrentFilePath()) || null
+          const filePath =
+            ctx.filePath ||
+            (typeof context.getCurrentFilePath === 'function' && context.getCurrentFilePath()) ||
+            null
           const absPath = resolveImageAbsolutePath(info.path, filePath)
           debugLog('contextMenu.uploadSelected: absPath =', absPath, 'filePath =', filePath)
           const url = await uploadViaPicList(context, absPath)
@@ -564,19 +622,21 @@ export async function activate(context) {
             return
           }
 
-          const sel = context.getSelection ? context.getSelection() : null
-          const full = context.getEditorValue ? context.getEditorValue() : ''
-          if (!sel || typeof sel.start !== 'number' || typeof sel.end !== 'number' || sel.end <= sel.start) {
-            // 回退方案：直接在光标处插入
-            if (typeof context.insertAtCursor === 'function') {
-              context.insertAtCursor(replacement)
+          if (range && typeof context.replaceRange === 'function') {
+            context.replaceRange(range.start, range.end, replacement)
+          } else {
+            const sel = context.getSelection ? context.getSelection() : null
+            if (!sel || typeof sel.start !== 'number' || typeof sel.end !== 'number' || sel.end <= sel.start) {
+              if (typeof context.insertAtCursor === 'function') {
+                context.insertAtCursor(replacement)
+              }
+            } else if (typeof context.replaceRange === 'function') {
+              context.replaceRange(sel.start, sel.end, replacement)
+            } else if (typeof context.setEditorValue === 'function') {
+              const before = String(full || '').slice(0, sel.start)
+              const after = String(full || '').slice(sel.end)
+              context.setEditorValue(before + replacement + after)
             }
-          } else if (typeof context.replaceRange === 'function') {
-            context.replaceRange(sel.start, sel.end, replacement)
-          } else if (typeof context.setEditorValue === 'function') {
-            const before = String(full || '').slice(0, sel.start)
-            const after = String(full || '').slice(sel.end)
-            context.setEditorValue(before + replacement + after)
           }
 
           context.ui.notice('图片已上传至 PicList', 'ok', 2600)
