@@ -1618,7 +1618,7 @@ dependencies = [
 
 [[package]]
 name = "flymd"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "aws-config",
  "aws-sdk-s3",
@@ -7098,3 +7098,4 @@ dependencies = [
  "syn 2.0.111",
  "winnow 0.7.13",
 ]
+

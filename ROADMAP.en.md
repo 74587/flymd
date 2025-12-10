@@ -1,7 +1,15 @@
-﻿# Roadmap
+# Roadmap
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+
+## Update v0.7.1
+- Added: New “PicList Uploader” extension that lets you select local image paths or Markdown image syntax in source mode, upload them to a local PicList HTTP server with one click, and replace the selection with the hosted URL; an optional “auto upload after paste” switch can watch pasted `pasted-*` images and automatically upload + rewrite them.
+- Added: PicList uploader is now integrated with WYSIWYG mode via paste/flush hooks so that the same auto-upload pipeline applies while editing visually, keeping behaviour consistent across modes.
+- Added: Built-in “S3 Gallery” extension that aggregates images uploaded via the built-in S3/R2 uploader into a visual gallery, with thumbnail previews and actions to copy links, insert into the current note, or delete remote objects for easier image housekeeping.
+- Added: Extension marketplace now supports category filters; together with the new “PicList Uploader”, “S3 Gallery” and “Flyshow Publish” extensions you can quickly discover storage/publishing tools under dedicated categories.
+- Added: The plugin host now exposes new filesystem APIs (`readTextFile`, `writeTextFile`, `listLibraryFiles`) so extensions can safely read/write files inside the current library and enumerate Markdown documents, enabling richer plugin scenarios.
+- Improved: The S3 uploader now persists upload history and exposes list APIs that can be reused by management-oriented extensions such as “S3 Gallery”, laying the groundwork for more advanced image-bed management features.
 ## Update v0.7.0
 - Added: The Word/Excel Importer now extracts `data:`-URL images from the converted HTML, saves them as standalone files under an `images/` subfolder next to the current document, and inserts relative paths in the generated Markdown; the plugin runtime also exposes a new `saveBinaryToCurrentFolder` API so extensions can safely write binaries beside the current file and get back a path suitable for Markdown.
 - Improved: In WYSIWYG mode, pasting images into an unsaved document no longer inlines them as base64 inside the text; instead they fall back to being stored in the system Pictures directory (matching source-mode behaviour), which keeps documents smaller and reduces memory spikes while editing.
@@ -576,3 +584,6 @@ This version focuses on stability and detail experience optimization, main chang
 - Added: LaTeX (based on KaTeX) rendering support
 - Added: Mermaid flowchart/sequence diagram etc. rendering support
 - Added shortcuts: Ctrl+B bold, Ctrl+I italic, Ctrl+K insert link
+
+
+
