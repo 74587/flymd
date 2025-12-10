@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2025-12-08T18:00:00Z",
+  "updatedAt": "2025-12-10T09:40:00Z",
   "ttlSeconds": 3600,
   "items": [
     {
@@ -129,6 +129,17 @@
       "install": {
         "ref": "xf959211192/telegraph-image-flymd@main",
         "type": "github"
+      }
+    },
+    {
+      "homepage": "https://github.com/flyhunterl/flymd",
+      "name": "PicList 图床上传",
+      "description": "通过本地 PicList 内置 HTTP 服务器上传本地图片，并将 Markdown 中的本地路径替换为图床外链。",
+      "author": "flyMD",
+      "id": "piclist-uploader",
+      "install": {
+        "ref": "https://raw.githubusercontent.com/flyhunterl/flymd/main/public/plugins/piclist-uploader/manifest.json",
+        "type": "manifest"
       }
     },
     {

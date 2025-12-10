@@ -1,0 +1,10 @@
+{
+  "id": "piclist-uploader",
+  "name": "PicList 图床",
+  "version": "0.1.0",
+  "author": "flyMD",
+  "description": "通过 PicList 内置 HTTP 服务器上传本地图片，并将 Markdown 中的本地路径替换为图床链接。",
+  "main": "main.js",
+  "homepage": "https://github.com/Kuingsmile/PicList"
+}
+
