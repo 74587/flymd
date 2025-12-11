@@ -77,7 +77,7 @@ FlyMD 是一款轻量级、高性能的本地 Markdown 编辑器,支持 PDF 高�
 
 ### PDF 高精度解析 + 翻译
 
-**示例为高精度解析插件（0.024元/页），同时提供MinerU解析插件（免费，自行申请API）**
+**示例为高精度解析插件，同时提供MinerU解析插件，根据需求自行选择**
 
 <img src="https://github.com/user-attachments/assets/2a512b4b-7083-41d9-9b84-f9b411b849f1" alt="PDF高精度解析翻译" width="800">
 
