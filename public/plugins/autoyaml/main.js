@@ -358,7 +358,11 @@ function registerContextMenu(context) {
   try {
     AUTOYAML_CTX_MENU_DISPOSER = context.addContextMenuItem({
       label: 'AutoYAML：生成元数据',
-      condition: (ctx) => ctx.mode === 'edit',
+      // 在源码、预览、所见三种模式下都提供右键入口
+      condition: (ctx) =>
+        ctx.mode === 'edit' ||
+        ctx.mode === 'preview' ||
+        ctx.mode === 'wysiwyg',
       onClick: () => {
         void applyAutoYaml(context)
       },
@@ -510,7 +514,7 @@ async function openAutoYamlSettingsDialog(context, cfg) {
     const tipCtx = document.createElement('div')
     tipCtx.className = 'autoyaml-tip'
     tipCtx.textContent =
-      '勾选后，在右键菜单中会出现“AutoYAML：生成元数据”入口。（仅源码模式）'
+      '勾选后，在右键菜单中会出现“AutoYAML：生成元数据”入口。'
     rowCtx.appendChild(labelCtx)
     rowCtx.appendChild(tipCtx)
 
