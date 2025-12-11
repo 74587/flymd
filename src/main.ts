@@ -48,7 +48,7 @@ import { createImageUploader } from './core/imageUpload'
 import { createPluginMarket, compareInstallableItems, FALLBACK_INSTALLABLES } from './extensions/market'
 import type { InstallableItem } from './extensions/market'
 import { listDirOnce, type LibEntry } from './core/libraryFs'
-import { normSep, isInside, ensureDir, moveFileSafe, renameFileSafe } from './core/fsSafe'
+import { normSep, isInside, ensureDir, moveFileSafe, renameFileSafe, normalizePath, readTextFileAnySafe, writeTextFileAnySafe } from './core/fsSafe'
 import { getLibrarySort, setLibrarySort, type LibSortMode } from './core/librarySort'
 import { createCustomTitleBar, removeCustomTitleBar, applyWindowDecorationsCore } from './modes/focusMode'
 import {
@@ -134,6 +134,11 @@ import {
   type ContextMenuItemConfig,
   type PluginContextMenuItem,
 } from './ui/contextMenus'
+import { getMermaidConfig } from './core/mermaidConfig'
+import { CONFIG_BACKUP_FILE_EXT, formatBackupTimestamp } from './core/configBackup'
+import { pluginNotice } from './core/pluginNotice'
+import { shouldSanitizePreview } from './core/sanitize'
+import { isLikelyLocalPath } from './core/pathUtils'
 // 应用版本号（用于窗口标题/关于弹窗）
 
 // UI 缩放与预览宽度（已拆分到 core/uiZoom.ts）
@@ -156,42 +161,6 @@ let sanitizeHtml: ((html: string, cfg?: any) => string) | null = null
 let katexCssLoaded = false
 let hljsLoaded = false
 let mermaidReady = false
-
-// 获取 mermaid 初始化配置（根据夜间模式自动选择主题）
-function getMermaidConfig(): any {
-  const isDark = document.body.classList.contains('dark-mode') ||
-    (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)
-  return {
-    startOnLoad: false,
-    securityLevel: 'strict',
-    theme: isDark ? 'dark' : 'default',
-    logLevel: 'fatal' as any,
-    fontSize: 16 as any,
-    flowchart: { useMaxWidth: true } as any,
-    themeVariables: isDark ? {
-      fontFamily: 'Segoe UI, Helvetica, Arial, sans-serif',
-      fontSize: '16px',
-      // 夜间模式配色
-      primaryColor: '#3c3c3c',
-      primaryTextColor: '#d4d4d4',
-      primaryBorderColor: '#505050',
-      lineColor: '#808080',
-      secondaryColor: '#252526',
-      tertiaryColor: '#1e1e1e',
-      background: '#1e1e1e',
-      mainBkg: '#252526',
-      secondBkg: '#1e1e1e',
-      border1: '#505050',
-      border2: '#3c3c3c',
-      arrowheadColor: '#d4d4d4',
-      textColor: '#d4d4d4',
-      nodeTextColor: '#d4d4d4',
-    } : {
-      fontFamily: 'Segoe UI, Helvetica, Arial, sans-serif',
-      fontSize: '16px'
-    }
-  }
-}
 
 // Mermaid 工具（已拆分到 core/mermaid.ts）
 import { isMermaidCacheDisabled, getMermaidScale, setMermaidScaleClamped, adjustExistingMermaidSvgsForScale, exportMermaidViaDialog, createMermaidToolsFor, mermaidSvgCache, mermaidSvgCacheVersion, getCachedMermaidSvg, cacheMermaidSvg, normalizeMermaidSvg, postAttachMermaidSvgAdjust, invalidateMermaidSvgCache, MERMAID_SCALE_MIN, MERMAID_SCALE_MAX, MERMAID_SCALE_STEP } from './core/mermaid'
@@ -545,8 +514,6 @@ import { load as yamlLoad } from 'js-yaml'
 // 便携模式（已拆分到 core/portable.ts）
 import { PORTABLE_BACKUP_FILENAME, getPortableBaseDir, getPortableDirAbsolute, joinPortableFile, exportPortableBackupSilent, readPortableBackupPayload } from './core/portable'
 
-const CONFIG_BACKUP_FILE_EXT = 'flymdconfig'
-
 async function isPortableModeEnabled(): Promise<boolean> {
   try {
     if (!store) return false
@@ -751,11 +718,6 @@ async function handleOpenSyncLogFromMenu(): Promise<void> {
     console.error('open sync log failed', err)
     pluginNotice('打开同步日志失败', 'err', 2200)
   }
-}
-
-function formatBackupTimestamp(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
 }
 
 async function handleExportConfigFromMenu(): Promise<void> {
@@ -1108,50 +1070,6 @@ async function confirmNative(message: string, title = '确认') : Promise<boolea
     return false
   } catch {
     return false
-  }
-}
-
-// 将任意 open() 返回值归一化为可用于 fs API 的字符串路径
-function normalizePath(input: unknown): string {
-  try {
-    if (typeof input === 'string') return input
-    if (input && typeof (input as any).path === 'string') return (input as any).path
-    if (input && typeof (input as any).filePath === 'string') return (input as any).filePath
-    const p: any = (input as any)?.path
-    if (p) {
-      if (typeof p === 'string') return p
-      if (typeof p?.href === 'string') return p.href
-      if (typeof p?.toString === 'function') {
-        const s = p.toString()
-        if (typeof s === 'string' && s) return s
-      }
-    }
-    if (input && typeof (input as any).href === 'string') return (input as any).href
-    if (input && typeof (input as any).toString === 'function') {
-      const s = (input as any).toString()
-      if (typeof s === 'string' && s) return s
-    }
-    return String(input ?? '')
-  } catch {
-    return String(input ?? '')
-  }
-}
-
-// 统一读文件兜底：fs 失败则调用后端命令读取
-async function readTextFileAnySafe(p: string): Promise<string> {
-  try {
-    return await readTextFile(p as any)
-  } catch (e) {
-    try { return await invoke<string>('read_text_file_any', { path: p }) } catch { throw e }
-  }
-}
-
-// 统一写文件兜底：fs 失败则调用后端命令写入
-async function writeTextFileAnySafe(p: string, content: string): Promise<void> {
-  try {
-    await writeTextFile(p, content)
-  } catch (e) {
-    try { await invoke('write_text_file_any', { path: p, content }) } catch { throw e }
   }
 }
 
@@ -8825,22 +8743,6 @@ function startAsyncUploadFromBlob(blob: Blob, fname: string, mime: string): Prom
 // ========= END =========
 
 // ========== 扩展/插件：运行时与 UI ==========
-function pluginNotice(msg: string, level: 'ok' | 'err' = 'ok', ms?: number) {
-  try {
-    // 使用新的通知系统
-    const type: NotificationType = level === 'ok' ? 'plugin-success' : 'plugin-error'
-    NotificationManager.show(type, msg, ms)
-  } catch (e) {
-    // 降级：使用旧的状态栏
-    try {
-      const el = document.getElementById('status')
-      if (el) {
-        el.textContent = (level === 'ok' ? '✔ ' : '✖ ') + msg
-        setTimeout(() => { try { el.textContent = '' } catch {} }, ms || 1600)
-      }
-    } catch {}
-  }
-}
 
 // 插件运行时宿主：通过 initPluginRuntime 集中管理 PluginHost / 安装 / 更新 等逻辑
 const pluginRuntime: PluginRuntimeHandles = initPluginRuntime({
@@ -8932,20 +8834,6 @@ try {
     } catch (e) { console.error('flymdSetPluginMarketUrl 失败', e); return false }
   }
 } catch {}
-// 预览消毒开关：允许在发行版关闭预览消毒（定位构建差异问题），
-// 并支持用 localStorage 覆盖（flymd:sanitizePreview = '0'/'false' 关闭；'1'/'true' 开启）。
-function shouldSanitizePreview(): boolean {
-  try {
-    const v = localStorage.getItem('flymd:sanitizePreview')
-    if (v != null) {
-      const s = String(v).toLowerCase()
-      if (s === '0' || s === 'false' || s === 'off' || s === 'no') return false
-      if (s === '1' || s === 'true' || s === 'on' || s === 'yes') return true
-    }
-  } catch {}
-  // 默认策略：开发环境开启，发行版关闭（仅针对预览渲染，粘贴/更新弹窗仍保留基础消毒）
-  try { return !!((import.meta as any).env?.DEV) } catch { return false }
-}
 // 初始化多标签系统（包装器模式，最小侵入）
 import('./tabs/integration').catch(e => console.warn('[Tabs] Failed to load tab system:', e))
 // 初始化源码+阅读分屏（仅源码模式，包装器模式）

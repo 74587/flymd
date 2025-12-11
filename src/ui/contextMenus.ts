@@ -1,5 +1,7 @@
 // 右键菜单 UI 模块：渲染 + 排序 + 拖拽
 
+import { escapeAttrValue } from '../utils/escape'
+
 export type ContextMenuContext = {
   selectedText: string
   cursorPosition: number
@@ -86,18 +88,6 @@ export function removeContextMenu(): void {
       _contextMenuKeyHandler = null
     }
   } catch {}
-}
-
-function escapeAttrValue(input: string): string {
-  try {
-    return String(input)
-      .replace(/&/g, '&amp;')
-      .replace(/"/g, '&quot;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-  } catch {
-    return ''
-  }
 }
 
 // 渲染右键菜单项

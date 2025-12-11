@@ -14,6 +14,7 @@ import {
 } from './runtime'
 import { t } from '../i18n'
 import { appendLog } from '../core/logger'
+import { isLikelyLocalPath } from '../core/pathUtils'
 
 // 宿主依赖：通过注入避免与 main.ts 形成循环引用
 export interface ExtensionsPanelHost {
@@ -833,16 +834,6 @@ async function ensureExtensionsPanelRenderedOnce(): Promise<void> {
   if (_extOverlayRenderedOnce) return
   _extOverlayRenderedOnce = true
   await refreshExtensionsUI()
-}
-
-// 简单判断一个字符串是否更像本地路径（用于区分本地/远程安装）
-function isLikelyLocalPath(input: string): boolean {
-  const v = (input || '').trim()
-  if (!v) return false
-  if (/^[A-Za-z]:[\\/]/.test(v)) return true
-  if (/^\\\\/.test(v)) return true
-  if (v.startsWith('/')) return true
-  return false
 }
 
 function ensureExtensionsOverlayMounted(): void {

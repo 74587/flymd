@@ -13,6 +13,8 @@ export const SETTINGS_FILE_NAME = 'flymd-settings.json'
 export const BACKUP_PREFIX_APPDATA = 'appdata'
 export const BACKUP_PREFIX_APPLOCAL = 'applocal'
 export const APP_LOCAL_EXCLUDE_ROOTS = ['EBWebView']
+// 配置备份文件扩展名（原本定义在 main.ts 中）
+export const CONFIG_BACKUP_FILE_EXT = 'flymdconfig'
 
 // 类型定义
 export type ConfigBackupEntry = { path: string; data: string; size: number }
@@ -188,4 +190,10 @@ export async function clearAppLocalDataForRestore(): Promise<void> {
       try { await remove(name as any, { baseDir: BaseDirectory.AppLocalData } as any) } catch {}
     }
   }
+}
+
+// 备份文件名时间戳（从 main.ts 拆分，保持行为不变）
+export function formatBackupTimestamp(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
 }
