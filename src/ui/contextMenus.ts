@@ -1,6 +1,7 @@
 // 右键菜单 UI 模块：渲染 + 排序 + 拖拽
 
 import { escapeAttrValue } from '../utils/escape'
+import { getPluginMenuVisibility } from '../extensions/pluginMenuConfig'
 
 export type ContextMenuContext = {
   selectedText: string
@@ -187,8 +188,18 @@ export async function showContextMenu(
   try {
     removeContextMenu()
 
+    // 根据插件菜单可见性过滤右键菜单项
+    const visiblePluginItems = opts.pluginItems.filter((item) => {
+      try {
+        const vis = getPluginMenuVisibility(item.pluginId)
+        return vis.contextMenu !== false
+      } catch {
+        return true
+      }
+    })
+
     const sortedPluginItems = sortContextMenuItems(
-      opts.pluginItems.filter((item) => item && item.config),
+      visiblePluginItems.filter((item) => item && item.config),
     )
 
     type ExtendedMenuItem = {
@@ -457,4 +468,3 @@ export async function showContextMenu(
     console.error('显示右键菜单失败:', err)
   }
 }
-

@@ -6,6 +6,7 @@
  */
 
 import { t } from '../i18n'
+import { getPluginMenuVisibility } from './pluginMenuConfig'
 
 // 插件菜单项描述
 type PluginMenuItem = { pluginId: string; label: string; onClick?: () => void; children?: any[] }
@@ -17,6 +18,7 @@ const PLUGIN_DROPDOWN_PANEL_ID = 'plugin-dropdown-panel'
 // 当前“插件”菜单按钮和菜单项集合
 const pluginsMenuItems = new Map<string, PluginMenuItem>() // 收纳到"插件"菜单的项目
 let _pluginsMenuBtn: HTMLDivElement | null = null // "插件"菜单按钮
+let _openPluginsMenuManager: (() => void) | null = null // “菜单管理”弹窗打开回调
 
 let pluginDropdownKeyHandler: ((e: KeyboardEvent) => void) | null = null
 
@@ -215,6 +217,22 @@ function showPluginDropdownInternal(anchor: HTMLElement, items: any[]) {
   }
 }
 
+// 为“插件菜单管理”注册打开回调（由宿主 main.ts 注入）
+export function setPluginsMenuManagerOpener(fn: (() => void) | null): void {
+  _openPluginsMenuManager = fn
+}
+
+// 为菜单管理界面提供当前下拉菜单项快照（仅包含 pluginId 和 label）
+export function getPluginsMenuItemsSnapshot(): Array<{ pluginId: string; label: string }> {
+  const out: Array<{ pluginId: string; label: string }> = []
+  try {
+    for (const item of pluginsMenuItems.values()) {
+      out.push({ pluginId: item.pluginId, label: item.label })
+    }
+  } catch {}
+  return out
+}
+
 // 对外暴露的下拉菜单切换函数
 export function togglePluginDropdown(anchor: HTMLElement, items: any[]) {
   const overlay = document.getElementById(PLUGIN_DROPDOWN_OVERLAY_ID)
@@ -247,12 +265,43 @@ export function initPluginsMenu() {
       ev.preventDefault()
       ev.stopPropagation()
       try {
-        // 构建菜单项列表
-        const items = Array.from(pluginsMenuItems.values()).map(item => ({
-          label: item.label,
-          onClick: item.onClick,
-          children: item.children
-        }))
+        // 构建菜单项列表（按可见性过滤）
+        const visibleItems = Array.from(pluginsMenuItems.values()).filter((item) => {
+          try {
+            const vis = getPluginMenuVisibility(item.pluginId)
+            return vis.dropdownMenu !== false
+          } catch {
+            return true
+          }
+        })
+
+        const items: any[] = []
+
+        // 第一项：菜单管理
+        if (_openPluginsMenuManager) {
+          items.push({
+            label: t('menu.plugins.manage') || '菜单管理',
+            onClick: () => {
+              try {
+                _openPluginsMenuManager && _openPluginsMenuManager()
+              } catch (e) {
+                console.error(e)
+              }
+            },
+          })
+          if (visibleItems.length > 0) {
+            items.push({ type: 'divider' })
+          }
+        }
+
+        for (const item of visibleItems) {
+          items.push({
+            label: item.label,
+            onClick: item.onClick,
+            children: item.children,
+          })
+        }
+
         togglePluginDropdown(pluginsBtn, items)
       } catch (e) { console.error(e) }
     })

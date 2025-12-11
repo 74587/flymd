@@ -120,7 +120,14 @@ import {
   ensureCoreExtensionsAfterStartup,
   markCoreExtensionBlocked,
 } from './extensions/coreExtensions'
-import { initPluginsMenu, addToPluginsMenu, removeFromPluginsMenu, togglePluginDropdown } from './extensions/pluginMenu'
+import {
+  initPluginsMenu,
+  addToPluginsMenu,
+  removeFromPluginsMenu,
+  togglePluginDropdown,
+  setPluginsMenuManagerOpener,
+  getPluginsMenuItemsSnapshot,
+} from './extensions/pluginMenu'
 import { openLinkDialog, openRenameDialog } from './ui/linkDialogs'
 import { initExtensionsPanel, refreshExtensionsUI as panelRefreshExtensionsUI, showExtensionsOverlay as panelShowExtensionsOverlay, prewarmExtensionsPanel as panelPrewarmExtensionsPanel } from './extensions/extensionsPanel'
 import { initAboutOverlay, showAbout } from './ui/aboutOverlay'
@@ -134,6 +141,10 @@ import {
   type ContextMenuItemConfig,
   type PluginContextMenuItem,
 } from './ui/contextMenus'
+import {
+  openPluginMenuManager,
+  type PluginMenuManagerHost,
+} from './extensions/pluginMenuManager'
 import { getMermaidConfig } from './core/mermaidConfig'
 import { CONFIG_BACKUP_FILE_EXT, formatBackupTimestamp } from './core/configBackup'
 import { pluginNotice } from './core/pluginNotice'
@@ -8817,6 +8828,24 @@ const {
   removePluginDir,
   loadAndActivateEnabledPlugins,
 } = pluginRuntime
+
+// 插件菜单管理：提供“右键菜单 / 下拉菜单”可见性开关的宿主依赖
+const pluginMenuManagerHost: PluginMenuManagerHost = {
+  getInstalledPlugins: () => getInstalledPlugins(),
+  getPluginContextMenuItems: () => pluginContextMenuItems,
+  getDropdownPlugins: () => {
+    try {
+      return getPluginsMenuItemsSnapshot()
+    } catch {
+      return []
+    }
+  },
+}
+
+// 将“菜单管理”入口挂接到“插件”下拉菜单的第一项
+setPluginsMenuManagerOpener(() => {
+  void openPluginMenuManager(pluginMenuManagerHost)
+})
 
 // 简单判断一个字符串是否更像本地路径（用于区分本地/远程安装）
 function isLikelyLocalPath(input: string): boolean {

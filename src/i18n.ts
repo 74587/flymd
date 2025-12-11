@@ -48,6 +48,7 @@ const dict = {
     'menu.theme': '主题',
     'menu.plugins.tooltip': '扩展插件菜单',
     'menu.theme.tooltip': '主题设置',
+    'menu.plugins.manage': '菜单管理',
     'menu.portableMode': '便携模式',
     'portable.enabling': '正在开启便携模式…',
     'portable.enabled': '便携模式已开启，所有配置写入根目录方便携带',
@@ -300,8 +301,16 @@ const dict = {
     'ext.todoPush.name': '代办事项推送',
     'ext.todoPush.author': '作者：飞速MarkDown & xxtui',
     'ext.todoPush.desc': '智能提醒助手，自动识别文档中的未完成 TODO 事项，按设定时间通过微信、短信或邮箱推送给指定人员。支持自定义推送规则、多人协作提醒，让重要任务不再遗漏。',
+
+    // 插件菜单管理
+    'plugins.menuManager.title': '扩展菜单管理',
+    'plugins.menuManager.col.plugin': '扩展',
+    'plugins.menuManager.col.context': '右键菜单',
+    'plugins.menuManager.col.dropdown': '下拉菜单',
+    'plugins.menuManager.tip': '勾选表示显示，取消勾选后对应菜单将被隐藏。',
+    'plugins.menuManager.empty': '当前没有已注册的扩展菜单。',
   },
-    en: {
+  en: {
     'menu.file': 'File',
     'menu.mode': 'Mode',
     'menu.recent': 'Recent',
@@ -314,6 +323,7 @@ const dict = {
     'menu.theme': 'Theme',
     'menu.plugins.tooltip': 'Plugin menu',
     'menu.theme.tooltip': 'Theme settings',
+    'menu.plugins.manage': 'Menu Manager',
     'menu.portableMode': 'Portable Mode',
     'portable.enabling': 'Enabling portable mode…',
     'portable.enabled': 'Portable mode enabled (auto backup to app root)',
@@ -565,6 +575,14 @@ const dict = {
     'ext.todoPush.name': 'Todo Reminder',
     'ext.todoPush.author': 'By: FlyMD & xxtui',
     'ext.todoPush.desc': 'Smart reminder assistant that automatically identifies unfinished TODO items in documents and pushes them to designated recipients via WeChat, SMS or email at scheduled times. Supports custom push rules and multi-person collaboration reminders to ensure important tasks are never missed.',
+
+    // Plugin menu manager
+    'plugins.menuManager.title': 'Plugin Menu Manager',
+    'plugins.menuManager.col.plugin': 'Extension',
+    'plugins.menuManager.col.context': 'Context Menu',
+    'plugins.menuManager.col.dropdown': 'Plugins Menu',
+    'plugins.menuManager.tip': 'Checked means visible; unchecking hides the corresponding menu entry.',
+    'plugins.menuManager.empty': 'No registered extension menus found.',
   },
 } as const
 
