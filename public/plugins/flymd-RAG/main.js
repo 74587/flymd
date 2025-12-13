@@ -4,7 +4,7 @@
 // - embedding 连接默认复用 ai-assistant 的 baseUrl/apiKey（模型单独配置；也可切换为自定义）
 // - 第一版仅支持 md/markdown/txt
 // - 排除规则：目录前缀（遍历阶段跳过）
-// - 索引落盘：AppLocalData/flymd/plugin-data/<pluginId>/<libraryKey>/
+// - 索引落盘：默认 AppLocalData/flymd/plugin-data/<pluginId>/<libraryKey>/（可在设置里改索引存储目录）
 
 const CFG_KEY = 'flysmart.byLibrary'
 const SCHEMA_VERSION = 1
@@ -18,6 +18,7 @@ const DEFAULT_CFG = {
   includeDirs: [],
   excludeDirs: [],
   maxDepth: 32,
+  indexDir: '', // 为空=默认（插件数据目录）；非空=使用该目录作为索引存储根目录
   // 分块：优先按 Markdown 标题段落切分（更贴近语义），再做长度上限
   chunk: { maxChars: 512, overlapChars: 0, byHeading: true },
   embedding: {
@@ -408,6 +409,10 @@ function normalizeDirPrefixes(list) {
   return out
 }
 
+function normalizeDirPath(p) {
+  return String(p || '').trim().replace(/[\\/]+$/, '')
+}
+
 function matchDirPrefix(relativePath, prefixes, caseInsensitive) {
   if (!prefixes || !prefixes.length) return false
   let rel = String(relativePath || '').replace(/[\\]+/g, '/')
@@ -445,6 +450,23 @@ function normalizeRelativePath(p) {
     .replace(/^\/+/, '')
 }
 
+function normalizeDocInputToRel(input, root) {
+  const raw = String(input || '').trim()
+  if (!raw) return ''
+  const s = raw.replace(/[\\]+/g, '/')
+  const r = normalizeRelativePath(s)
+  const looksAbs = /^[a-zA-Z]:\//.test(s) || s.startsWith('//')
+  if (!looksAbs) return r
+  const rootNorm = String(root || '').trim().replace(/[\\]+/g, '/')
+  if (!rootNorm) return r
+  const win = isWindowsPath(rootNorm)
+  const a = win ? s.toLowerCase() : s
+  const b = win ? rootNorm.toLowerCase() : rootNorm
+  if (a === b) return ''
+  if (a.startsWith(b + '/')) return normalizeRelativePath(s.slice(rootNorm.length + 1))
+  return ''
+}
+
 function shouldIndexRel(rel, cfg, caseInsensitive) {
   const r = normalizeRelativePath(rel)
   if (!r) return false
@@ -465,7 +487,11 @@ function shouldIndexRel(rel, cfg, caseInsensitive) {
 function stopIncrementalWatch() {
   try {
     for (const fn of FLYSMART_WATCH_DISPOSERS || []) {
-      try { fn && fn() } catch {}
+      try {
+        if (!fn) continue
+        const r = fn()
+        if (r && typeof r.catch === 'function') r.catch(() => {})
+      } catch {}
     }
   } catch {}
   FLYSMART_WATCH_DISPOSERS = []
@@ -592,6 +618,7 @@ function normalizeConfig(cfg) {
     ...c,
   }
   out.enabled = !!out.enabled
+  out.indexDir = normalizeDirPath(out.indexDir || '')
   out.includeExtensions = normalizeExtensions(out.includeExtensions)
   out.includeDirs = normalizeDirPrefixes(out.includeDirs)
   out.excludeDirs = normalizeDirPrefixes(out.excludeDirs)
@@ -658,6 +685,88 @@ async function getLibraryRootRequired(ctx) {
 async function getLibraryKey(ctx) {
   const root = await getLibraryRootRequired(ctx)
   return await sha1Hex(normalizePathForKey(root))
+}
+
+async function getIndexDataDir(ctx, cfg, libraryRoot, opt) {
+  const dir = cfg && cfg.indexDir ? normalizeDirPath(cfg.indexDir) : ''
+  if (!dir) return await ctx.getPluginDataDir()
+  const cfgKey =
+    cfg && cfg.libraryKey ? String(cfg.libraryKey) : (await sha1Hex(normalizePathForKey(libraryRoot)))
+  const base = normalizeDirPath(dir)
+  const sep = base.includes('\\') ? '\\' : '/'
+  const target = base + sep + ['flymd', 'rag-index', cfgKey].join(sep)
+  if (opt && opt.ensure === false) return target
+  if (typeof ctx.ensureDir === 'function') {
+    const ok = await ctx.ensureDir(target)
+    if (!ok) throw new Error('创建索引目录失败：' + target)
+  }
+  return target
+}
+
+async function migrateIndexDirIfNeeded(ctx, oldCfg, newCfg) {
+  try {
+    if (!ctx) return { changed: false }
+    const root = await getLibraryRootRequired(ctx)
+    const oldDir = await getIndexDataDir(ctx, oldCfg, root, { ensure: false })
+    const newDir = await getIndexDataDir(ctx, newCfg, root, { ensure: true })
+    const caseInsensitive = isWindowsPath(root)
+    const a = caseInsensitive ? String(oldDir).toLowerCase() : String(oldDir)
+    const b = caseInsensitive ? String(newDir).toLowerCase() : String(newDir)
+    if (!a || !b || a === b) return { changed: false }
+
+    const list = [META_FILE, VEC_FILE, INDEX_LOG_FILE]
+    let copied = 0
+    for (const name of list) {
+      const src = joinFs(oldDir, name)
+      const dst = joinFs(newDir, name)
+      const ok = typeof ctx.exists === 'function' ? await ctx.exists(src) : true
+      if (!ok) continue
+      if (name === VEC_FILE) {
+        const bytes = await ctx.readFileBinary(src)
+        await ctx.writeFileBinary(dst, bytes)
+      } else {
+        const text = await ctx.readTextFile(src)
+        await ctx.writeTextFile(dst, String(text ?? ''))
+      }
+      copied++
+    }
+
+    if (copied > 0) {
+      await dbg(ctx, '索引目录已搬迁', { from: oldDir, to: newDir, copied }, true)
+    }
+    return { changed: true, oldDir, newDir, copied }
+  } catch (e) {
+    try {
+      await dbg(
+        ctx,
+        '索引目录搬迁失败',
+        { error: e && e.message ? String(e.message) : String(e) },
+        true,
+      )
+    } catch {}
+    throw e
+  }
+}
+
+async function cleanupIndexFiles(ctx, dir) {
+  try {
+    if (!ctx || !dir) return
+    const list = [META_FILE, VEC_FILE, INDEX_LOG_FILE]
+    for (const name of list) {
+      const p = joinFs(dir, name)
+      const ok = typeof ctx.exists === 'function' ? await ctx.exists(p) : true
+      if (!ok) continue
+      if (typeof ctx.removePath === 'function') {
+        await ctx.removePath(p, { recursive: false })
+        continue
+      }
+      if (name === VEC_FILE) {
+        await ctx.writeFileBinary(p, new Uint8Array())
+      } else {
+        await ctx.writeTextFile(p, '')
+      }
+    }
+  } catch {}
 }
 
 async function loadCfgMap(ctx) {
@@ -1025,7 +1134,8 @@ async function readJsonMaybe(ctx, absPath) {
 }
 
 async function loadIndexFromDisk(ctx, cfg) {
-  const dataDir = await ctx.getPluginDataDir()
+  const libraryRoot = await getLibraryRootRequired(ctx)
+  const dataDir = await getIndexDataDir(ctx, cfg, libraryRoot)
   const metaPath = joinFs(dataDir, META_FILE)
   const vecPath = joinFs(dataDir, VEC_FILE)
   const meta = await readJsonMaybe(ctx, metaPath)
@@ -1101,6 +1211,9 @@ async function buildIndex(ctx) {
     if (typeof ctx.writeFileBinary !== 'function') {
       throw new Error('宿主版本过老：缺少 writeFileBinary')
     }
+    if (typeof ctx.ensureDir !== 'function') {
+      throw new Error('宿主版本过老：缺少 ensureDir')
+    }
     if (typeof ctx.listLibraryFiles !== 'function') {
       throw new Error('宿主版本过老：缺少 listLibraryFiles')
     }
@@ -1113,7 +1226,7 @@ async function buildIndex(ctx) {
     const libraryRoot = await getLibraryRootRequired(ctx)
     const caseInsensitive = isWindowsPath(libraryRoot)
     const cfgKey = cfg.libraryKey || (await sha1Hex(normalizePathForKey(libraryRoot)))
-    const dataDir = await ctx.getPluginDataDir()
+    const dataDir = await getIndexDataDir(ctx, cfg, libraryRoot)
     FLYSMART_LOG.filePath = joinFs(dataDir, INDEX_LOG_FILE)
     FLYSMART_LOG.writeMode = 'overwrite'
     FLYSMART_LOG.lines = []
@@ -1447,11 +1560,12 @@ async function buildIndex(ctx) {
   }
 }
 
-async function incrementalIndexOne(ctx, relativePath) {
+async function incrementalIndexOne(ctx, relativePath, opts) {
   if (!ctx) return
   if (FLYSMART_BUSY) return
   FLYSMART_BUSY = true
   try {
+    const forceRebuild = !!(opts && opts.forceRebuild)
     const cfg = await loadConfig(ctx)
     if (!cfg || !cfg.enabled) return
     const libraryRoot = await getLibraryRootRequired(ctx)
@@ -1468,10 +1582,13 @@ async function incrementalIndexOne(ctx, relativePath) {
     if (typeof ctx.writeTextFile !== 'function') {
       throw new Error('宿主版本过老：缺少 writeTextFile')
     }
+    if (typeof ctx.ensureDir !== 'function') {
+      throw new Error('宿主版本过老：缺少 ensureDir')
+    }
 
     const cfgKey =
       cfg.libraryKey || (await sha1Hex(normalizePathForKey(libraryRoot)))
-    const dataDir = await ctx.getPluginDataDir()
+    const dataDir = await getIndexDataDir(ctx, cfg, libraryRoot)
     const metaPath = joinFs(dataDir, META_FILE)
     const vecPath = joinFs(dataDir, VEC_FILE)
 
@@ -1539,8 +1656,25 @@ async function incrementalIndexOne(ctx, relativePath) {
     if (!meta.chunks || typeof meta.chunks !== 'object') meta.chunks = {}
 
     if (Object.prototype.hasOwnProperty.call(meta.files, rel)) {
-      await dbg(ctx, '增量索引：已存在，跳过', { rel }, true)
-      return
+      if (!forceRebuild) {
+        await dbg(ctx, '增量索引：已存在，跳过', { rel }, true)
+        return
+      }
+      try {
+        const old = meta.files[rel] || {}
+        const oldChunkIds = Array.isArray(old.chunkIds) ? old.chunkIds : []
+        for (const id of oldChunkIds) {
+          try { delete meta.chunks[id] } catch {}
+        }
+        try { delete meta.files[rel] } catch {}
+        meta.updatedAt = Date.now()
+        await dbg(
+          ctx,
+          '重建文档索引：已清理旧记录',
+          { rel, oldChunks: oldChunkIds.length },
+          true,
+        )
+      } catch {}
     }
 
     const absPath = joinAbs(libraryRoot, rel)
@@ -1687,11 +1821,14 @@ async function clearIndex(ctx) {
   if (typeof ctx.writeTextFile !== 'function') {
     throw new Error('宿主版本过老：缺少 writeTextFile')
   }
+  if (typeof ctx.ensureDir !== 'function') {
+    throw new Error('宿主版本过老：缺少 ensureDir')
+  }
 
   const cfg = await loadConfig(ctx)
   const libraryRoot = await getLibraryRootRequired(ctx)
   const cfgKey = cfg.libraryKey || (await sha1Hex(normalizePathForKey(libraryRoot)))
-  const dataDir = await ctx.getPluginDataDir()
+  const dataDir = await getIndexDataDir(ctx, cfg, libraryRoot)
   const metaPath = joinFs(dataDir, META_FILE)
   const vecPath = joinFs(dataDir, VEC_FILE)
 
@@ -2113,7 +2250,8 @@ async function openSettingsDialog(settingsCtx) {
   // 尝试读取上次的索引日志（无法打开控制台时靠它定位）
   try {
     if (typeof runtime.getPluginDataDir === 'function') {
-      const dataDir = await runtime.getPluginDataDir()
+      const root = await getLibraryRootRequired(runtime)
+      const dataDir = await getIndexDataDir(runtime, cfg, root)
       const logPath = joinFs(dataDir, INDEX_LOG_FILE)
       FLYSMART_LOG.filePath = logPath
       FLYSMART_LOG.pending = []
@@ -2184,11 +2322,11 @@ async function openSettingsDialog(settingsCtx) {
   const inputModel = document.createElement('input')
   inputModel.className = 'flysmart-input'
   inputModel.value = String(cfg.embedding.model || '')
-  inputModel.placeholder = '例如：voyage-3.5-lite / text-embedding-3-small'
+  inputModel.placeholder = '例如：text-embedding-3-small'
   const modelTip = document.createElement('div')
   modelTip.className = 'flysmart-tip'
   modelTip.textContent =
-    '支持 VoyageAI（model=voyage-3.5/voyage-3.5-lite 等）；连接默认复用 AI 助手，也可切换为自定义。'
+    '模型名由你的 embedding 服务决定；连接默认复用 AI 助手，也可切换为自定义。'
   rowModel.appendChild(modelLabel)
   rowModel.appendChild(inputModel)
   rowModel.appendChild(modelTip)
@@ -2205,7 +2343,7 @@ async function openSettingsDialog(settingsCtx) {
   optReuse.textContent = '复用 AI 助手'
   const optCustom = document.createElement('option')
   optCustom.value = 'custom'
-  optCustom.textContent = '自定义（VoyageAI 等）'
+  optCustom.textContent = '自定义'
   selectProvider.appendChild(optReuse)
   selectProvider.appendChild(optCustom)
   selectProvider.value = String(cfg.embedding.provider || 'reuse-ai-assistant')
@@ -2225,17 +2363,16 @@ async function openSettingsDialog(settingsCtx) {
   customConnLabel.textContent = '自定义 Embedding BaseURL / Key'
   const inputEmbedBaseUrl = document.createElement('input')
   inputEmbedBaseUrl.className = 'flysmart-input'
-  inputEmbedBaseUrl.placeholder = '例如：https://api.voyageai.com/v1'
+  inputEmbedBaseUrl.placeholder = '例如：https://your-embedding-host/v1'
   inputEmbedBaseUrl.value = String(cfg.embedding.baseUrl || '').trim()
   const inputEmbedApiKey = document.createElement('input')
   inputEmbedApiKey.className = 'flysmart-input'
   inputEmbedApiKey.type = 'password'
-  inputEmbedApiKey.placeholder = '例如：VOYAGE_API_KEY（可留空）'
+  inputEmbedApiKey.placeholder = '例如：API_KEY（可留空）'
   inputEmbedApiKey.value = String(cfg.embedding.apiKey || '')
   const customConnTip = document.createElement('div')
   customConnTip.className = 'flysmart-tip'
-  customConnTip.textContent =
-    'VoyageAI：baseUrl=https://api.voyageai.com/v1；model=voyage-3.5/voyage-3.5-lite（会自动使用 input_type=query/document）。'
+  customConnTip.textContent = '填写 baseUrl 与 apiKey（如服务不需要 key 可留空）。'
   rowCustomConn.appendChild(customConnLabel)
   rowCustomConn.appendChild(inputEmbedBaseUrl)
   rowCustomConn.appendChild(inputEmbedApiKey)
@@ -2285,6 +2422,71 @@ async function openSettingsDialog(settingsCtx) {
   rowExclude.appendChild(textareaExclude)
   rowExclude.appendChild(exclTip)
 
+  const rowIndexDir = document.createElement('div')
+  rowIndexDir.className = 'flysmart-row'
+  const indexDirLabel = document.createElement('div')
+  indexDirLabel.style.fontWeight = '600'
+  indexDirLabel.textContent = '索引存储目录（可选）'
+  const indexDirBar = document.createElement('div')
+  indexDirBar.style.display = 'flex'
+  indexDirBar.style.gap = '10px'
+  indexDirBar.style.flexWrap = 'wrap'
+  indexDirBar.style.alignItems = 'center'
+  const inputIndexDir = document.createElement('input')
+  inputIndexDir.className = 'flysmart-input'
+  inputIndexDir.placeholder = '留空=默认（插件数据目录）'
+  inputIndexDir.value = String(cfg.indexDir || '')
+  inputIndexDir.style.flex = '1'
+  inputIndexDir.style.minWidth = '260px'
+  const btnPickIndexDir = document.createElement('button')
+  btnPickIndexDir.className = 'flysmart-btn'
+  btnPickIndexDir.textContent = '浏览'
+  const indexDirTip = document.createElement('div')
+  indexDirTip.className = 'flysmart-tip'
+
+  const rootForUi = await getLibraryRootRequired(runtime)
+  const refreshIndexDirTip = async () => {
+    try {
+      const tmp = { ...cfg, indexDir: normalizeDirPath(inputIndexDir.value || '') }
+      const eff = await getIndexDataDir(runtime, tmp, rootForUi, { ensure: false })
+      indexDirTip.textContent =
+        tmp.indexDir
+          ? `实际保存到：${eff}（目录变更会自动搬迁旧索引）`
+          : `实际保存到：${eff}（默认；目录变更会自动搬迁旧索引）`
+    } catch {
+      indexDirTip.textContent = '目录变更会自动搬迁旧索引'
+    }
+  }
+  inputIndexDir.addEventListener('input', () => {
+    try { void refreshIndexDirTip() } catch {}
+  })
+  await refreshIndexDirTip()
+
+  btnPickIndexDir.onclick = async () => {
+    btnPickIndexDir.disabled = true
+    try {
+      if (typeof runtime.pickDirectory !== 'function') {
+        throw new Error('宿主版本过老：缺少 pickDirectory')
+      }
+      const picked = await runtime.pickDirectory({
+        defaultPath: String(inputIndexDir.value || '').trim() || undefined,
+      })
+      if (!picked) return
+      inputIndexDir.value = String(picked || '').trim()
+      await refreshIndexDirTip()
+    } catch (e) {
+      uiNotice(settingsCtx, e && e.message ? e.message : '选择目录失败', 'err', 2400)
+    } finally {
+      btnPickIndexDir.disabled = false
+    }
+  }
+
+  indexDirBar.appendChild(inputIndexDir)
+  indexDirBar.appendChild(btnPickIndexDir)
+  rowIndexDir.appendChild(indexDirLabel)
+  rowIndexDir.appendChild(indexDirBar)
+  rowIndexDir.appendChild(indexDirTip)
+
   const rowActions = document.createElement('div')
   rowActions.className = 'flysmart-row'
   rowActions.style.display = 'flex'
@@ -2298,6 +2500,12 @@ async function openSettingsDialog(settingsCtx) {
   const btnIndex = document.createElement('button')
   btnIndex.className = 'flysmart-btn'
   btnIndex.textContent = '重建索引'
+  const tipRebuildAll = document.createElement('div')
+  tipRebuildAll.className = 'flysmart-tip'
+  tipRebuildAll.textContent = '重建索引将完全重建已索引的所有数据！'
+  const rowRebuildAllTip = document.createElement('div')
+  rowRebuildAllTip.className = 'flysmart-row'
+  rowRebuildAllTip.appendChild(tipRebuildAll)
 
   const btnClearIndex = document.createElement('button')
   btnClearIndex.className = 'flysmart-btn danger'
@@ -2339,7 +2547,7 @@ async function openSettingsDialog(settingsCtx) {
         embPatch.baseUrl = String(inputEmbedBaseUrl.value || '').trim()
         embPatch.apiKey = String(inputEmbedApiKey.value || '').trim()
       }
-      const next = await saveConfig(runtime, {
+      const patch = {
         enabled: !!inputEnabled.checked,
         includeDirs: String(textareaInclude.value || '')
           .split(/\r?\n/)
@@ -2349,9 +2557,26 @@ async function openSettingsDialog(settingsCtx) {
           .split(/\r?\n/)
           .map((x) => x.trim())
           .filter(Boolean),
+        indexDir: normalizeDirPath(inputIndexDir.value || ''),
         embedding: embPatch,
-      })
+      }
+      const preview = normalizeConfig({ ...DEFAULT_CFG, ...cfg, ...(patch || {}) })
+      preview.libraryKey = cfg && cfg.libraryKey ? cfg.libraryKey : preview.libraryKey
+      let mig = null
+      if (normalizeDirPath(cfg && cfg.indexDir ? cfg.indexDir : '') !== normalizeDirPath(preview.indexDir || '')) {
+        mig = await migrateIndexDirIfNeeded(runtime, cfg, preview)
+      }
+      const next = await saveConfig(runtime, patch)
       cfg = next
+      if (mig && mig.changed && mig.copied > 0 && mig.oldDir) {
+        await cleanupIndexFiles(runtime, mig.oldDir)
+      }
+      try {
+        const dataDir = await getIndexDataDir(runtime, cfg, rootForUi)
+        FLYSMART_LOG.filePath = joinFs(dataDir, INDEX_LOG_FILE)
+        debugTip.textContent = FLYSMART_LOG.filePath ? `日志文件：${FLYSMART_LOG.filePath}` : '日志文件：未生成'
+      } catch {}
+      try { await refreshIndexDirTip() } catch {}
       // 设置变更后，立刻刷新增量监听（includeDirs/enabled 会影响监控范围）
       try { void refreshIncrementalWatch(runtime, cfg) } catch {}
       uiNotice(settingsCtx, 'flymd-RAG 设置已保存', 'ok', 1400)
@@ -2397,6 +2622,81 @@ async function openSettingsDialog(settingsCtx) {
       uiNotice(settingsCtx, e && e.message ? e.message : '删除索引失败', 'err', 2600)
     } finally {
       btnClearIndex.disabled = false
+      refreshStatus()
+    }
+  }
+
+  const rowRebuildDoc = document.createElement('div')
+  rowRebuildDoc.className = 'flysmart-row'
+  rowRebuildDoc.style.display = 'flex'
+  rowRebuildDoc.style.flexDirection = 'column'
+  rowRebuildDoc.style.gap = '6px'
+  const rowRebuildDocTop = document.createElement('div')
+  rowRebuildDocTop.style.display = 'flex'
+  rowRebuildDocTop.style.gap = '10px'
+  rowRebuildDocTop.style.flexWrap = 'wrap'
+  rowRebuildDocTop.style.alignItems = 'center'
+  const inputRebuildDoc = document.createElement('input')
+  inputRebuildDoc.className = 'flysmart-input'
+  inputRebuildDoc.placeholder = '重建指定文档索引（相对库根目录）'
+  inputRebuildDoc.style.flex = '1'
+  inputRebuildDoc.style.minWidth = '260px'
+  const btnBrowseDoc = document.createElement('button')
+  btnBrowseDoc.className = 'flysmart-btn'
+  btnBrowseDoc.textContent = '浏览'
+  const btnRebuildDoc = document.createElement('button')
+  btnRebuildDoc.className = 'flysmart-btn'
+  btnRebuildDoc.textContent = '重建该文档索引'
+  const tipRebuildDoc = document.createElement('div')
+  tipRebuildDoc.className = 'flysmart-tip'
+  tipRebuildDoc.textContent =
+    '如果某个文档进行了修改，可以通过重建该文档索引来更新索引信息'
+  rowRebuildDocTop.appendChild(inputRebuildDoc)
+  rowRebuildDocTop.appendChild(btnBrowseDoc)
+  rowRebuildDocTop.appendChild(btnRebuildDoc)
+  rowRebuildDoc.appendChild(rowRebuildDocTop)
+  rowRebuildDoc.appendChild(tipRebuildDoc)
+
+  btnBrowseDoc.onclick = async () => {
+    btnBrowseDoc.disabled = true
+    try {
+      if (typeof runtime.pickDocFiles !== 'function') {
+        throw new Error('宿主版本过老：缺少 pickDocFiles')
+      }
+      const picked = await runtime.pickDocFiles({ multiple: false })
+      const abs = Array.isArray(picked) ? String(picked[0] || '') : ''
+      if (!abs) return
+      const root = await getLibraryRootRequired(runtime)
+      const rel = normalizeDocInputToRel(abs, root)
+      if (!rel) throw new Error('所选文档不在当前库目录下')
+      inputRebuildDoc.value = rel
+    } catch (e) {
+      uiNotice(settingsCtx, e && e.message ? e.message : '选择文档失败', 'err', 2400)
+    } finally {
+      btnBrowseDoc.disabled = false
+    }
+  }
+
+  btnRebuildDoc.onclick = async () => {
+    btnRebuildDoc.disabled = true
+    try {
+      if (FLYSMART_BUSY) throw new Error('正在索引，稍后再试')
+      await btnSave.onclick()
+      const cfgNow = await loadConfig(runtime)
+      if (!cfgNow || !cfgNow.enabled) throw new Error('未启用知识库索引')
+      const root = await getLibraryRootRequired(runtime)
+      const rel = normalizeDocInputToRel(inputRebuildDoc.value, root)
+      if (!rel) throw new Error('请输入文档相对路径（相对库根目录）')
+      const caseInsensitive = isWindowsPath(root)
+      if (!shouldIndexRel(rel, cfgNow, caseInsensitive)) {
+        throw new Error('该文档不在索引范围（目录/扩展名过滤）')
+      }
+      await incrementalIndexOne(runtime, rel, { forceRebuild: true })
+      uiNotice(settingsCtx, `已触发重建：${rel}`, 'ok', 1600)
+    } catch (e) {
+      uiNotice(settingsCtx, e && e.message ? e.message : '重建失败', 'err', 2600)
+    } finally {
+      btnRebuildDoc.disabled = false
       refreshStatus()
     }
   }
@@ -2571,7 +2871,10 @@ async function openSettingsDialog(settingsCtx) {
   body.appendChild(rowCustomConn)
   body.appendChild(rowInclude)
   body.appendChild(rowExclude)
+  body.appendChild(rowIndexDir)
   body.appendChild(rowActions)
+  body.appendChild(rowRebuildAllTip)
+  body.appendChild(rowRebuildDoc)
   body.appendChild(statusEl)
   body.appendChild(rowDebug)
   body.appendChild(rowSearch)

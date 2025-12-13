@@ -853,8 +853,16 @@ export function createPluginHost(
           throw new Error('cb 必须是函数')
         }
         const unwatch = await watchPathsAbs(root, [String(root)], cb, opt)
+        let disposed = false
         const disposer = () => {
-          try { unwatch() } catch {}
+          try {
+            if (disposed) return
+            disposed = true
+            const r = unwatch()
+            if (r && typeof (r as any).catch === 'function') {
+              ;(r as any).catch(() => {})
+            }
+          } catch {}
         }
         const list = state.pluginWatchDisposers.get(p.id) || []
         list.push(disposer)
@@ -895,8 +903,16 @@ export function createPluginHost(
         if (!absList.length) throw new Error('paths 不能为空')
 
         const unwatch = await watchPathsAbs(root, absList, cb, opt)
+        let disposed = false
         const disposer = () => {
-          try { unwatch() } catch {}
+          try {
+            if (disposed) return
+            disposed = true
+            const r = unwatch()
+            if (r && typeof (r as any).catch === 'function') {
+              ;(r as any).catch(() => {})
+            }
+          } catch {}
         }
         const list = state.pluginWatchDisposers.get(p.id) || []
         list.push(disposer)
@@ -923,6 +939,28 @@ export function createPluginHost(
         } catch (e) {
           console.error(`[Plugin ${p.id}] writeTextFile 失败:`, e)
           throw e
+        }
+      },
+      ensureDir: async (absPath: string) => {
+        try {
+          const p2 = String(absPath || '').trim()
+          if (!p2) throw new Error('absPath 不能为空')
+          await mkdir(p2 as any, { recursive: true } as any)
+          return true
+        } catch (e) {
+          console.error(`[Plugin ${p.id}] ensureDir 失败:`, e)
+          return false
+        }
+      },
+      removePath: async (absPath: string, opt?: { recursive?: boolean }) => {
+        try {
+          const p2 = String(absPath || '').trim()
+          if (!p2) throw new Error('absPath 不能为空')
+          await remove(p2 as any, { recursive: !!(opt && opt.recursive) } as any)
+          return true
+        } catch (e) {
+          console.error(`[Plugin ${p.id}] removePath 失败:`, e)
+          return false
         }
       },
       appendTextFile: async (absPath: string, content: string) => {
