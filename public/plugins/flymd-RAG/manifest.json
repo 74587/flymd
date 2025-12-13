@@ -1,0 +1,16 @@
+{
+  "id": "flymd-RAG",
+  "name": "flymd-RAG 知识库索引",
+  "version": "0.1.0",
+  "author": "flyMD",
+  "description": "为本地 Markdown/TXT 构建向量索引，提供语义检索（RAG 基础能力）。",
+  "i18n": {
+    "en": {
+      "name": "flymd-RAG Knowledge Index",
+      "description": "Builds an embedding index for local Markdown/TXT and provides semantic search (RAG base)."
+    }
+  },
+  "homepage": "https://github.com/flyhunterl/flymd",
+  "main": "main.js",
+  "minHostVersion": "0.3.0"
+}

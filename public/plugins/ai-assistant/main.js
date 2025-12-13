@@ -25,6 +25,7 @@ const DEFAULT_CFG = {
   win: { x: 60, y: 60, w: 400, h: 440 },
   dock: 'left', // 'left'=左侧停靠；'right'=右侧停靠；'bottom'=底部停靠；false=浮动窗口
   limits: { maxCtxChars: 6000 },
+  kb: { enabled: false, topK: 5, maxChars: 2000 }, // 知识库检索（RAG），默认关闭
   theme: 'auto',
   freeModel: DEFAULT_FREE_MODEL_KEY,
   alwaysUseFreeTrans: false // 翻译功能始终使用免费模型
@@ -218,6 +219,15 @@ async function loadCfg(context) {
     // 兼容旧配置：将 dock: true 转换为 'left'
     if (cfg.dock === true) cfg.dock = 'left'
     cfg.freeModel = normalizeFreeModelKey(cfg.freeModel)
+    // 知识库配置：确保子对象合并与数值归一化
+    try {
+      const raw = cfg.kb && typeof cfg.kb === 'object' ? cfg.kb : {}
+      const kb = { ...(DEFAULT_CFG.kb || {}), ...(raw || {}) }
+      kb.enabled = !!kb.enabled
+      kb.topK = Math.max(1, Math.min(20, parseInt(String(kb.topK ?? 5), 10) || 5))
+      kb.maxChars = Math.max(200, Math.min(8000, parseInt(String(kb.maxChars ?? 2000), 10) || 2000))
+      cfg.kb = kb
+    } catch { cfg.kb = { ...(DEFAULT_CFG.kb || {}) } }
     // 更新免费模式缓存
     __AI_IS_FREE_MODE__ = cfg.provider === 'free'
     return cfg
@@ -480,6 +490,7 @@ function mergeConfig(baseCfg, overrides = {}){
   const merged = { ...baseCfg, ...overrides }
   merged.limits = { ...(baseCfg?.limits || {}), ...(overrides?.limits || {}) }
   merged.win = { ...(baseCfg?.win || {}), ...(overrides?.win || {}) }
+  merged.kb = { ...(baseCfg?.kb || {}), ...(overrides?.kb || {}) }
   return merged
 }
 
@@ -3231,6 +3242,115 @@ async function sendFromInput(context){
   await doSend(context)
 }
 
+function normalizeKbCfgForAi(cfg){
+  try {
+    const raw = (cfg && cfg.kb && typeof cfg.kb === 'object') ? cfg.kb : {}
+    const enabled = !!raw.enabled
+    const topK = Math.max(1, Math.min(20, parseInt(String(raw.topK ?? 5), 10) || 5))
+    const maxChars = Math.max(200, Math.min(8000, parseInt(String(raw.maxChars ?? 2000), 10) || 2000))
+    return { enabled, topK, maxChars }
+  } catch {
+    return { enabled: false, topK: 5, maxChars: 2000 }
+  }
+}
+
+function extractPlainTextFromChatMessage(msg){
+  try {
+    if (!msg) return ''
+    const c = msg.content
+    if (typeof c === 'string') return c
+    if (Array.isArray(c)) {
+      return c.map(b => (b && b.type === 'text') ? String(b.text || '') : '').join('')
+    }
+  } catch {}
+  return ''
+}
+
+function getLastUserTextFromMsgs(msgs){
+  try {
+    const arr = Array.isArray(msgs) ? msgs : []
+    for (let i = arr.length - 1; i >= 0; i--) {
+      const m = arr[i]
+      if (m && m.role === 'user') {
+        const t = String(extractPlainTextFromChatMessage(m) || '').trim()
+        if (t) return t
+      }
+    }
+  } catch {}
+  return ''
+}
+
+function buildKnowledgeContextText(hits, maxChars){
+  const locale = aiGetLocale()
+  const head = locale === 'en' ? 'Knowledge base excerpts:' : '知识库引用：'
+  const tail = locale === 'en'
+    ? '\nUse [n] citations when you refer to these excerpts.'
+    : '\n引用这些内容时请用 [n] 标注来源。'
+  let out = head + '\n'
+  const limit = Math.max(200, maxChars | 0)
+  const add = (s) => {
+    if (!s) return
+    if (out.length >= limit) return
+    const remain = limit - out.length
+    out += s.length > remain ? s.slice(0, remain) : s
+  }
+
+  const arr = Array.isArray(hits) ? hits : []
+  for (let i = 0; i < arr.length; i++) {
+    const h = arr[i] || {}
+    const rel = String(h.relative || '').trim()
+    const line = `${rel || (h.filePath || '')}:${h.startLine || ''}-${h.endLine || ''}`
+    const heading = String(h.heading || '').trim()
+    const score = (typeof h.score === 'number' && Number.isFinite(h.score)) ? h.score : null
+    const title = `[${i + 1}] ${line}` + (heading ? ` # ${heading}` : '') + (score != null ? ` (${score.toFixed(4)})` : '')
+    const snip = String(h.snippet || '').trim()
+    add(title + '\n')
+    if (snip) add(snip + '\n\n')
+    if (out.length >= limit) break
+  }
+  add(tail)
+  return out.trim()
+}
+
+async function maybeInjectKnowledgeContext(context, cfg, userMsgs, finalMsgs, textOnlyMsgs){
+  const kb = normalizeKbCfgForAi(cfg)
+  if (!kb.enabled) return { finalMsgs, textOnlyMsgs, injected: false }
+  if (!context || typeof context.getPluginAPI !== 'function') return { finalMsgs, textOnlyMsgs, injected: false }
+
+  const query = getLastUserTextFromMsgs(userMsgs)
+  if (!query) return { finalMsgs, textOnlyMsgs, injected: false }
+
+  const api = context.getPluginAPI('flymdRAG')
+  if (!api || typeof api.search !== 'function') return { finalMsgs, textOnlyMsgs, injected: false }
+
+  try {
+    if (typeof api.getConfig === 'function') {
+      const vcfg = await api.getConfig()
+      if (vcfg && vcfg.enabled === false) return { finalMsgs, textOnlyMsgs, injected: false }
+    }
+  } catch {}
+
+  let hits = []
+  try {
+    hits = await api.search(query, { topK: kb.topK })
+  } catch (e) {
+    console.warn('flymd-RAG 检索失败：', e)
+    return { finalMsgs, textOnlyMsgs, injected: false }
+  }
+  if (!hits || !hits.length) return { finalMsgs, textOnlyMsgs, injected: false }
+
+  const content = buildKnowledgeContextText(hits, kb.maxChars)
+  if (!content) return { finalMsgs, textOnlyMsgs, injected: false }
+  const sysMsg = { role: 'system', content }
+  const inject = (arr) => {
+    const a = Array.isArray(arr) ? arr : []
+    if (!a.length) return [sysMsg]
+    if (a[0] && a[0].role === 'system') return [a[0], sysMsg, ...a.slice(1)]
+    return [sysMsg, ...a]
+  }
+  return { finalMsgs: inject(finalMsgs), textOnlyMsgs: inject(textOnlyMsgs), injected: true }
+}
+
 // 带快捷操作的发送函数
 async function sendFromInputWithAction(context){
   const pendingAction = __AI_PENDING_ACTION__
@@ -3314,7 +3434,7 @@ async function sendFromInputWithAction(context){
         userMsg = { role: 'user', content: '文档上下文：\n\n' + docCtx }
       }
 
-      const finalMsgs = [{ role: 'system', content: system }, userMsg]
+      let finalMsgs = [{ role: 'system', content: system }, userMsg]
       userMsgs.forEach(m => finalMsgs.push(m))
 
       // 纯文本降级版本：保留图片的文字说明，去掉 image_url 结构
@@ -3326,6 +3446,15 @@ async function sendFromInputWithAction(context){
           textOnlyMsgs = [{ role: 'system', content: system }, textUserMsg]
           userMsgs.forEach(m => textOnlyMsgs.push(m))
         } catch {}
+      }
+
+      // RAG：可选追加知识库引用（默认关闭；未安装/未启用 flymd-RAG 时不影响现有行为）
+      try {
+        const r = await maybeInjectKnowledgeContext(context, cfg, userMsgs, finalMsgs, textOnlyMsgs)
+        finalMsgs = r.finalMsgs
+        textOnlyMsgs = r.textOnlyMsgs
+      } catch (e) {
+        console.warn('知识库联动失败：', e)
       }
 
       const url = buildApiUrl(cfg)
@@ -3527,6 +3656,10 @@ export async function openSettings(context){
     '  <div class="set-row custom-only"><label>' + aiText('模型', 'Model') + '</label><input id="set-model" type="text" placeholder="gpt-4o-mini"/></div>',
     '  <div class="set-row"><label>' + aiText('侧栏宽度(px)', 'Sidebar width (px)') + '</label><input id="set-sidew" type="number" min="400" step="10" placeholder="400"/></div>',
     '  <div class="set-row"><label>' + aiText('上下文截断', 'Context limit') + '</label><input id="set-max" type="number" min="1000" step="500" placeholder="6000"/></div>',
+    '  <div class="set-row"><label>' + aiText('知识库(RAG)', 'Knowledge (RAG)') + '</label><label class="toggle-switch"><input type="checkbox" id="set-kb-enabled"/><span class="toggle-slider"></span></label></div>',
+    '  <div class="set-row"><label>TopK</label><input id="set-kb-topk" type="number" min="1" max="20" step="1" placeholder="5"/></div>',
+    '  <div class="set-row"><label>' + aiText('引用字数', 'Max chars') + '</label><input id="set-kb-maxchars" type="number" min="200" step="200" placeholder="2000"/></div>',
+    '  <div class="set-row"><span style="font-size:12px;color:#6b7280;line-height:1.4;">' + aiText('开启后会在发送前调用 flymd-RAG 检索并追加引用上下文；未安装/未启用 flymd-RAG 时不影响现有行为。', 'When enabled, AI Assistant will call flymd-RAG search before sending and append cited context; if flymd-RAG is not installed/enabled, behavior stays unchanged.') + '</span></div>',
     '  <div class="set-row set-link-row custom-only"><a href="https://cloud.siliconflow.cn/i/X96CT74a" target="_blank" rel="noopener noreferrer">' + aiText('点此注册硅基流动得2000万免费Token', 'Click to register at SiliconFlow to get 20M free tokens') + '</a></div>',
     '  <div class="set-row set-link-row custom-only"><a href="https://x.dogenet.win/i/dXCKvZ6Q" target="_blank" rel="noopener noreferrer">' + aiText('点此注册OMG获得20美元Claude资源包', 'Click to register OMG to get 20 USD Claude credits') + '</a></div>',
     '  <div class="powered-by-img" id="powered-by-container" style="display:none;text-align:center;margin:12px 0 4px 0;"><a href="https://cloud.siliconflow.cn/i/X96CT74a" target="_blank" rel="noopener noreferrer" style="border:none;outline:none;"><img id="powered-by-img" src="" alt="Powered by" style="max-width:180px;height:auto;cursor:pointer;border:none;outline:none;"/></a></div>',
@@ -3552,6 +3685,9 @@ export async function openSettings(context){
   const elModel = overlay.querySelector('#set-model')
   const elMax = overlay.querySelector('#set-max')
   const elSideW = overlay.querySelector('#set-sidew')
+  const elKbEnabled = overlay.querySelector('#set-kb-enabled')
+  const elKbTopK = overlay.querySelector('#set-kb-topk')
+  const elKbMaxChars = overlay.querySelector('#set-kb-maxchars')
   const elFreeWarning = overlay.querySelector('#free-warning')
   const elCustomOnlyRows = overlay.querySelectorAll('.custom-only')
   const elModeLabelCustom = overlay.querySelector('#mode-label-custom')
@@ -3565,6 +3701,9 @@ export async function openSettings(context){
   elModel.value = cfg.model || 'gpt-4o-mini'
   elMax.value = String((cfg.limits?.maxCtxChars) || 6000)
   elSideW.value = String((cfg.win?.w) || MIN_WIDTH)
+  if (elKbEnabled) elKbEnabled.checked = !!(cfg.kb && cfg.kb.enabled)
+  if (elKbTopK) elKbTopK.value = String((cfg.kb && cfg.kb.topK) || 5)
+  if (elKbMaxChars) elKbMaxChars.value = String((cfg.kb && cfg.kb.maxChars) || 2000)
   if (elBaseSel) {
     const cur = String(cfg.baseUrl || '').trim()
     if (!cur || cur === 'https://api.siliconflow.cn/v1') elBaseSel.value = 'https://api.siliconflow.cn/v1'
@@ -3636,7 +3775,10 @@ export async function openSettings(context){
     const model = String(elModel.value || '').trim() || 'gpt-4o-mini'
     const n = Math.max(1000, parseInt(String(elMax.value || '6000'),10) || 6000)
     const sidew = Math.max(MIN_WIDTH, parseInt(String(elSideW.value || MIN_WIDTH),10) || MIN_WIDTH)
-    const next = { ...cfg, provider, alwaysUseFreeTrans, baseUrl, apiKey, model, limits: { maxCtxChars: n }, win: { ...(cfg.win||{}), w: sidew, x: cfg.win?.x||60, y: cfg.win?.y||60, h: cfg.win?.h||440 } }
+    const kbEnabled = !!(elKbEnabled && elKbEnabled.checked)
+    const kbTopK = Math.max(1, Math.min(20, parseInt(String((elKbTopK && elKbTopK.value) || '5'), 10) || 5))
+    const kbMaxChars = Math.max(200, Math.min(8000, parseInt(String((elKbMaxChars && elKbMaxChars.value) || '2000'), 10) || 2000))
+    const next = { ...cfg, provider, alwaysUseFreeTrans, baseUrl, apiKey, model, limits: { maxCtxChars: n }, kb: { ...(cfg.kb || {}), enabled: kbEnabled, topK: kbTopK, maxChars: kbMaxChars }, win: { ...(cfg.win||{}), w: sidew, x: cfg.win?.x||60, y: cfg.win?.y||60, h: cfg.win?.h||440 } }
     await saveCfg(context, next)
     const m = el('ai-model'); if (m) m.value = model
     context.ui.notice(aiText('设置已保存', 'Settings saved'), 'ok', 1600)

@@ -9,6 +9,8 @@ import {
   writeFile,
   mkdir,
   writeTextFile,
+  open as openFs,
+  SeekMode,
   BaseDirectory,
   exists,
   stat,
@@ -19,6 +21,11 @@ import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { appLocalDataDir } from '@tauri-apps/api/path'
 import { getHttpClient } from './runtime'
 import type { InstalledPlugin } from './runtime'
+import {
+  watchPathsAbs,
+  type PluginWatchEvent,
+  type PluginWatchOptions,
+} from './libraryWatch'
 import type {
   PluginContextMenuItem,
   ContextMenuItemConfig,
@@ -62,6 +69,7 @@ export type PluginHostState = {
   activePlugins: Map<string, any>
   pluginMenuAdded: Map<string, boolean>
   pluginMenuDisposers: Map<string, Array<() => void>>
+  pluginWatchDisposers: Map<string, Array<() => void>>
   pluginAPIRegistry: Map<string, PluginAPIRecord>
   pluginContextMenuItems: PluginContextMenuItem[]
   pluginSelectionHandlers: Map<string, PluginSelectionHandler>
@@ -168,6 +176,108 @@ function normalizeRelative(base: string, target: string): string {
   }
   if (rel.startsWith(sep)) rel = rel.slice(1)
   return rel.replace(/\\/g, '/')
+}
+
+function isWindowsPath(p: string): boolean {
+  return /[a-zA-Z]:[\\/]/.test(p) || p.includes('\\')
+}
+
+function normalizePathForKey(p: string): string {
+  const raw = String(p || '').trim()
+  const win = isWindowsPath(raw)
+  let out = raw
+    .replace(/[\\/]+$/, '')
+    .replace(/[\\]+/g, '/')
+    .replace(/\/+/g, '/')
+  if (win) out = out.toLowerCase()
+  return out
+}
+
+function fnv1a32Hex(str: string): string {
+  let hash = 0x811c9dc5
+  const prime = 0x01000193
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i)
+    hash = Math.imul(hash, prime)
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0')
+}
+
+async function hashLibraryKey(root: string): Promise<string> {
+  const input = normalizePathForKey(root)
+  try {
+    const c = (globalThis as any)?.crypto
+    if (c && c.subtle && typeof c.subtle.digest === 'function') {
+      const enc = new TextEncoder().encode(input)
+      const buf = await c.subtle.digest('SHA-1', enc)
+      return Array.from(new Uint8Array(buf))
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('')
+    }
+  } catch {}
+  return fnv1a32Hex(input)
+}
+
+function normalizeDirPrefixes(dirs: unknown): string[] {
+  if (!Array.isArray(dirs)) return []
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const it of dirs) {
+    const raw = String(it || '').trim()
+    if (!raw) continue
+    let d = raw
+      .replace(/[\\]+/g, '/')
+      .replace(/^\/+/, '')
+      .replace(/\/+$/, '')
+    d = d.replace(/^\.\//, '')
+    if (!d) continue
+    const key = d.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(d)
+  }
+  return out
+}
+
+function matchDirPrefix(
+  relativePath: string,
+  prefixes: string[],
+  caseInsensitive: boolean,
+): boolean {
+  if (!prefixes.length) return false
+  let rel = String(relativePath || '').replace(/[\\]+/g, '/')
+  rel = rel.replace(/^\/+/, '').replace(/\/+$/, '')
+  const relCmp = caseInsensitive ? rel.toLowerCase() : rel
+  for (const raw of prefixes) {
+    const p = caseInsensitive ? String(raw).toLowerCase() : String(raw)
+    if (!p) continue
+    if (relCmp === p) return true
+    if (relCmp.startsWith(p + '/')) return true
+  }
+  return false
+}
+
+function matchIncludeScope(
+  relativeDir: string,
+  includePrefixes: string[],
+  caseInsensitive: boolean,
+): boolean {
+  if (!includePrefixes.length) return true
+  let rel = String(relativeDir || '').replace(/[\\]+/g, '/')
+  rel = rel.replace(/^\/+/, '').replace(/\/+$/, '')
+  // 库根目录永远允许进入，否则无法到达任何子目录
+  if (!rel) return true
+  const relCmp = caseInsensitive ? rel.toLowerCase() : rel
+  for (const raw of includePrefixes) {
+    const p = caseInsensitive ? String(raw).toLowerCase() : String(raw)
+    if (!p) continue
+    // 当前目录在 include 内
+    if (relCmp === p) return true
+    if (relCmp.startsWith(p + '/')) return true
+    // 当前目录是 include 的祖先目录，需要继续深入
+    if (p.startsWith(relCmp + '/')) return true
+  }
+  return false
 }
 
 function toMtimeMs(meta: any): number {
@@ -733,6 +843,76 @@ export function createPluginHost(
           throw e
         }
       },
+      watchLibrary: async (
+        cb: (ev: PluginWatchEvent) => void,
+        opt?: PluginWatchOptions,
+      ) => {
+        const root = await deps.getLibraryRoot()
+        if (!root) throw new Error('当前未打开任何库')
+        if (typeof cb !== 'function') {
+          throw new Error('cb 必须是函数')
+        }
+        const unwatch = await watchPathsAbs(root, [String(root)], cb, opt)
+        const disposer = () => {
+          try { unwatch() } catch {}
+        }
+        const list = state.pluginWatchDisposers.get(p.id) || []
+        list.push(disposer)
+        state.pluginWatchDisposers.set(p.id, list)
+        return disposer
+      },
+      watchPaths: async (
+        paths: string | string[],
+        cb: (ev: PluginWatchEvent) => void,
+        opt?: (PluginWatchOptions & { base?: 'library' | 'absolute' }),
+      ) => {
+        const root = await deps.getLibraryRoot()
+        if (!root) throw new Error('当前未打开任何库')
+        if (typeof cb !== 'function') {
+          throw new Error('cb 必须是函数')
+        }
+        const arr = Array.isArray(paths) ? paths : [paths]
+        const base = opt?.base === 'absolute' ? 'absolute' : 'library'
+        const rootSlash = String(root).replace(/[\\/]+$/, '')
+        const sep = rootSlash.includes('\\') ? '\\' : '/'
+
+        const toAbs = (p0: string) => {
+          const p2 = String(p0 || '').trim()
+          if (!p2) return ''
+          if (base === 'absolute') return p2
+          if (
+            /^[a-zA-Z]:[\\/]/.test(p2) ||
+            p2.startsWith('\\\\') ||
+            p2.startsWith('/')
+          ) {
+            return p2
+          }
+          const rel = p2.replace(/^[/\\]+/, '').replace(/[\\/]+/g, sep)
+          return rootSlash + sep + rel
+        }
+
+        const absList = arr.map(toAbs).filter(Boolean)
+        if (!absList.length) throw new Error('paths 不能为空')
+
+        const unwatch = await watchPathsAbs(root, absList, cb, opt)
+        const disposer = () => {
+          try { unwatch() } catch {}
+        }
+        const list = state.pluginWatchDisposers.get(p.id) || []
+        list.push(disposer)
+        state.pluginWatchDisposers.set(p.id, list)
+        return disposer
+      },
+      exists: async (absPath: string) => {
+        try {
+          const p2 = String(absPath || '').trim()
+          if (!p2) return false
+          return await exists(p2 as any)
+        } catch (e) {
+          console.error(`[Plugin ${p.id}] exists 失败:`, e)
+          return false
+        }
+      },
       writeTextFile: async (absPath: string, content: string) => {
         try {
           const p2 = String(absPath || '').trim()
@@ -745,9 +925,36 @@ export function createPluginHost(
           throw e
         }
       },
+      appendTextFile: async (absPath: string, content: string) => {
+        try {
+          const p2 = String(absPath || '').trim()
+          if (!p2) {
+            throw new Error('absPath 不能为空')
+          }
+          const text = String(content ?? '')
+          if (!text) return
+          const file = await openFs(p2 as any, {
+            write: true,
+            create: true,
+          } as any)
+          try {
+            await file.seek(0, SeekMode.End)
+            await file.write(new TextEncoder().encode(text))
+          } finally {
+            try {
+              await (file as any).close?.()
+            } catch {}
+          }
+        } catch (e) {
+          console.error(`[Plugin ${p.id}] appendTextFile 失败:`, e)
+          throw e
+        }
+      },
       listLibraryFiles: async (opt?: {
         extensions?: string[]
         maxDepth?: number
+        includeDirs?: string[]
+        excludeDirs?: string[]
       }) => {
         const root = await deps.getLibraryRoot()
         if (!root) {
@@ -763,6 +970,9 @@ export function createPluginHost(
           Number.isFinite(opt?.maxDepth) && opt?.maxDepth !== undefined
             ? Math.max(0, Number(opt?.maxDepth))
             : 32
+        const includeDirs = normalizeDirPrefixes(opt?.includeDirs)
+        const excludeDirs = normalizeDirPrefixes(opt?.excludeDirs)
+        const caseInsensitive = isWindowsPath(base)
         const out: Array<{
           path: string
           relative: string
@@ -799,6 +1009,13 @@ export function createPluginHost(
               }
             }
             if (isDir) {
+              const relDir = normalizeRelative(base, full)
+              if (matchDirPrefix(relDir, excludeDirs, caseInsensitive)) {
+                continue
+              }
+              if (!matchIncludeScope(relDir, includeDirs, caseInsensitive)) {
+                continue
+              }
               await walk(full, depth - 1)
               continue
             }
@@ -807,6 +1024,13 @@ export function createPluginHost(
             const ext = (nm.split('.').pop() || '').toLowerCase()
             if (allow.size > 0 && !allow.has(ext)) continue
             const rel = normalizeRelative(base, full)
+            if (matchDirPrefix(rel, excludeDirs, caseInsensitive)) continue
+            if (
+              includeDirs.length > 0 &&
+              !matchDirPrefix(rel, includeDirs, caseInsensitive)
+            ) {
+              continue
+            }
             const meta = (it as any)?.metadata
             out.push({
               path: full,
@@ -825,6 +1049,28 @@ export function createPluginHost(
         )
         return out
       },
+      getPluginDataDir: async () => {
+        const root = await deps.getLibraryRoot()
+        if (!root) {
+          throw new Error('当前未打开任何库')
+        }
+        const base = await getAppLocalDataDirCached()
+        if (!base) {
+          throw new Error('无法获取 AppLocalDataDir')
+        }
+        const sep = pathSep(base)
+        const libraryKey = await hashLibraryKey(root)
+        const dir =
+          base +
+          sep +
+          ['flymd', 'plugin-data', p.id, libraryKey].join(sep)
+        try {
+          if (!(await exists(dir as any))) {
+            await mkdir(dir as any, { recursive: true } as any)
+          }
+        } catch {}
+        return dir.replace(/[\\/]+$/, '')
+      },
       readFileBinary: async (absPath: string) => {
         try {
           const p2 = String(absPath || '').trim()
@@ -841,6 +1087,36 @@ export function createPluginHost(
         } catch (e) {
           console.error(
             `[Plugin ${p.id}] readFileBinary 失败:`,
+            e,
+          )
+          throw e
+        }
+      },
+      writeFileBinary: async (
+        absPath: string,
+        bytes: Uint8Array | ArrayBuffer | number[],
+      ) => {
+        try {
+          const p2 = String(absPath || '').trim()
+          if (!p2) {
+            throw new Error('absPath 不能为空')
+          }
+          let data: Uint8Array
+          if (bytes instanceof Uint8Array) {
+            data = bytes
+          } else if (bytes instanceof ArrayBuffer) {
+            data = new Uint8Array(bytes)
+          } else if (Array.isArray(bytes)) {
+            data = new Uint8Array(bytes)
+          } else if ((bytes as any)?.buffer instanceof ArrayBuffer) {
+            data = new Uint8Array((bytes as any).buffer)
+          } else {
+            throw new Error('bytes 必须是 Uint8Array / ArrayBuffer / number[]')
+          }
+          await writeFile(p2 as any, data as any, {} as any)
+        } catch (e) {
+          console.error(
+            `[Plugin ${p.id}] writeFileBinary 失败:`,
             e,
           )
           throw e
@@ -1523,6 +1799,15 @@ export function createPluginHost(
         }
       }
       state.pluginMenuDisposers.delete(id)
+    } catch {}
+    try {
+      const disposers = state.pluginWatchDisposers.get(id)
+      if (disposers && disposers.length) {
+        for (const fn of disposers) {
+          try { fn() } catch {}
+        }
+      }
+      state.pluginWatchDisposers.delete(id)
     } catch {}
     try {
       for (let i = state.pluginContextMenuItems.length - 1; i >= 0; i--) {

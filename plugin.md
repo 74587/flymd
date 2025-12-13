@@ -1151,9 +1151,129 @@ if (!root) {
 - 返回的是操作系统级绝对路径；
 - 可能与当前编辑器打开的“临时文档”所在位置不同。
 
+### context.listLibraryFiles
+
+递归列出当前库（Library）内的文件列表，返回数组，每一项包含：
+- `path`：绝对路径
+- `relative`：相对库根目录的路径（统一使用 `/`）
+- `name`：文件名
+- `mtime`：修改时间（毫秒时间戳，可能为 `0`）
+
+```javascript
+// 仅列出 md/markdown/txt，并支持“仅扫描/排除”目录前缀
+const files = await context.listLibraryFiles({
+  extensions: ['md', 'markdown', 'txt'],
+  maxDepth: 32,
+  includeDirs: ['笔记/', '随笔/'],
+  excludeDirs: ['.git/', 'assets/', '_private/']
+});
+
+console.log(files[0]);
+// { path: 'C:/notes/a.md', relative: 'a.md', name: 'a.md', mtime: 1734067200000 }
+```
+
+**参数：**
+- `extensions`（可选）：扩展名白名单，默认 `['md','markdown']`（不含点号，大小写不敏感）
+- `maxDepth`（可选）：最大递归深度，默认 `32`
+- `includeDirs`（可选）：仅扫描目录“前缀”数组（相对库根目录，统一使用 `/`；为空表示扫描整个库）
+- `excludeDirs`（可选）：排除目录“前缀”数组（相对库根目录，统一使用 `/`）
+
+**注意：**
+- `includeDirs` 与 `excludeDirs` 都会在遍历阶段生效（会影响递归进入哪些目录），适合大库性能场景；
+- `excludeDirs` 会在遍历阶段直接跳过目录（不会进入递归），适合大库性能场景；
+- Windows 下排除目录匹配是大小写不敏感的（否则用户会骂你）。
+
+### context.watchLibrary
+
+监控当前库（Library）目录下的文件变化事件（可递归）。返回一个 `unwatch()` 函数，调用后停止监听。
+
+事件对象结构：
+- `type`：`'create' | 'modify' | 'remove' | 'access' | 'any' | 'other'`
+- `kind`：更细的类型字符串（来自底层 watcher）
+- `paths`：变化路径的绝对路径数组
+- `relatives`：对应的相对库根目录路径数组（不在库内则为空字符串）
+- `libraryRoot`：库根目录绝对路径
+- `raw`：底层原始事件
+
+```javascript
+// 典型：只关心新增文件（create），并且只处理库内路径（relatives 非空）
+const unwatch = await context.watchLibrary((ev) => {
+  if (ev.type !== 'create') return;
+  for (let i = 0; i < ev.relatives.length; i++) {
+    const rel = ev.relatives[i];
+    if (!rel) continue;
+    console.log('新增文件：', rel);
+  }
+}, { recursive: true, immediate: true });
+
+// 需要时停止监听
+// unwatch();
+```
+
+**注意：**
+- 文件系统事件可能很“吵”（短时间触发多次），插件侧应自行去抖/合并；
+- 插件停用时宿主会自动清理 watcher，但别偷懒，建议你自己也调用 `unwatch()`。
+
+### context.watchPaths
+
+监控指定路径（文件或目录）的变化事件。支持监听库内相对路径（默认）或绝对路径。
+
+```javascript
+// 仅监控白名单目录前缀（相对库根目录）
+const unwatch = await context.watchPaths(
+  ['笔记/', '随笔/'],
+  (ev) => {
+    if (ev.type !== 'create') return;
+    console.log(ev.relatives.filter(Boolean));
+  },
+  { base: 'library', recursive: true, immediate: true }
+);
+```
+
+**参数：**
+- `paths`：`string | string[]`（默认按库根目录解析）
+- `cb`：事件回调函数
+- `opt.base`（可选）：`'library' | 'absolute'`，默认 `'library'`
+- 其余选项同 `watchLibrary`：`recursive/immediate/delayMs`
+
+### context.getPluginDataDir
+
+返回当前插件在 `AppLocalData` 下的“插件数据目录”，并按库隔离：
+
+`<AppLocalData>/flymd/plugin-data/<pluginId>/<libraryKey>/`
+
+典型用途：向量索引、缓存、数据库文件等**大文件落盘**（不要污染用户库目录）。
+
+```javascript
+const dir = await context.getPluginDataDir();
+// 例：写入索引元数据到插件数据目录
+const sep = dir.includes('\\\\') ? '\\\\' : '/';
+await context.writeTextFile(dir + sep + 'meta.json', JSON.stringify({ ok: true }, null, 2));
+```
+
+**注意：**
+- 目录会自动创建；
+- 当前未打开任何库时会抛出错误（因为需要按库隔离）；
+- `libraryKey` 由库根目录归一化后 hash 得到，用于多库隔离。
+
 ### context.readFileBinary
 
 按绝对路径读取本地文件的二进制内容，返回 `Uint8Array`。适合用于 PDF 解析、图片处理等场景。
+
+### context.exists
+
+判断本地路径是否存在，返回 `boolean`。
+
+```javascript
+const ok = await context.exists('C:/tmp/a.txt');
+if (!ok) {
+  context.ui.notice('文件不存在', 'err');
+}
+```
+
+**注意：**
+- 推荐在 `readTextFile/readFileBinary` 前先 `exists`，避免“不存在文件”导致宿主打印错误日志；
+- 传入空字符串会返回 `false`。
 
 ```javascript
 const path = context.getCurrentFilePath();
@@ -1171,6 +1291,24 @@ context.ui.notice('已读取字节数：' + bytes.length, 'ok');
 - 仅在桌面版（Tauri 应用）可用，依赖底层文件系统权限；
 - 参数必须是绝对路径，传入空字符串或非法路径会抛出错误；
 - 返回值始终为 `Uint8Array`，方便直接传给 `FormData`、`fetch` 等接口。
+
+### context.writeFileBinary
+
+按绝对路径写入本地文件的二进制内容。适合用于向量索引（`.f32`）、缓存等场景。
+
+```javascript
+// 写入二进制文件
+const bytes = new Uint8Array([1, 2, 3, 4]);
+await context.writeFileBinary('C:/tmp/data.bin', bytes);
+```
+
+**参数：**
+- `absPath`：绝对路径
+- `bytes`：`Uint8Array / ArrayBuffer / number[]`
+
+**注意：**
+- 仅在桌面版（Tauri 应用）可用；
+- 若目录不存在，需要你先创建目录（或使用 `context.getPluginDataDir()` 获取已创建的插件数据目录）。
 
 ### context.saveMarkdownToCurrentFolder
 

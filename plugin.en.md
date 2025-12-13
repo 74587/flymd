@@ -821,6 +821,42 @@ if (!root) {
 - Combine with `context.getCurrentFilePath` to calculate “current file’s folder”;
 - Build library-relative paths when exporting or generating helper documents.
 
+### context.watchLibrary
+
+Watch filesystem changes under the current library root (optionally recursive). Returns an `unwatch()` function.
+
+Event object:
+- `type`: `'create' | 'modify' | 'remove' | 'access' | 'any' | 'other'`
+- `kind`: more detailed kind string from the underlying watcher
+- `paths`: absolute paths reported by the watcher
+- `relatives`: paths relative to the library root (empty string if not under the library)
+- `libraryRoot`: library root absolute path
+- `raw`: raw watcher event
+
+```javascript
+const unwatch = await context.watchLibrary((ev) => {
+  if (ev.type !== 'create') return;
+  console.log('New files:', ev.relatives.filter(Boolean));
+}, { recursive: true, immediate: true });
+
+// unwatch();
+```
+
+### context.watchPaths
+
+Watch specific paths (files or directories). By default, non-absolute paths are resolved relative to the current library root.
+
+```javascript
+const unwatch = await context.watchPaths(
+  ['Notes/', 'Essays/'],
+  (ev) => {
+    if (ev.type !== 'create') return;
+    console.log(ev.relatives.filter(Boolean));
+  },
+  { base: 'library', recursive: true, immediate: true }
+);
+```
+
 ### context.readFileBinary
 
 Read local file as binary content by absolute path and return a `Uint8Array`. Useful for PDF parsing, image processing and other binary workflows.

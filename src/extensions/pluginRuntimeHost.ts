@@ -103,6 +103,7 @@ export function initPluginRuntime(
   const activePlugins = new Map<string, any>() // id -> module
   const pluginMenuAdded = new Map<string, boolean>() // 限制每个插件仅添加一个菜单项
   const pluginMenuDisposers = new Map<string, Array<() => void>>() // 每个插件对应的菜单清理函数
+  const pluginWatchDisposers = new Map<string, Array<() => void>>() // 每个插件对应的 watch 清理函数
   const pluginAPIRegistry = new Map<string, PluginAPIRecord>() // namespace -> { pluginId, api }
   const pluginContextMenuItems: PluginContextMenuItem[] = [] // 所有插件注册的右键菜单项
   const pluginSelectionHandlers = new Map<string, PluginSelectionHandler>()
@@ -154,6 +155,7 @@ export function initPluginRuntime(
     activePlugins,
     pluginMenuAdded,
     pluginMenuDisposers,
+    pluginWatchDisposers,
     pluginAPIRegistry,
     pluginContextMenuItems,
     pluginSelectionHandlers,
