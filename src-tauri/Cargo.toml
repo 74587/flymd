@@ -1,6 +1,6 @@
 [package]
 name = "flymd"
-version = "0.7.4"
+version = "0.7.5"
 description = "飞速 Markdown 编辑器"
 authors = ["flymd"]
 edition = "2021"

@@ -3,6 +3,15 @@
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
 
+## Update v0.7.5
+- Added: Published the official “flymd-RAG Knowledge Index” extension, which builds vector indexes for local Markdown/TXT libraries, enabling semantic search over your vault and serving as the backbone for RAG-style knowledge conversations.
+- Added: AI Assistant can optionally integrate with flymd-RAG and, before sending a request, run semantic search and append cited snippets from your vault so answers can combine “current chat + local knowledge”; when flymd-RAG is not installed or disabled, existing behavior remains unchanged.
+- Added: Extended the plugin runtime with library-wide file listing, directory watching and per-library plugin data directories, giving knowledge-indexing extensions a more robust foundation and making it easier for other plugins to build lightweight indexes.
+- Improved: flymd-RAG Knowledge Index now supports incremental indexing and better recall strategies, only reindexing changed files and significantly reducing wait times on large libraries.
+- Improved: flymd-RAG adds advanced options such as custom index directory and per-document index rebuild, along with richer progress and error reporting to help diagnose indexing issues.
+- Improved: Completed English UI and copy for both flymd-RAG and the AI Assistant integration so knowledge-base search works seamlessly in English environments.
+- Added: AI Assistant now includes a built-in free vector/LLM mode that can power flymd-RAG indexing without requiring your own API key (within the free quota limits).
+
 ## Update v0.7.4
 - Added: Published the “Property View” extension, which shows document metadata fields in a column-based sidebar table so you can browse and filter your library by properties as a foundation for attribute-driven knowledge management.
 - Added: Published the “Notes & Tasks Calendar” extension that aggregates todos and notes by day on a calendar view, letting you scan and jump to tasks directly from the calendar.
@@ -608,4 +617,3 @@ This version focuses on stability and detail experience optimization, main chang
 - Added: LaTeX (based on KaTeX) rendering support
 - Added: Mermaid flowchart/sequence diagram etc. rendering support
 - Added shortcuts: Ctrl+B bold, Ctrl+I italic, Ctrl+K insert link
-
