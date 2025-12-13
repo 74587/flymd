@@ -13,6 +13,29 @@ const MINERU_BATCH_RESULTS_PREFIX = '/api/v4/extract-results/batch/'
 // 设置对话框样式 id
 const MINERU_SETTINGS_STYLE_ID = 'mineru-settings-style'
 
+// 轻量多语言：跟随宿主（flymd.locale），默认用系统语言
+const MINERU_LOCALE_LS_KEY = 'flymd.locale'
+function mineruDetectLocale() {
+  try {
+    const nav = typeof navigator !== 'undefined' ? navigator : null
+    const lang = (nav && (nav.language || nav.userLanguage)) || 'en'
+    const lower = String(lang || '').toLowerCase()
+    if (lower.startsWith('zh')) return 'zh'
+  } catch {}
+  return 'en'
+}
+function mineruGetLocale() {
+  try {
+    const ls = typeof localStorage !== 'undefined' ? localStorage : null
+    const v = ls && ls.getItem(MINERU_LOCALE_LS_KEY)
+    if (v === 'zh' || v === 'en') return v
+  } catch {}
+  return mineruDetectLocale()
+}
+function mineruText(zh, en) {
+  return mineruGetLocale() === 'en' ? en : zh
+}
+
 // 读取配置：仅需要 Token 和模型版本
 async function mineruLoadConfig(context) {
   const apiToken = (await context.storage.get('apiToken')) || ''
@@ -69,7 +92,7 @@ async function mineruOpenSettingsDialog(context, cfg) {
     const header = document.createElement('div')
     header.className = 'mineru-header'
     const title = document.createElement('div')
-    title.textContent = 'MinerU 解析 - 设置'
+    title.textContent = mineruText('MinerU 解析 - 设置', 'MinerU Parser - Settings')
     const closeBtn = document.createElement('button')
     closeBtn.textContent = '×'
     closeBtn.style.cssText =
@@ -89,10 +112,13 @@ async function mineruOpenSettingsDialog(context, cfg) {
     inputToken.className = 'mineru-input'
     inputToken.type = 'password'
     inputToken.value = cfg.apiToken || ''
-    inputToken.placeholder = '在 MinerU 官网申请的 API Token'
+    inputToken.placeholder = mineruText('在 MinerU 官网申请的 API Token', 'API token obtained from MinerU official site')
     const tipToken = document.createElement('div')
     tipToken.className = 'mineru-tip'
-    tipToken.textContent = '调用所有 v4 接口都需要在请求头中携带 Authorization: Bearer <Token>'
+    tipToken.textContent = mineruText(
+      '调用所有 v4 接口都需要在请求头中携带 Authorization: Bearer <Token>',
+      'All v4 endpoints require Authorization: Bearer <Token> in the request headers.'
+    )
     rowToken.appendChild(labelToken)
     rowToken.appendChild(inputToken)
     rowToken.appendChild(tipToken)
@@ -101,14 +127,17 @@ async function mineruOpenSettingsDialog(context, cfg) {
     const rowModel = document.createElement('div')
     rowModel.className = 'mineru-row'
     const labelModel = document.createElement('label')
-    labelModel.textContent = '模型版本（model_version）'
+    labelModel.textContent = mineruText('模型版本（model_version）', 'Model version (model_version)')
     const inputModel = document.createElement('input')
     inputModel.className = 'mineru-input'
     inputModel.value = cfg.modelVersion || 'vlm'
-    inputModel.placeholder = '例如：vlm 或 pipeline，默认 vlm'
+    inputModel.placeholder = mineruText('例如：vlm 或 pipeline，默认 vlm', 'e.g. vlm or pipeline, default is vlm')
     const tipModel = document.createElement('div')
     tipModel.className = 'mineru-tip'
-    tipModel.textContent = 'MinerU 当前文档模型版本：pipeline / vlm，推荐使用默认值即可'
+    tipModel.textContent = mineruText(
+      'MinerU 当前文档模型版本：pipeline / vlm，推荐使用默认值即可',
+      'MinerU document models: pipeline / vlm. Using the default is recommended.'
+    )
     rowModel.appendChild(labelModel)
     rowModel.appendChild(inputModel)
     rowModel.appendChild(tipModel)
@@ -117,9 +146,12 @@ async function mineruOpenSettingsDialog(context, cfg) {
     rowInfo.className = 'mineru-row'
     const tipInfo = document.createElement('div')
     tipInfo.className = 'mineru-tip'
-    tipInfo.innerHTML =
+    tipInfo.innerHTML = mineruText(
       '说明：本插件通过 MinerU 的批量上传接口 <code>/api/v4/file-urls/batch</code> 申请上传链接并上传本地文件，' +
-      '再通过 <code>/api/v4/extract-results/batch/{batch_id}</code> 轮询解析结果，最终返回一个结果 zip 下载链接。'
+        '再通过 <code>/api/v4/extract-results/batch/{batch_id}</code> 轮询解析结果，最终返回一个结果 zip 下载链接。',
+      'Note: this plugin calls MinerU\'s batch upload API <code>/api/v4/file-urls/batch</code> to obtain an upload URL,' +
+        ' then polls <code>/api/v4/extract-results/batch/{batch_id}</code> for results, finally returning a result ZIP link.'
+    )
     rowInfo.appendChild(tipInfo)
 
     body.appendChild(rowToken)
@@ -131,11 +163,11 @@ async function mineruOpenSettingsDialog(context, cfg) {
 
     const btnCancel = document.createElement('button')
     btnCancel.className = 'mineru-btn-secondary'
-    btnCancel.textContent = '取消'
+    btnCancel.textContent = mineruText('取消', 'Cancel')
 
     const btnOk = document.createElement('button')
     btnOk.className = 'mineru-btn-primary'
-    btnOk.textContent = '保存'
+    btnOk.textContent = mineruText('保存', 'Save')
 
     footer.appendChild(btnCancel)
     footer.appendChild(btnOk)
@@ -184,7 +216,7 @@ function mineruPickFile() {
     input.onchange = function () {
       const file = input.files && input.files[0]
       if (!file) {
-        reject(new Error('未选择文件'))
+        reject(new Error(mineruText('未选择文件', 'No file selected')))
       } else {
         resolve(file)
       }
@@ -221,10 +253,10 @@ function mineruBytesToFile(bytes, name, mime) {
 async function mineruApplyUploadUrl(context, cfg, fileName) {
   const http = context.http
   if (!http || typeof http.fetch !== 'function') {
-    throw new Error('当前环境不支持 HTTP 请求')
+    throw new Error(mineruText('当前环境不支持 HTTP 请求', 'HTTP requests are not supported in this environment'))
   }
   if (!cfg.apiToken) {
-    throw new Error('未配置 MinerU API Token')
+    throw new Error(mineruText('未配置 MinerU API Token', 'MinerU API token is not configured'))
   }
 
   const url = MINERU_BASE_URL + MINERU_FILE_URLS_BATCH
@@ -247,7 +279,12 @@ async function mineruApplyUploadUrl(context, cfg, fileName) {
       body: JSON.stringify(body)
     })
   } catch (e) {
-    throw new Error('申请 MinerU 上传链接失败：' + (e && e.message ? e.message : String(e)))
+    throw new Error(
+      mineruText(
+        '申请 MinerU 上传链接失败：' + (e && e.message ? e.message : String(e)),
+        'Failed to request MinerU upload URL: ' + (e && e.message ? e.message : String(e))
+      )
+    )
   }
 
   let data
@@ -255,18 +292,29 @@ async function mineruApplyUploadUrl(context, cfg, fileName) {
     data = await res.json()
   } catch (e) {
     throw new Error(
-      '解析 MinerU 上传链接响应失败：HTTP ' +
-        res.status +
-        '，' +
-        (e && e.message ? e.message : String(e))
+      mineruText(
+        '解析 MinerU 上传链接响应失败：HTTP ' +
+          res.status +
+          '，' +
+          (e && e.message ? e.message : String(e)),
+        'Failed to parse MinerU upload response: HTTP ' +
+          res.status +
+          ', ' +
+          (e && e.message ? e.message : String(e))
+      )
     )
   }
 
   if (!data || typeof data !== 'object') {
-    throw new Error('MinerU 上传链接响应格式错误')
+    throw new Error(mineruText('MinerU 上传链接响应格式错误', 'MinerU upload response has invalid format'))
   }
   if (data.code !== 0) {
-    throw new Error('申请上传链接失败：' + (data.msg || '未知错误'))
+    throw new Error(
+      mineruText(
+        '申请上传链接失败：' + (data.msg || '未知错误'),
+        'Failed to request upload URL: ' + (data.msg || 'unknown error')
+      )
+    )
   }
 
   const d = data.data || {}
@@ -275,7 +323,9 @@ async function mineruApplyUploadUrl(context, cfg, fileName) {
   const uploadUrl = urls && urls.length > 0 ? urls[0] : null
 
   if (!batchId || !uploadUrl) {
-    throw new Error('MinerU 返回的上传链接信息不完整')
+    throw new Error(
+      mineruText('MinerU 返回的上传链接信息不完整', 'MinerU returned incomplete upload URL information')
+    )
   }
 
   return {
@@ -288,7 +338,7 @@ async function mineruApplyUploadUrl(context, cfg, fileName) {
 async function mineruUploadFileToUrl(context, file, uploadUrl) {
   const http = context.http
   if (!http || typeof http.fetch !== 'function') {
-    throw new Error('当前环境不支持 HTTP 请求')
+    throw new Error(mineruText('当前环境不支持 HTTP 请求', 'HTTP requests are not supported in this environment'))
   }
 
   // 根据 MinerU 文档，上传时“无须设置 Content-Type”，
@@ -312,11 +362,21 @@ async function mineruUploadFileToUrl(context, file, uploadUrl) {
       body: body
     })
   } catch (e) {
-    throw new Error('上传文件到 MinerU 失败：' + (e && e.message ? e.message : String(e)))
+    throw new Error(
+      mineruText(
+        '上传文件到 MinerU 失败：' + (e && e.message ? e.message : String(e)),
+        'Failed to upload file to MinerU: ' + (e && e.message ? e.message : String(e))
+      )
+    )
   }
 
   if (res.status < 200 || res.status >= 300) {
-    throw new Error('上传文件到 MinerU 失败：HTTP ' + res.status)
+    throw new Error(
+      mineruText(
+        '上传文件到 MinerU 失败：HTTP ' + res.status,
+        'Failed to upload file to MinerU: HTTP ' + res.status
+      )
+    )
   }
 }
 
@@ -324,7 +384,7 @@ async function mineruUploadFileToUrl(context, file, uploadUrl) {
 async function mineruWaitBatchResult(context, cfg, batchId) {
   const http = context.http
   if (!http || typeof http.fetch !== 'function') {
-    throw new Error('当前环境不支持 HTTP 请求')
+    throw new Error(mineruText('当前环境不支持 HTTP 请求', 'HTTP requests are not supported in this environment'))
   }
 
   const url = MINERU_BASE_URL + MINERU_BATCH_RESULTS_PREFIX + encodeURIComponent(batchId)
@@ -345,7 +405,11 @@ async function mineruWaitBatchResult(context, cfg, batchId) {
     try {
       res = await http.fetch(url, { method: 'GET', headers: headers })
     } catch (e) {
-      lastErr = '查询 MinerU 解析结果失败：' + (e && e.message ? e.message : String(e))
+      lastErr =
+        mineruText(
+          '查询 MinerU 解析结果失败：' + (e && e.message ? e.message : String(e)),
+          'Failed to query MinerU result: ' + (e && e.message ? e.message : String(e))
+        )
       await new Promise(function (r) {
         setTimeout(r, intervalMs)
       })
@@ -356,11 +420,16 @@ async function mineruWaitBatchResult(context, cfg, batchId) {
     try {
       data = await res.json()
     } catch (e) {
-      lastErr =
+      lastErr = mineruText(
         '解析 MinerU 结果响应失败：HTTP ' +
-        res.status +
-        '，' +
-        (e && e.message ? e.message : String(e))
+          res.status +
+          '，' +
+          (e && e.message ? e.message : String(e)),
+        'Failed to parse MinerU result response: HTTP ' +
+          res.status +
+          ', ' +
+          (e && e.message ? e.message : String(e))
+      )
       await new Promise(function (r) {
         setTimeout(r, intervalMs)
       })
@@ -368,7 +437,7 @@ async function mineruWaitBatchResult(context, cfg, batchId) {
     }
 
     if (!data || typeof data !== 'object') {
-      lastErr = 'MinerU 结果响应格式错误'
+      lastErr = mineruText('MinerU 结果响应格式错误', 'MinerU result response has invalid format')
       await new Promise(function (r) {
         setTimeout(r, intervalMs)
       })
@@ -376,7 +445,10 @@ async function mineruWaitBatchResult(context, cfg, batchId) {
     }
 
     if (data.code !== 0) {
-      lastErr = '查询 MinerU 解析结果失败：' + (data.msg || '未知错误')
+      lastErr = mineruText(
+        '查询 MinerU 解析结果失败：' + (data.msg || '未知错误'),
+        'Failed to query MinerU result: ' + (data.msg || 'unknown error')
+      )
       await new Promise(function (r) {
         setTimeout(r, intervalMs)
       })
@@ -389,7 +461,7 @@ async function mineruWaitBatchResult(context, cfg, batchId) {
     const first = results[0]
 
     if (!first) {
-      lastErr = 'MinerU 返回结果为空'
+      lastErr = mineruText('MinerU 返回结果为空', 'MinerU returned empty result')
       await new Promise(function (r) {
         setTimeout(r, intervalMs)
       })
@@ -409,7 +481,9 @@ async function mineruWaitBatchResult(context, cfg, batchId) {
     }
 
     if (state === 'failed') {
-      throw new Error('MinerU 解析失败：' + (lastErr || '未知错误'))
+      throw new Error(
+        mineruText('MinerU 解析失败：' + (lastErr || '未知错误'), 'MinerU parsing failed: ' + (lastErr || 'unknown error'))
+      )
     }
 
     // waiting-file / pending / running 等状态继续轮询
@@ -419,7 +493,12 @@ async function mineruWaitBatchResult(context, cfg, batchId) {
   }
 
   throw new Error(
-    'MinerU 解析超时，最后状态：' + (lastState || '未知') + (lastErr ? '，原因：' + lastErr : '')
+    mineruText(
+      'MinerU 解析超时，最后状态：' + (lastState || '未知') + (lastErr ? '，原因：' + lastErr : ''),
+      'MinerU parsing timed out, last state: ' +
+        (lastState || 'unknown') +
+        (lastErr ? ', reason: ' + lastErr : '')
+    )
   )
 }
 
@@ -437,7 +516,7 @@ function showMineruZipDownloadDialog(zipUrl, fileName) {
   const header = document.createElement('div')
   header.style.cssText =
     'padding:16px 20px;border-bottom:1px solid var(--border,#e5e7eb);font-weight:600;font-size:16px;background:linear-gradient(135deg,#0f172a,#1d4ed8);color:#fff;display:flex;align-items:center;justify-content:space-between;'
-  header.textContent = 'MinerU 结果压缩包已生成'
+  header.textContent = mineruText('MinerU 结果压缩包已生成', 'MinerU result ZIP is ready')
   const closeBtn = document.createElement('button')
   closeBtn.textContent = '×'
   closeBtn.style.cssText =
@@ -455,8 +534,10 @@ function showMineruZipDownloadDialog(zipUrl, fileName) {
   const message = document.createElement('div')
   message.style.cssText =
     'font-size:14px;color:var(--fg,#555);margin-bottom:16px;line-height:1.6;'
-  message.innerHTML =
-    'MinerU 已完成解析，并生成结果压缩包。你可以直接下载，或复制链接到浏览器中打开。'
+  message.innerHTML = mineruText(
+    'MinerU 已完成解析，并生成结果压缩包。你可以直接下载，或复制链接到浏览器中打开。',
+    'MinerU has finished parsing and generated a result ZIP. You can download it directly or copy the link to open in your browser.'
+  )
 
   const linkDisplay = document.createElement('div')
   linkDisplay.style.cssText =
@@ -470,7 +551,7 @@ function showMineruZipDownloadDialog(zipUrl, fileName) {
   const downloadBtn = document.createElement('button')
   downloadBtn.style.cssText =
     'padding:10px 16px;border-radius:8px;border:none;background:linear-gradient(135deg,#2563eb 0%,#1d4ed8 100%);color:#fff;cursor:pointer;font-size:14px;font-weight:500;transition:transform 0.2s;'
-  downloadBtn.textContent = '🔽 下载压缩包'
+  downloadBtn.textContent = mineruText('🔽 下载压缩包', '🔽 Download ZIP')
   downloadBtn.onmouseover = function () {
     downloadBtn.style.transform = 'translateY(-2px)'
   }
@@ -492,7 +573,7 @@ function showMineruZipDownloadDialog(zipUrl, fileName) {
         } catch (e) {}
       }, 100)
     } catch (e) {
-      downloadBtn.textContent = '❌ 下载失败'
+      downloadBtn.textContent = mineruText('❌ 下载失败', '❌ Download failed')
       downloadBtn.style.background = '#ef4444'
     }
   }
@@ -500,7 +581,7 @@ function showMineruZipDownloadDialog(zipUrl, fileName) {
   const copyBtn = document.createElement('button')
   copyBtn.style.cssText =
     'padding:10px 16px;border-radius:8px;border:1px solid var(--border,#d1d5db);background:var(--bg,#fff);color:var(--fg,#333);cursor:pointer;font-size:14px;font-weight:500;transition:all 0.2s;'
-  copyBtn.textContent = '📋 复制链接'
+  copyBtn.textContent = mineruText('📋 复制链接', '📋 Copy link')
   copyBtn.onmouseover = function () {
     copyBtn.style.background = 'var(--bg-muted,#f9fafb)'
     copyBtn.style.transform = 'translateY(-2px)'
@@ -526,12 +607,12 @@ function showMineruZipDownloadDialog(zipUrl, fileName) {
         } catch (e) {}
         document.body.removeChild(ta)
       }
-      copyBtn.textContent = '✅ 已复制'
+      copyBtn.textContent = mineruText('✅ 已复制', '✅ Copied')
       setTimeout(function () {
-        copyBtn.textContent = '📋 复制链接'
+        copyBtn.textContent = mineruText('📋 复制链接', '📋 Copy link')
       }, 2000)
     } catch (e) {
-      copyBtn.textContent = '❌ 复制失败'
+      copyBtn.textContent = mineruText('❌ 复制失败', '❌ Copy failed')
       copyBtn.style.borderColor = '#ef4444'
       copyBtn.style.color = '#ef4444'
     }
@@ -554,17 +635,17 @@ function showMineruZipDownloadDialog(zipUrl, fileName) {
 async function mineruParseLocalFile(context, cfg, file, sourceLabel) {
   const name = (file && file.name) || 'document'
 
-  const stepLabel = sourceLabel || '文件'
+  const stepLabel = sourceLabel || mineruText('文件', 'file')
 
   let notifyId = null
   try {
     if (context.ui && context.ui.showNotification) {
-      notifyId = context.ui.showNotification('MinerU：正在申请上传链接（' + stepLabel + '）...', {
+      notifyId = context.ui.showNotification(mineruText('MinerU：正在申请上传链接（' + stepLabel + '）...', 'MinerU: requesting upload URL (' + stepLabel + ')...'), {
         type: 'info',
         duration: 0
       })
     } else if (context.ui && context.ui.notice) {
-      context.ui.notice('MinerU：正在申请上传链接（' + stepLabel + '）...', 'ok', 2500)
+      context.ui.notice(mineruText('MinerU：正在申请上传链接（' + stepLabel + '）...', 'MinerU: requesting upload URL (' + stepLabel + ')...'), 'ok', 2500)
     }
 
     const applied = await mineruApplyUploadUrl(context, cfg, name)
@@ -576,12 +657,12 @@ async function mineruParseLocalFile(context, cfg, file, sourceLabel) {
     }
 
     if (context.ui && context.ui.showNotification) {
-      notifyId = context.ui.showNotification('MinerU：正在上传文件...', {
+      notifyId = context.ui.showNotification(mineruText('MinerU：正在上传文件...', 'MinerU: uploading file...'), {
         type: 'info',
         duration: 0
       })
     } else if (context.ui && context.ui.notice) {
-      context.ui.notice('MinerU：正在上传文件...', 'ok', 2500)
+      context.ui.notice(mineruText('MinerU：正在上传文件...', 'MinerU: uploading file...'), 'ok', 2500)
     }
 
     await mineruUploadFileToUrl(context, file, applied.uploadUrl)
@@ -593,12 +674,12 @@ async function mineruParseLocalFile(context, cfg, file, sourceLabel) {
     }
 
     if (context.ui && context.ui.showNotification) {
-      notifyId = context.ui.showNotification('MinerU：正在解析，请稍候...', {
+      notifyId = context.ui.showNotification(mineruText('MinerU：正在解析，请稍候...', 'MinerU: parsing, please wait...'), {
         type: 'info',
         duration: 0
       })
     } else if (context.ui && context.ui.notice) {
-      context.ui.notice('MinerU：正在解析，请稍候...', 'ok', 2500)
+      context.ui.notice(mineruText('MinerU：正在解析，请稍候...', 'MinerU: parsing, please wait...'), 'ok', 2500)
     }
 
     const result = await mineruWaitBatchResult(context, cfg, applied.batchId)
@@ -611,7 +692,9 @@ async function mineruParseLocalFile(context, cfg, file, sourceLabel) {
 
     const fullZipUrl = result.fullZipUrl || ''
     if (!fullZipUrl) {
-      throw new Error('解析完成但未返回结果压缩包地址')
+      throw new Error(
+        mineruText('解析完成但未返回结果压缩包地址', 'Parsing finished but no result ZIP URL was returned')
+      )
     }
 
     // 尝试使用隐藏 a 标签自动触发下载
@@ -644,7 +727,10 @@ async function mineruParseLocalFile(context, cfg, file, sourceLabel) {
 
     if (context.ui && context.ui.notice) {
       context.ui.notice(
-        'MinerU 解析完成，结果压缩包下载已开始：' + zipName,
+        mineruText(
+          'MinerU 解析完成，结果压缩包下载已开始：' + zipName,
+          'MinerU parsing finished; ZIP download started: ' + zipName
+        ),
         'ok',
         6000
       )
@@ -657,7 +743,11 @@ async function mineruParseLocalFile(context, cfg, file, sourceLabel) {
     }
     const msg = err && err.message ? err.message : String(err)
     if (context.ui && context.ui.notice) {
-      context.ui.notice('MinerU 解析失败：' + msg, 'err', 6000)
+      context.ui.notice(
+        mineruText('MinerU 解析失败：' + msg, 'MinerU parsing failed: ' + msg),
+        'err',
+        6000
+      )
     }
   }
 }
@@ -668,22 +758,36 @@ export async function activate(context) {
     const cfg = await mineruLoadConfig(context)
     if (!cfg.apiToken) {
       if (context.ui && context.ui.notice) {
-        context.ui.notice('MinerU 插件未配置 Token，请先在设置中填写 API Token', 'err', 5000)
+        context.ui.notice(
+          mineruText(
+            'MinerU 插件未配置 Token，请先在设置中填写 API Token',
+            'MinerU plugin has no token configured; please set the API token in settings.'
+          ),
+          'err',
+          5000
+        )
       }
     }
   } catch (e) {}
 
   if (typeof context.addMenuItem === 'function') {
     context.addMenuItem({
-      label: 'MinerU PDF/图片解析',
-      title: '使用 MinerU 官方 API 解析本地 PDF / 图片（非高精度逐页解析，返回结果 zip）',
+      label: mineruText('📂 MinerU PDF/图片解析', '📂 MinerU PDF/Image Parser'),
+      title: mineruText(
+        '使用 MinerU 官方 API 解析本地 PDF / 图片（非高精度逐页解析，返回结果 zip）',
+        'Use the official MinerU API to parse local PDF/images (non per-page high-precision, returns result ZIP).'
+      ),
       children: [
         {
-          label: '选择文件',
+          label: mineruText('选择文件', 'Choose file'),
           onClick: async function () {
             const cfg = await mineruLoadConfig(context)
             if (!cfg.apiToken) {
-              context.ui.notice('请先在 MinerU 设置中填写 API Token', 'err', 5000)
+              context.ui.notice(
+                mineruText('请先在 MinerU 设置中填写 API Token', 'Please set MinerU API token in settings first'),
+                'err',
+                5000
+              )
               return
             }
             let file
@@ -691,30 +795,46 @@ export async function activate(context) {
               file = await mineruPickFile()
             } catch (e) {
               const msg = e && e.message ? e.message : String(e)
-              context.ui.notice('选择文件失败：' + msg, 'err', 4000)
+              context.ui.notice(
+                mineruText('选择文件失败：' + msg, 'Failed to choose file: ' + msg),
+                'err',
+                4000
+              )
               return
             }
-            await mineruParseLocalFile(context, cfg, file, '选择文件')
+            await mineruParseLocalFile(context, cfg, file, mineruText('选择文件', 'chosen file'))
           }
         },
         {
-          label: '解析当前',
+          label: mineruText('解析当前', 'Parse current file'),
           onClick: async function () {
             const cfg = await mineruLoadConfig(context)
             if (!cfg.apiToken) {
-              context.ui.notice('请先在 MinerU 设置中填写 API Token', 'err', 5000)
+              context.ui.notice(
+                mineruText('请先在 MinerU 设置中填写 API Token', 'Please set MinerU API token in settings first'),
+                'err',
+                5000
+              )
               return
             }
             if (
               typeof context.getCurrentFilePath !== 'function' ||
               typeof context.readFileBinary !== 'function'
             ) {
-              context.ui.notice('当前环境不支持按路径读取当前文件', 'err', 4000)
+              context.ui.notice(
+                mineruText('当前环境不支持按路径读取当前文件', 'Current environment cannot read current file by path'),
+                'err',
+                4000
+              )
               return
             }
             const path = context.getCurrentFilePath()
             if (!path) {
-              context.ui.notice('当前没有打开任何文件', 'err', 4000)
+              context.ui.notice(
+                mineruText('当前没有打开任何文件', 'No file is currently open'),
+                'err',
+                4000
+              )
               return
             }
             const lower = String(path).toLowerCase()
@@ -724,7 +844,11 @@ export async function activate(context) {
               lower.endsWith('.jpg') ||
               lower.endsWith('.jpeg')
             if (!isSupported) {
-              context.ui.notice('当前文件不是支持的 PDF/图片 类型', 'err', 4000)
+              context.ui.notice(
+                mineruText('当前文件不是支持的 PDF/图片 类型', 'Current file is not a supported PDF/image type'),
+                'err',
+                4000
+              )
               return
             }
             let bytes
@@ -732,13 +856,17 @@ export async function activate(context) {
               bytes = await context.readFileBinary(path)
             } catch (e) {
               const msg = e && e.message ? e.message : String(e)
-              context.ui.notice('读取当前文件失败：' + msg, 'err', 4000)
+              context.ui.notice(
+                mineruText('读取当前文件失败：' + msg, 'Failed to read current file: ' + msg),
+                'err',
+                4000
+              )
               return
             }
             const fileName = path.split(/[\\/]+/).pop() || 'document.pdf'
             const mime = lower.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg'
             const file = mineruBytesToFile(bytes, fileName, mime)
-            await mineruParseLocalFile(context, cfg, file, '当前文件')
+            await mineruParseLocalFile(context, cfg, file, mineruText('当前文件', 'current file'))
           }
         }
       ]
@@ -752,7 +880,7 @@ export async function openSettings(context) {
   if (!next) return
   await mineruSaveConfig(context, next)
   if (context.ui && context.ui.notice) {
-    context.ui.notice('MinerU 配置已保存', 'ok')
+    context.ui.notice(mineruText('MinerU 配置已保存', 'MinerU settings saved'), 'ok')
   }
 }
 

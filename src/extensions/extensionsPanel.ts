@@ -108,6 +108,11 @@ const MARKET_OFFICIAL_I18N: Record<string, { name: string; author: string; desc:
     author: 'ext.todoPush.author',
     desc: 'ext.todoPush.desc',
   },
+  mineru: {
+    name: 'ext.mineru.name',
+    author: 'ext.mineru.author',
+    desc: 'ext.mineru.desc',
+  },
   pdf2doc: {
     name: 'ext.pdf2doc.name',
     author: 'ext.pdf2doc.author',

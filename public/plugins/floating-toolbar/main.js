@@ -3,6 +3,29 @@
 const TOOLBAR_ID = 'flymd-floating-toolbar';
 const SETTINGS_KEY = 'floatingToolbarSettings';
 
+// 轻量多语言：跟随宿主（flymd.locale），默认用系统语言
+const FT_LOCALE_LS_KEY = 'flymd.locale';
+function ftDetectLocale() {
+  try {
+    const nav = typeof navigator !== 'undefined' ? navigator : null;
+    const lang = (nav && (nav.language || nav.userLanguage)) || 'en';
+    const lower = String(lang || '').toLowerCase();
+    if (lower.startsWith('zh')) return 'zh';
+  } catch {}
+  return 'en';
+}
+function ftGetLocale() {
+  try {
+    const ls = typeof localStorage !== 'undefined' ? localStorage : null;
+    const v = ls && ls.getItem(FT_LOCALE_LS_KEY);
+    if (v === 'zh' || v === 'en') return v;
+  } catch {}
+  return ftDetectLocale();
+}
+function ftText(zh, en) {
+  return ftGetLocale() === 'en' ? en : zh;
+}
+
 // 默认标题快捷键配置
 const DEFAULT_HEADING_HOTKEYS = {
   h1: { ctrl: true, shift: false, alt: false, meta: false, code: 'Digit1' },
@@ -62,67 +85,67 @@ const COMMANDS = [
   {
     id: 'h1',
     label: 'H1',
-    title: '一级标题',
+    title: ftText('一级标题', 'Heading 1'),
     run: (ctx) => applyHeading(ctx, 1)
   },
   {
     id: 'h2',
     label: 'H2',
-    title: '二级标题',
+    title: ftText('二级标题', 'Heading 2'),
     run: (ctx) => applyHeading(ctx, 2)
   },
   {
     id: 'h3',
     label: 'H3',
-    title: '三级标题',
+    title: ftText('三级标题', 'Heading 3'),
     run: (ctx) => applyHeading(ctx, 3)
   },
   {
     id: 'h4',
     label: 'H4',
-    title: '四级标题',
+    title: ftText('四级标题', 'Heading 4'),
     run: (ctx) => applyHeading(ctx, 4)
   },
   {
     id: 'h5',
     label: 'H5',
-    title: '五级标题',
+    title: ftText('五级标题', 'Heading 5'),
     run: (ctx) => applyHeading(ctx, 5)
   },
   {
     id: 'h6',
     label: 'H6',
-    title: '六级标题',
+    title: ftText('六级标题', 'Heading 6'),
     run: (ctx) => applyHeading(ctx, 6)
   },
   {
     id: 'bold',
     label: 'B',
-    title: '加粗',
+    title: ftText('加粗', 'Bold'),
     run: (ctx) => applyBold(ctx)
   },
   {
     id: 'italic',
     label: 'I',
-    title: '斜体',
+    title: ftText('斜体', 'Italic'),
     run: (ctx) => applyItalic(ctx)
   },
   {
     id: 'ul',
     label: '•',
-    title: '无序列表',
+    title: ftText('无序列表', 'Bullet list'),
     run: (ctx) => applyList(ctx, '- ')
   },
   {
     id: 'link',
     label: '🔗',
-    title: '插入链接',
+    title: ftText('插入链接', 'Insert link'),
     run: (ctx) => applyLink(ctx)
   },
   {
     id: 'image',
     label: 'IMG',
-    title: '插入图片',
+    title: ftText('插入图片', 'Insert image'),
     run: (ctx) => applyImage(ctx)
   }
 ];
@@ -179,10 +202,10 @@ export async function activate(context) {
   }
 
   context.addMenuItem({
-    label: '富文本工具条',
+    label: ftText('🪄 富文本工具条', '🪄 Floating Toolbar'),
     children: [
       {
-        label: '显示/隐藏工具条',
+        label: ftText('显示/隐藏工具条', 'Show / Hide toolbar'),
         onClick: () => {
           if (!state.toolbarEl) {
             createToolbarIfNeeded();
@@ -199,7 +222,7 @@ export async function activate(context) {
         }
       },
       {
-        label: '设置...',
+        label: ftText('设置...', 'Settings...'),
         onClick: () => {
           openSettings(context);
         }
@@ -245,7 +268,7 @@ function createToolbarIfNeeded() {
   bar.style.cursor = 'move';
 
   const title = document.createElement('span');
-  title.textContent = '富文本';
+  title.textContent = ftText('富文本', 'Toolbar');
   title.style.fontSize = '12px';
   title.style.opacity = '0.8';
   title.style.marginRight = '4px';

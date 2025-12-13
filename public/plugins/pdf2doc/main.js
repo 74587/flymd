@@ -4,6 +4,29 @@
 const DEFAULT_API_BASE = 'https://flymd.llingfei.com/pdf/'
 const PDF2DOC_STYLE_ID = 'pdf2doc-settings-style'
 
+// 轻量多语言：跟随宿主（flymd.locale），默认用系统语言
+const PDF2DOC_LOCALE_LS_KEY = 'flymd.locale'
+function pdf2docDetectLocale() {
+  try {
+    const nav = typeof navigator !== 'undefined' ? navigator : null
+    const lang = (nav && (nav.language || nav.userLanguage)) || 'en'
+    const lower = String(lang || '').toLowerCase()
+    if (lower.startsWith('zh')) return 'zh'
+  } catch {}
+  return 'en'
+}
+function pdf2docGetLocale() {
+  try {
+    const ls = typeof localStorage !== 'undefined' ? localStorage : null
+    const v = ls && ls.getItem(PDF2DOC_LOCALE_LS_KEY)
+    if (v === 'zh' || v === 'en') return v
+  } catch {}
+  return pdf2docDetectLocale()
+}
+function pdf2docText(zh, en) {
+  return pdf2docGetLocale() === 'en' ? en : zh
+}
+
 
 async function loadConfig(context) {
   const apiBaseUrl =
@@ -38,7 +61,7 @@ function pickPdfFile() {
     input.onchange = () => {
       const file = input.files && input.files[0]
       if (!file) {
-        reject(new Error('未选择文件'))
+        reject(new Error(pdf2docText('未选择文件', 'No file selected')))
       } else {
         resolve(file)
       }
@@ -67,7 +90,7 @@ function pickImageFile() {
     input.onchange = () => {
       const file = input.files && input.files[0]
       if (!file) {
-        reject(new Error('未选择文件'))
+        reject(new Error(pdf2docText('未选择文件', 'No file selected')))
       } else {
         resolve(file)
       }
@@ -110,9 +133,11 @@ async function uploadAndParsePdfFile(context, cfg, file, output) {
       body: form
     })
   } catch (e) {
-    
     throw new Error(
-      '网络请求失败：' + (e && e.message ? e.message : String(e))
+      pdf2docText(
+        '网络请求失败：' + (e && e.message ? e.message : String(e)),
+        'Network request failed: ' + (e && e.message ? e.message : String(e))
+      )
     )
   }
 
@@ -122,20 +147,21 @@ async function uploadAndParsePdfFile(context, cfg, file, output) {
   } catch (e) {
     const statusText = 'HTTP ' + res.status
     throw new Error(
-      '解析响应 JSON 失败（' +
-        statusText +
-        '）：' +
-        (e && e.message ? e.message : String(e))
+      pdf2docText(
+        '解析响应 JSON 失败（' + statusText + '）：' + (e && e.message ? e.message : String(e)),
+        'Failed to parse JSON response (' + statusText + '): ' + (e && e.message ? e.message : String(e))
+      )
     )
   }
 
   if (!data || typeof data !== 'object') {
-    throw new Error('响应格式错误：不是 JSON 对象')
+    throw new Error(pdf2docText('响应格式错误：不是 JSON 对象', 'Invalid response format: not a JSON object'))
   }
 
   if (!data.ok) {
-    const msg = data.message || data.error || '解析失败'
-    throw new Error(msg)
+    const msgZh = data.message || data.error || '解析失败'
+    const msgEn = data.message || data.error || 'Parse failed'
+    throw new Error(pdf2docText(msgZh, msgEn))
   }
 
   return data // { ok, format, markdown?, docx_url?, pages, uid }
@@ -167,7 +193,10 @@ async function uploadAndParseImageFile(context, cfg, file) {
     })
   } catch (e) {
     throw new Error(
-      '网络请求失败：' + (e && e.message ? e.message : String(e))
+      pdf2docText(
+        '网络请求失败：' + (e && e.message ? e.message : String(e)),
+        'Network request failed: ' + (e && e.message ? e.message : String(e))
+      )
     )
   }
 
@@ -177,24 +206,27 @@ async function uploadAndParseImageFile(context, cfg, file) {
   } catch (e) {
     const statusText = 'HTTP ' + res.status
     throw new Error(
-      '解析响应 JSON 失败（' +
-        statusText +
-        '）：' +
-        (e && e.message ? e.message : String(e))
+      pdf2docText(
+        '解析响应 JSON 失败（' + statusText + '）：' + (e && e.message ? e.message : String(e)),
+        'Failed to parse JSON response (' + statusText + '): ' + (e && e.message ? e.message : String(e))
+      )
     )
   }
 
   if (!data || typeof data !== 'object') {
-    throw new Error('响应格式错误：不是 JSON 对象')
+    throw new Error(pdf2docText('响应格式错误：不是 JSON 对象', 'Invalid response format: not a JSON object'))
   }
 
   if (!data.ok) {
-    const msg = data.message || data.error || '图片解析失败'
-    throw new Error(msg)
+    const msgZh = data.message || data.error || '图片解析失败'
+    const msgEn = data.message || data.error || 'Image parse failed'
+    throw new Error(pdf2docText(msgZh, msgEn))
   }
 
   if (data.format !== 'markdown' || !data.markdown) {
-    throw new Error('解析成功，但返回格式不是 Markdown')
+    throw new Error(
+      pdf2docText('解析成功，但返回格式不是 Markdown', 'Parse succeeded but returned format is not Markdown')
+    )
   }
 
   return data // { ok, format: 'markdown', markdown, pages, uid }
@@ -512,7 +544,7 @@ function showDocxDownloadDialog(docxUrl, pages) {
   
   const header = document.createElement('div')
   header.style.cssText = 'padding:16px 20px;border-bottom:1px solid var(--border,#e5e7eb);font-weight:600;font-size:16px;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;'
-  header.textContent = 'docx 文件已生成'
+  header.textContent = pdf2docText('docx 文件已生成', 'DOCX file is ready')
 
  
   const body = document.createElement('div')
@@ -520,7 +552,10 @@ function showDocxDownloadDialog(docxUrl, pages) {
 
   const message = document.createElement('div')
   message.style.cssText = 'font-size:14px;color:var(--fg,#555);margin-bottom:16px;line-height:1.6;'
-  message.innerHTML = `文件已成功转换为 docx 格式（<strong>${pages} 页</strong>）<br>请选择下载方式：`
+  message.innerHTML = pdf2docText(
+    `文件已成功转换为 docx 格式（<strong>${pages} 页</strong>）<br>请选择下载方式：`,
+    `The file has been converted to DOCX (<strong>${pages} pages</strong>).<br>Please choose a download method:`
+  )
 
   
   const linkDisplay = document.createElement('div')
@@ -534,7 +569,7 @@ function showDocxDownloadDialog(docxUrl, pages) {
  
   const downloadBtn = document.createElement('button')
   downloadBtn.style.cssText = 'padding:10px 16px;border-radius:8px;border:none;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;cursor:pointer;font-size:14px;font-weight:500;transition:transform 0.2s;'
-  downloadBtn.textContent = '🔽 点击下载'
+  downloadBtn.textContent = pdf2docText('🔽 点击下载', '🔽 Download')
   downloadBtn.onmouseover = () => downloadBtn.style.transform = 'translateY(-2px)'
   downloadBtn.onmouseout = () => downloadBtn.style.transform = 'translateY(0)'
   downloadBtn.onclick = () => {
@@ -544,27 +579,31 @@ function showDocxDownloadDialog(docxUrl, pages) {
         
         document.body.removeChild(overlay)
       } else {
-        
-        downloadBtn.textContent = '❌ 浏览器已拦截'
+        downloadBtn.textContent = pdf2docText('❌ 浏览器已拦截', '❌ Blocked by browser')
         downloadBtn.style.background = '#ef4444'
-        message.innerHTML = `<span style="color:#ef4444;">⚠️ 浏览器阻止了弹窗</span><br>请点击"复制链接"按钮，然后粘贴到浏览器地址栏打开`
+        message.innerHTML = pdf2docText(
+          `<span style="color:#ef4444;">⚠️ 浏览器阻止了弹窗</span><br>请点击\"复制链接\"按钮，然后粘贴到浏览器地址栏打开`,
+          `<span style="color:#ef4444;">⚠️ Browser blocked the popup</span><br>Please click \"Copy link\" and paste it into your browser's address bar.`
+        )
         setTimeout(() => {
-          downloadBtn.textContent = '🔽 点击下载'
+          downloadBtn.textContent = pdf2docText('🔽 点击下载', '🔽 Download')
           downloadBtn.style.background = 'linear-gradient(135deg,#667eea 0%,#764ba2 100%)'
         }, 3000)
       }
     } catch (e) {
-      
-      downloadBtn.textContent = '❌ 下载失败'
+      downloadBtn.textContent = pdf2docText('❌ 下载失败', '❌ Download failed')
       downloadBtn.style.background = '#ef4444'
-      message.innerHTML = `<span style="color:#ef4444;">⚠️ 无法打开下载链接</span><br>请点击"复制链接"按钮，然后粘贴到浏览器地址栏打开`
+      message.innerHTML = pdf2docText(
+        `<span style="color:#ef4444;">⚠️ 无法打开下载链接</span><br>请点击\"复制链接\"按钮，然后粘贴到浏览器地址栏打开`,
+        `<span style="color:#ef4444;">⚠️ Unable to open download link</span><br>Please click \"Copy link\" and paste it into your browser's address bar.`
+      )
     }
   }
 
   
   const copyBtn = document.createElement('button')
   copyBtn.style.cssText = 'padding:10px 16px;border-radius:8px;border:1px solid var(--border,#d1d5db);background:var(--bg,#fff);color:var(--fg,#333);cursor:pointer;font-size:14px;font-weight:500;transition:all 0.2s;'
-  copyBtn.textContent = '📋 复制链接'
+  copyBtn.textContent = pdf2docText('📋 复制链接', '📋 Copy link')
   copyBtn.onmouseover = () => {
     copyBtn.style.background = 'var(--bg-muted,#f9fafb)'
     copyBtn.style.transform = 'translateY(-2px)'
@@ -576,7 +615,7 @@ function showDocxDownloadDialog(docxUrl, pages) {
   copyBtn.onclick = () => {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(docxUrl).then(() => {
-        copyBtn.textContent = '✅ 已复制'
+        copyBtn.textContent = pdf2docText('✅ 已复制', '✅ Copied')
         copyBtn.style.background = '#10b981'
         copyBtn.style.color = '#fff'
         copyBtn.style.borderColor = '#10b981'
@@ -584,7 +623,7 @@ function showDocxDownloadDialog(docxUrl, pages) {
           document.body.removeChild(overlay)
         }, 1000)
       }).catch(() => {
-        copyBtn.textContent = '❌ 复制失败'
+        copyBtn.textContent = pdf2docText('❌ 复制失败', '❌ Copy failed')
         copyBtn.style.background = '#ef4444'
         copyBtn.style.color = '#fff'
         copyBtn.style.borderColor = '#ef4444'
@@ -597,7 +636,7 @@ function showDocxDownloadDialog(docxUrl, pages) {
       const sel = window.getSelection()
       sel.removeAllRanges()
       sel.addRange(range)
-      copyBtn.textContent = '已选中，请按 Ctrl+C'
+      copyBtn.textContent = pdf2docText('已选中，请按 Ctrl+C', 'Selected, press Ctrl+C')
     }
   }
 
@@ -607,7 +646,7 @@ function showDocxDownloadDialog(docxUrl, pages) {
 
   const closeBtn = document.createElement('button')
   closeBtn.style.cssText = 'padding:6px 20px;border-radius:6px;border:1px solid var(--border,#d1d5db);background:var(--bg,#fff);color:var(--muted,#6b7280);cursor:pointer;font-size:13px;'
-  closeBtn.textContent = '关闭'
+  closeBtn.textContent = pdf2docText('关闭', 'Close')
   closeBtn.onclick = () => document.body.removeChild(overlay)
 
   
@@ -666,28 +705,30 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
     const header = document.createElement('div')
     header.style.cssText =
       'padding:14px 18px;border-bottom:1px solid var(--border,#e5e7eb);font-weight:600;font-size:15px;background:linear-gradient(135deg,#0ea5e9 0%,#6366f1 100%);color:#fff;'
-    header.textContent = '确认翻译 PDF'
+    header.textContent = pdf2docText('确认翻译 PDF', 'Confirm PDF translation')
 
     const body = document.createElement('div')
     body.style.cssText = 'padding:18px 18px 6px 18px;line-height:1.7;'
 
     const nameRow = document.createElement('div')
     nameRow.style.marginBottom = '8px'
-    nameRow.innerHTML =
-      '将翻译文档：<strong>' +
-      (fileName || '未命名 PDF') +
-      '</strong>'
+    nameRow.innerHTML = pdf2docText(
+      '将翻译文档：<strong>' + (fileName || '未命名 PDF') + '</strong>',
+      'File to translate: <strong>' + (fileName || 'Untitled PDF') + '</strong>'
+    )
 
     const descRow = document.createElement('div')
     descRow.style.marginBottom = '8px'
-    descRow.textContent =
-      '翻译将通过 AI 助手插件执行，默认使用当前配置的模型。如使用免费模型，可能因为超出速率限制失败，可再通过AI插件手动翻译'
+    descRow.textContent = pdf2docText(
+      '翻译将通过 AI 助手插件执行，默认使用当前配置的模型。如使用免费模型，可能因为超出速率限制失败，可再通过AI插件手动翻译',
+      'Translation will be performed via the AI Assistant plugin using the current model. Free models may fail due to rate limits; you can always translate manually in the AI plugin.'
+    )
 
     const modelRow = document.createElement('div')
     modelRow.style.marginBottom = '8px'
     modelRow.style.fontSize = '13px'
     modelRow.style.color = 'var(--muted,#4b5563)'
-    modelRow.textContent = '当前模型：正在获取...'
+    modelRow.textContent = pdf2docText('当前模型：正在获取...', 'Current model: fetching...')
 
     const saveRow = document.createElement('div')
     saveRow.style.marginBottom = '8px'
@@ -696,25 +737,33 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
     const baseNameRaw = (fileName || 'document.pdf').replace(/\.pdf$/i, '')
     const originFileName = baseNameRaw + ' (PDF 原文).md'
     const transFileName = baseNameRaw + ' (PDF 翻译).md'
-    saveRow.textContent =
+    saveRow.textContent = pdf2docText(
       '解析成功后，将在当前文件所在目录自动保存 Markdown 文件：' +
-      originFileName +
-      ' 和 ' +
-      transFileName +
-      '。'
+        originFileName +
+        ' 和 ' +
+        transFileName +
+        '。',
+      'After parsing, two Markdown files will be saved in the current folder: ' +
+        originFileName +
+        ' and ' +
+        transFileName +
+        '.'
+    )
 
     const batchRow = document.createElement('div')
     batchRow.style.marginBottom = '8px'
-    batchRow.innerHTML =
-      '当前 PDF 文档超过 2 页，将按 <strong>2 页一批</strong>依次翻译。请确认所选模型的上下文长度和速率限制是否足够。'
+    batchRow.innerHTML = pdf2docText(
+      '当前 PDF 文档超过 2 页，将按 <strong>2 页一批</strong>依次翻译。请确认所选模型的上下文长度和速率限制是否足够。',
+      'If the PDF has more than 2 pages, it will be translated in <strong>batches of 2 pages</strong>. Make sure your model\'s context length and rate limits are sufficient.'
+    )
 
     const quotaRow = document.createElement('div')
     quotaRow.style.cssText =
       'margin-top:4px;margin-bottom:4px;font-size:13px;color:var(--muted,#4b5563);'
     const quotaLabel = document.createElement('span')
-    quotaLabel.textContent = '当前剩余可用解析页数：'
+    quotaLabel.textContent = pdf2docText('当前剩余可用解析页数：', 'Remaining parse pages: ')
     const quotaValue = document.createElement('span')
-    quotaValue.textContent = '正在查询...'
+    quotaValue.textContent = pdf2docText('正在查询...', 'Querying...')
     quotaRow.appendChild(quotaLabel)
     quotaRow.appendChild(quotaValue)
 
@@ -723,12 +772,12 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
       'padding:12px 18px;border-top:1px solid var(--border,#e5e7eb);display:flex;justify-content:flex-end;gap:10px;background:var(--bg-muted,#f9fafb);'
 
     const btnCancel = document.createElement('button')
-    btnCancel.textContent = '取消'
+    btnCancel.textContent = pdf2docText('取消', 'Cancel')
     btnCancel.style.cssText =
       'padding:6px 16px;border-radius:6px;border:1px solid var(--border,#d1d5db);background:var(--bg,#fff);color:var(--muted,#4b5563);cursor:pointer;font-size:13px;'
 
     const btnOk = document.createElement('button')
-    btnOk.textContent = '确认'
+    btnOk.textContent = pdf2docText('确认', 'Confirm')
     btnOk.style.cssText =
       'padding:6px 18px;border-radius:6px;border:1px solid #2563eb;background:#2563eb;color:#fff;cursor:pointer;font-size:13px;font-weight:500;'
 
@@ -793,7 +842,7 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
         try {
           data = text ? JSON.parse(text) : null
         } catch {
-          quotaValue.textContent = '查询失败（响应格式错误）'
+          quotaValue.textContent = pdf2docText('查询失败（响应格式错误）', 'Query failed: invalid response format')
           return
         }
 
@@ -801,19 +850,21 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
           const msg =
             (data && (data.message || data.error)) ||
             text ||
-            '请求失败（HTTP ' + res.status + '）'
-          quotaValue.textContent = '查询失败：' + msg
+            pdf2docText('请求失败（HTTP ' + res.status + '）', 'Request failed (HTTP ' + res.status + ')')
+          quotaValue.textContent = pdf2docText('查询失败：', 'Query failed: ') + msg
           return
         }
 
         const total = data.total_pages ?? 0
         const used = data.used_pages ?? 0
         const remain = data.remain_pages ?? Math.max(0, total - used)
-        quotaValue.textContent =
-          String(remain) + ' 页（总 ' + total + ' 页，已用 ' + used + ' 页）'
+        quotaValue.textContent = pdf2docText(
+          String(remain) + ' 页（总 ' + total + ' 页，已用 ' + used + ' 页）',
+          String(remain) + ' pages (total ' + total + ', used ' + used + ')'
+        )
       } catch (e) {
-        const msg = e && e.message ? e.message : String(e || '未知错误')
-        quotaValue.textContent = '查询失败：' + msg
+        const msg = e && e.message ? e.message : String(e || pdf2docText('未知错误', 'unknown error'))
+        quotaValue.textContent = pdf2docText('查询失败：', 'Query failed: ') + msg
       }
     })()
 
@@ -825,12 +876,15 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
             ? context.getPluginAPI('ai-assistant')
             : null
         if (!ai || typeof ai.getConfig !== 'function') {
-          modelRow.textContent = '当前模型：未知（AI 助手插件未安装或版本过低）'
+          modelRow.textContent = pdf2docText(
+            '当前模型：未知（AI 助手插件未安装或版本过低）',
+            'Current model: unknown (AI Assistant plugin not installed or too old)'
+          )
           return
         }
         const aiCfg = await ai.getConfig()
         if (!aiCfg || typeof aiCfg !== 'object') {
-          modelRow.textContent = '当前模型：获取失败'
+          modelRow.textContent = pdf2docText('当前模型：获取失败', 'Current model: failed to fetch')
           return
         }
 
@@ -842,22 +896,25 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
 
         let detail = ''
         if (alwaysFreeTrans) {
-          detail =
-            '已启用“翻译始终使用免费模型”，本次将使用免费模型' +
-            (freeKey ? `（${freeKey}）` : '')
+          detail = pdf2docText(
+            '已启用“翻译始终使用免费模型”，本次将使用免费模型' + (freeKey ? `（${freeKey}）` : ''),
+            'Always-use-free-model is enabled; this translation uses the free model' + (freeKey ? ` (${freeKey})` : '')
+          )
         } else if (isFreeProvider) {
-          detail =
-            '当前处于免费模式，将使用免费模型' +
-            (freeKey ? `（${freeKey}）` : '')
+          detail = pdf2docText(
+            '当前处于免费模式，将使用免费模型' + (freeKey ? `（${freeKey}）` : ''),
+            'Currently in free mode; the free model will be used' + (freeKey ? ` (${freeKey})` : '')
+          )
         } else {
-          detail =
-            '当前使用自定义模型' +
-            (modelId ? `（${modelId}）` : '')
+          detail = pdf2docText(
+            '当前使用自定义模型' + (modelId ? `（${modelId}）` : ''),
+            'Using custom model' + (modelId ? ` (${modelId})` : '')
+          )
         }
 
-        modelRow.textContent = '当前模型：' + detail
+        modelRow.textContent = pdf2docText('当前模型：', 'Current model: ') + detail
       } catch (e) {
-        modelRow.textContent = '当前模型：获取失败'
+        modelRow.textContent = pdf2docText('当前模型：获取失败', 'Current model: failed to fetch')
       }
     })()
   })
@@ -929,7 +986,7 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
 
     const header = document.createElement('div')
     header.className = 'pdf2doc-settings-header'
-    header.textContent = 'pdf2doc 设置'
+    header.textContent = pdf2docText('pdf2doc 设置', 'pdf2doc Settings')
     dialog.appendChild(header)
 
     const body = document.createElement('div')
@@ -941,7 +998,7 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
   rowToken.className = 'pdf2doc-settings-row'
   const labToken = document.createElement('div')
   labToken.className = 'pdf2doc-settings-label'
-  labToken.textContent = '密钥'
+  labToken.textContent = pdf2docText('密钥', 'Token')
   const boxToken = document.createElement('div')
     const inputToken = document.createElement('input')
     inputToken.type = 'text'
@@ -952,7 +1009,10 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
       boxToken.appendChild(inputToken)
       const tipToken = document.createElement('div')
       tipToken.className = 'pdf2doc-settings-desc'
-      tipToken.textContent = '务必牢记密钥，丢失后可通过我的订单找回'
+      tipToken.textContent = pdf2docText(
+        '务必牢记密钥，丢失后可通过我的订单找回',
+        'Keep this token safe; if you lose it, you can retrieve it from the order page.'
+      )
       boxToken.appendChild(tipToken)
 
       const quotaInfo = document.createElement('div')
@@ -962,7 +1022,7 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
       const btnQuota = document.createElement('button')
       btnQuota.type = 'button'
       btnQuota.className = 'pdf2doc-settings-btn'
-      btnQuota.textContent = '查询剩余页数'
+      btnQuota.textContent = pdf2docText('查询剩余页数', 'Check remaining pages')
       btnQuota.style.marginTop = '6px'
       boxToken.appendChild(btnQuota)
       boxToken.appendChild(quotaInfo)
@@ -981,12 +1041,15 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
 
     const purchaseTitle = document.createElement('div')
     purchaseTitle.className = 'pdf2doc-settings-purchase-title'
-    purchaseTitle.textContent = '支付宝扫码购买解析页数'
+    purchaseTitle.textContent = pdf2docText('支付宝扫码购买解析页数', 'Scan Alipay QR to buy pages')
     purchaseSection.appendChild(purchaseTitle)
 
     const purchaseDesc = document.createElement('div')
     purchaseDesc.className = 'pdf2doc-settings-purchase-desc'
-    purchaseDesc.innerHTML = '100页PDF 3元 折合0.03元/页<br>200页PDF 5元 折合0.025元/页<br>500页PDF 12元 折合0.024元/页'
+    purchaseDesc.innerHTML = pdf2docText(
+      '100页PDF 3元 折合0.03元/页<br>200页PDF 5元 折合0.025元/页<br>500页PDF 12元 折合0.024元/页',
+      '100 pages: ¥3 (¥0.03/page)<br>200 pages: ¥5 (¥0.025/page)<br>500 pages: ¥12 (¥0.024/page)'
+    )
     purchaseSection.appendChild(purchaseDesc)
 
     
@@ -996,7 +1059,7 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
     const qrcodeImg = document.createElement('img')
     qrcodeImg.className = 'pdf2doc-settings-qrcode-img'
     qrcodeImg.src = 'https://flymd.llingfei.com/pdf/shop.png'
-    qrcodeImg.alt = '支付宝扫码购买'
+    qrcodeImg.alt = pdf2docText('支付宝扫码购买', 'Scan with Alipay to purchase')
     qrcodeContainer.appendChild(qrcodeImg)
 
     purchaseSection.appendChild(qrcodeContainer)
@@ -1005,7 +1068,7 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
     const orderBtn = document.createElement('button')
     orderBtn.type = 'button'
     orderBtn.className = 'pdf2doc-settings-order-btn'
-    orderBtn.textContent = '查看我的订单'
+    orderBtn.textContent = pdf2docText('查看我的订单', 'View my orders')
     orderBtn.addEventListener('click', (e) => {
       e.preventDefault()
       e.stopPropagation()
@@ -1028,7 +1091,10 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
     warnTip.className = 'pdf2doc-settings-desc'
     warnTip.style.color = '#b45309'
     warnTip.style.marginTop = '4px'
-    warnTip.textContent = '⚠️请及时保存文档！重复解析也会扣除剩余页数。解析为Markdown后可另存为Docx'
+    warnTip.textContent = pdf2docText(
+      '⚠️请及时保存文档！重复解析也会扣除剩余页数。解析为Markdown后可另存为Docx',
+      '⚠️ Save your documents in time! Re-parsing also consumes pages. After parsing to Markdown you can export to DOCX.'
+    )
     body.appendChild(warnTip)
 
     
@@ -1036,7 +1102,7 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
     rowOut.className = 'pdf2doc-settings-row'
     const labOut = document.createElement('div')
     labOut.className = 'pdf2doc-settings-label'
-    labOut.textContent = '默认输出格式'
+    labOut.textContent = pdf2docText('默认输出格式', 'Default output format')
     const outSelect = document.createElement('select')
     outSelect.className = 'pdf2doc-settings-input'
     const optMd = document.createElement('option')
@@ -1044,7 +1110,7 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
     optMd.textContent = 'Markdown'
     const optDocx = document.createElement('option')
     optDocx.value = 'docx'
-    optDocx.textContent = 'docx（生成可下载的 Word 文件）'
+    optDocx.textContent = pdf2docText('docx（生成可下载的 Word 文件）', 'DOCX (downloadable Word file)')
     outSelect.appendChild(optMd)
     outSelect.appendChild(optDocx)
     outSelect.value = cfg.defaultOutput === 'docx' ? 'docx' : 'markdown'
@@ -1056,10 +1122,10 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
     footer.className = 'pdf2doc-settings-footer'
     const btnCancel = document.createElement('button')
     btnCancel.className = 'pdf2doc-settings-btn'
-    btnCancel.textContent = '取消'
+    btnCancel.textContent = pdf2docText('取消', 'Cancel')
     const btnSave = document.createElement('button')
     btnSave.className = 'pdf2doc-settings-btn primary'
-    btnSave.textContent = '保存'
+    btnSave.textContent = pdf2docText('保存', 'Save')
     footer.appendChild(btnCancel)
     footer.appendChild(btnSave)
     dialog.appendChild(footer)
@@ -1092,11 +1158,11 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
 
       const username = inputToken.value.trim()
       if (!username) {
-        quotaInfo.textContent = '请先填写密钥'
+        quotaInfo.textContent = pdf2docText('请先填写密钥', 'Please enter the token first')
         return
       }
 
-      quotaInfo.textContent = '正在查询剩余页数...'
+      quotaInfo.textContent = pdf2docText('正在查询剩余页数...', 'Checking remaining pages...')
 
       let apiUrl = (cfg.apiBaseUrl || DEFAULT_API_BASE).trim()
       if (apiUrl.endsWith('/pdf')) {
@@ -1118,21 +1184,24 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
         try {
           data = text ? JSON.parse(text) : null
         } catch (parseErr) {
-          quotaInfo.textContent = '查询失败：服务器响应格式错误'
+          quotaInfo.textContent = pdf2docText('查询失败：服务器响应格式错误', 'Query failed: invalid server response')
           return
         }
 
         
         if (res.status < 200 || res.status >= 300) {
-          const msg = (data && (data.message || data.error)) || text || '请求失败（HTTP ' + res.status + '）'
-          quotaInfo.textContent = '查询失败：' + msg
+          const msg =
+            (data && (data.message || data.error)) ||
+            text ||
+            pdf2docText('请求失败（HTTP ' + res.status + '）', 'Request failed (HTTP ' + res.status + ')')
+          quotaInfo.textContent = pdf2docText('查询失败：', 'Query failed: ') + msg
           return
         }
 
         
         if (!data || data.ok !== true) {
-          const msg = (data && (data.message || data.error)) || '服务器返回错误'
-          quotaInfo.textContent = '查询失败：' + msg
+          const msg = (data && (data.message || data.error)) || pdf2docText('服务器返回错误', 'Server returned an error')
+          quotaInfo.textContent = pdf2docText('查询失败：', 'Query failed: ') + msg
           return
         }
 
@@ -1141,19 +1210,14 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
         const used = data.used_pages ?? 0
         const remain = data.remain_pages ?? Math.max(0, total - used)
 
-        quotaInfo.textContent =
-          '当前剩余页数：' +
-          remain +
-          '（总 ' +
-          total +
-          ' 页，已用 ' +
-          used +
-          ' 页）'
+        quotaInfo.textContent = pdf2docText(
+          '当前剩余页数：' + remain + '（总 ' + total + ' 页，已用 ' + used + ' 页）',
+          'Remaining pages: ' + remain + ' (total ' + total + ', used ' + used + ')'
+        )
 
       } catch (e) {
-        
-        const msg = e && e.message ? e.message : String(e || '未知错误')
-        quotaInfo.textContent = '查询失败：' + msg
+        const msg = e && e.message ? e.message : String(e || pdf2docText('未知错误', 'unknown error'))
+        quotaInfo.textContent = pdf2docText('查询失败：', 'Query failed: ') + msg
       }
     }
     btnQuota.addEventListener('click', fetchQuota)
@@ -1197,7 +1261,10 @@ export async function activate(context) {
         const remain = data.remain_pages ?? Math.max(0, total - used)
 
         context.ui.notice(
-          'PDF2Doc 剩余页数：' + remain + ' 页（总 ' + total + ' 页）',
+          pdf2docText(
+            'PDF2Doc 剩余页数：' + remain + ' 页（总 ' + total + ' 页）',
+            'PDF2Doc remaining pages: ' + remain + ' (total ' + total + ')'
+          ),
           'ok',
           5000
         )
@@ -1208,29 +1275,42 @@ export async function activate(context) {
   })()
 
     context.addMenuItem({
-      label: 'PDF / 图片高精度解析',
-      title: '解析 PDF 或图片为 Markdown 或 docx（图片仅支持 Markdown）',
+      label: pdf2docText('📄 PDF / 图片高精度解析', '📄 PDF / Image High-Precision OCR'),
+      title: pdf2docText(
+        '解析 PDF 或图片为 Markdown 或 docx（图片仅支持 Markdown）',
+        'Parse PDF or images into Markdown or DOCX (images only support Markdown).'
+      ),
       children: [
         {
-          label: '选择文件',
+          label: pdf2docText('选择文件', 'Choose file'),
         onClick: async () => {
           let loadingId = null
           try {
             const cfg = await loadConfig(context)
             if (!cfg.apiToken) {
-              context.ui.notice('请先在插件设置中配置密钥', 'err')
+              context.ui.notice(
+                pdf2docText('请先在插件设置中配置密钥', 'Please configure the PDF2Doc token in plugin settings first'),
+                'err'
+              )
               return
             }
 
             const file = await pickPdfFile()
 
             if (context.ui.showNotification) {
-              loadingId = context.ui.showNotification('正在解析 PDF，请稍候...', {
-                type: 'info',
-                duration: 0
-              })
+              loadingId = context.ui.showNotification(
+                pdf2docText('正在解析 PDF，请稍候...', 'Parsing PDF, please wait...'),
+                {
+                  type: 'info',
+                  duration: 0
+                }
+              )
             } else {
-              context.ui.notice('正在解析 PDF，请稍候...', 'ok', 3000)
+              context.ui.notice(
+                pdf2docText('正在解析 PDF，请稍候...', 'Parsing PDF, please wait...'),
+                'ok',
+                3000
+              )
             }
 
             const result = await uploadAndParsePdfFile(context, cfg, file, cfg.defaultOutput)
@@ -1264,15 +1344,23 @@ export async function activate(context) {
               const merged = current ? current + '\n\n' + localized : localized
               context.setEditorValue(merged)
 
-              const pagesInfo = result.pages ? '（' + result.pages + ' 页）' : ''
+              const pagesInfo = result.pages
+                ? pdf2docText('（' + result.pages + ' 页）', ' (' + result.pages + ' pages)')
+                : ''
               if (savedPath) {
                 context.ui.notice(
-                  'PDF 解析完成，已插入并保存为 Markdown 文件' + pagesInfo,
+                  pdf2docText(
+                    'PDF 解析完成，已插入并保存为 Markdown 文件' + pagesInfo,
+                    'PDF parsed and inserted; Markdown file saved' + pagesInfo
+                  ),
                   'ok'
                 )
               } else {
                 context.ui.notice(
-                  'PDF 解析完成，已插入 Markdown' + pagesInfo,
+                  pdf2docText(
+                    'PDF 解析完成，已插入 Markdown' + pagesInfo,
+                    'PDF parsed and inserted as Markdown' + pagesInfo
+                  ),
                   'ok'
                 )
               }
@@ -1299,7 +1387,12 @@ export async function activate(context) {
                 downloadSuccess = true
 
                 context.ui.notice(
-                  'docx 文件已开始下载，请查看浏览器下载栏（' + (result.pages || '?') + ' 页）',
+                  pdf2docText(
+                    'docx 文件已开始下载，请查看浏览器下载栏（' + (result.pages || '?') + ' 页）',
+                    'DOCX download started; check your browser downloads (' +
+                      (result.pages || '?') +
+                      ' pages).'
+                  ),
                   'ok',
                   5000
                 )
@@ -1311,7 +1404,10 @@ export async function activate(context) {
                 showDocxDownloadDialog(result.docx_url, result.pages || 0)
               }
             } else {
-              context.ui.notice('解析成功，但返回格式未知', 'err')
+              context.ui.notice(
+                pdf2docText('解析成功，但返回格式未知', 'Parse succeeded but returned unknown format'),
+                'err'
+              )
             }
           } catch (err) {
             if (loadingId && context.ui.hideNotification) {
@@ -1320,32 +1416,45 @@ export async function activate(context) {
               } catch {}
             }
               context.ui.notice(
-                'PDF 解析失败：' + (err && err.message ? err.message : String(err)),
+                pdf2docText(
+                  'PDF 解析失败：' + (err && err.message ? err.message : String(err)),
+                  'PDF parse failed: ' + (err && err.message ? err.message : String(err))
+                ),
                 'err'
               )
             }
           }
         },
         {
-          label: '选择图片 (To MD)',
+          label: pdf2docText('选择图片 (To MD)', 'Choose image (To MD)'),
           onClick: async () => {
             let loadingId = null
             try {
               const cfg = await loadConfig(context)
               if (!cfg.apiToken) {
-                context.ui.notice('请先在插件设置中配置密钥', 'err')
+                context.ui.notice(
+                  pdf2docText('请先在插件设置中配置密钥', 'Please configure the PDF2Doc token in plugin settings first'),
+                  'err'
+                )
                 return
               }
 
               const file = await pickImageFile()
 
               if (context.ui.showNotification) {
-                loadingId = context.ui.showNotification('正在解析图片为 Markdown，请稍候...', {
-                  type: 'info',
-                  duration: 0
-                })
+                loadingId = context.ui.showNotification(
+                  pdf2docText('正在解析图片为 Markdown，请稍候...', 'Parsing image to Markdown, please wait...'),
+                  {
+                    type: 'info',
+                    duration: 0
+                  }
+                )
               } else {
-                context.ui.notice('正在解析图片为 Markdown，请稍候...', 'ok', 3000)
+                context.ui.notice(
+                  pdf2docText('正在解析图片为 Markdown，请稍候...', 'Parsing image to Markdown, please wait...'),
+                  'ok',
+                  3000
+                )
               }
 
               const result = await uploadAndParseImageFile(context, cfg, file)
@@ -1363,11 +1472,17 @@ export async function activate(context) {
                 const merged = current ? current + '\n\n' + localized : localized
                 context.setEditorValue(merged)
                 context.ui.notice(
-                  '图片解析完成，已插入 Markdown（' + (result.pages || '?') + ' 页）',
+                  pdf2docText(
+                    '图片解析完成，已插入 Markdown（' + (result.pages || '?') + ' 页）',
+                    'Image parsed and inserted as Markdown (' + (result.pages || '?') + ' pages)'
+                  ),
                   'ok'
                 )
               } else {
-                context.ui.notice('解析成功，但返回格式不是 Markdown', 'err')
+                context.ui.notice(
+                  pdf2docText('解析成功，但返回格式不是 Markdown', 'Parse succeeded but returned format is not Markdown'),
+                  'err'
+                )
               }
             } catch (err) {
               if (loadingId && context.ui.hideNotification) {
@@ -1376,39 +1491,58 @@ export async function activate(context) {
                 } catch {}
               }
               context.ui.notice(
-                '图片解析失败：' + (err && err.message ? err.message : String(err)),
+                pdf2docText(
+                  '图片解析失败：' + (err && err.message ? err.message : String(err)),
+                  'Image parse failed: ' + (err && err.message ? err.message : String(err))
+                ),
                 'err'
               )
             }
           }
         },
         {
-        label: 'To MD',
+        label: pdf2docText('To MD', 'To MD'),
         onClick: async () => {
           let loadingId = null
           try {
             const cfg = await loadConfig(context)
             if (!cfg.apiToken) {
-              context.ui.notice('请先在插件设置中配置密钥', 'err')
+              context.ui.notice(
+                pdf2docText('请先在插件设置中配置密钥', 'Please configure the PDF2Doc token in plugin settings first'),
+                'err'
+              )
               return
             }
             if (typeof context.getCurrentFilePath !== 'function' || typeof context.readFileBinary !== 'function') {
-              context.ui.notice('当前版本不支持按路径解析 PDF', 'err')
+              context.ui.notice(
+                pdf2docText('当前版本不支持按路径解析 PDF', 'This version does not support parsing PDF by path'),
+                'err'
+              )
               return
             }
             const path = context.getCurrentFilePath()
             if (!path || !/\.pdf$/i.test(path)) {
-              context.ui.notice('当前没有打开 PDF 文件', 'err')
+              context.ui.notice(
+                pdf2docText('当前没有打开 PDF 文件', 'No PDF file is currently open'),
+                'err'
+              )
               return
             }
 
             if (context.ui.showNotification) {
-              loadingId = context.ui.showNotification('正在解析当前 PDF 为 Markdown...', {
-                type: 'info',
-                duration: 0
-              })
+              loadingId = context.ui.showNotification(
+                pdf2docText('正在解析当前 PDF 为 Markdown...', 'Parsing current PDF to Markdown...'),
+                {
+                  type: 'info',
+                  duration: 0
+                }
+              )
             } else {
-              context.ui.notice('正在解析当前 PDF 为 Markdown...', 'ok', 3000)
+              context.ui.notice(
+                pdf2docText('正在解析当前 PDF 为 Markdown...', 'Parsing current PDF to Markdown...'),
+                'ok',
+                3000
+              )
             }
 
             const bytes = await context.readFileBinary(path)
@@ -1448,20 +1582,31 @@ export async function activate(context) {
                 context.setEditorValue(merged)
               }
 
-              const pagesInfo = result.pages ? '（' + result.pages + ' 页）' : ''
+              const pagesInfo = result.pages
+                ? pdf2docText('（' + result.pages + ' 页）', ' (' + result.pages + ' pages)')
+                : ''
               if (savedPath) {
                 context.ui.notice(
-                  'PDF 解析完成，已保存为 Markdown 文件并打开' + pagesInfo,
+                  pdf2docText(
+                    'PDF 解析完成，已保存为 Markdown 文件并打开' + pagesInfo,
+                    'PDF parsed; Markdown file saved and opened' + pagesInfo
+                  ),
                   'ok'
                 )
               } else {
                 context.ui.notice(
-                  'PDF 解析完成，已插入 Markdown（未能自动保存为单独文件）' + pagesInfo,
+                  pdf2docText(
+                    'PDF 解析完成，已插入 Markdown（未能自动保存为单独文件）' + pagesInfo,
+                    'PDF parsed and inserted as Markdown (could not save separate file)' + pagesInfo
+                  ),
                   'ok'
                 )
               }
             } else {
-              context.ui.notice('解析成功，但返回格式不是 Markdown', 'err')
+              context.ui.notice(
+                pdf2docText('解析成功，但返回格式不是 Markdown', 'Parse succeeded but returned format is not Markdown'),
+                'err'
+              )
             }
           } catch (err) {
             if (loadingId && context.ui.hideNotification) {
@@ -1470,39 +1615,58 @@ export async function activate(context) {
               } catch {}
             }
             context.ui.notice(
-              'PDF 解析失败：' + (err && err.message ? err.message : String(err)),
+              pdf2docText(
+                'PDF 解析失败：' + (err && err.message ? err.message : String(err)),
+                'PDF parse failed: ' + (err && err.message ? err.message : String(err))
+              ),
               'err'
             )
           }
         }
       },
       {
-        label: 'To Docx',
+        label: pdf2docText('To Docx', 'To Docx'),
         onClick: async () => {
           let loadingId = null
           try {
             const cfg = await loadConfig(context)
             if (!cfg.apiToken) {
-              context.ui.notice('请先在插件设置中配置密钥', 'err')
+              context.ui.notice(
+                pdf2docText('请先在插件设置中配置密钥', 'Please configure the PDF2Doc token in plugin settings first'),
+                'err'
+              )
               return
             }
             if (typeof context.getCurrentFilePath !== 'function' || typeof context.readFileBinary !== 'function') {
-              context.ui.notice('当前版本不支持按路径解析 PDF', 'err')
+              context.ui.notice(
+                pdf2docText('当前版本不支持按路径解析 PDF', 'This version does not support parsing PDF by path'),
+                'err'
+              )
               return
             }
             const path = context.getCurrentFilePath()
             if (!path || !/\.pdf$/i.test(path)) {
-              context.ui.notice('当前没有打开 PDF 文件', 'err')
+              context.ui.notice(
+                pdf2docText('当前没有打开 PDF 文件', 'No PDF file is currently open'),
+                'err'
+              )
               return
             }
 
             if (context.ui.showNotification) {
-              loadingId = context.ui.showNotification('正在解析当前 PDF 为 Docx...', {
-                type: 'info',
-                duration: 0
-              })
+              loadingId = context.ui.showNotification(
+                pdf2docText('正在解析当前 PDF 为 Docx...', 'Parsing current PDF to DOCX...'),
+                {
+                  type: 'info',
+                  duration: 0
+                }
+              )
             } else {
-              context.ui.notice('正在解析当前 PDF 为 Docx...', 'ok', 3000)
+              context.ui.notice(
+                pdf2docText('正在解析当前 PDF 为 Docx...', 'Parsing current PDF to DOCX...'),
+                'ok',
+                3000
+              )
             }
 
             const bytes = await context.readFileBinary(path)
@@ -1536,7 +1700,12 @@ export async function activate(context) {
                 downloadSuccess = true
 
                 context.ui.notice(
-                  'docx 文件已开始下载，请查看浏览器下载栏（' + (result.pages || '?') + ' 页）',
+                  pdf2docText(
+                    'docx 文件已开始下载，请查看浏览器下载栏（' + (result.pages || '?') + ' 页）',
+                    'DOCX download started; check your browser downloads (' +
+                      (result.pages || '?') +
+                      ' pages).'
+                  ),
                   'ok',
                   5000
                 )
@@ -1548,7 +1717,10 @@ export async function activate(context) {
                 showDocxDownloadDialog(result.docx_url, result.pages || 0)
               }
             } else {
-              context.ui.notice('解析成功，但返回格式不是 Docx', 'err')
+              context.ui.notice(
+                pdf2docText('解析成功，但返回格式不是 Docx', 'Parse succeeded but returned format is not DOCX'),
+                'err'
+              )
             }
           } catch (err) {
             if (loadingId && context.ui.hideNotification) {
@@ -1557,14 +1729,17 @@ export async function activate(context) {
               } catch {}
             }
             context.ui.notice(
-              'PDF 解析失败：' + (err && err.message ? err.message : String(err)),
+              pdf2docText(
+                'PDF 解析失败：' + (err && err.message ? err.message : String(err)),
+                'PDF parse failed: ' + (err && err.message ? err.message : String(err))
+              ),
               'err'
             )
           }
         }
       },
         {
-        label: '翻译 PDF',
+        label: pdf2docText('翻译 PDF', 'Translate PDF'),
         onClick: async () => {
           let loadingId = null
           const loadingRef = { id: null }
@@ -1575,7 +1750,7 @@ export async function activate(context) {
                 : null
             if (!ai) {
               context.ui.notice(
-                '需要先安装并启用 AI 助手插件',
+                pdf2docText('需要先安装并启用 AI 助手插件', 'Please install and enable the AI Assistant plugin first'),
                 'err',
                 3000
               )
@@ -1588,7 +1763,10 @@ export async function activate(context) {
                 : true
             if (!ready) {
               context.ui.notice(
-                '请先在 AI 助手插件中配置 API Key 或切换免费模式',
+                pdf2docText(
+                  '请先在 AI 助手插件中配置 API Key 或切换免费模式',
+                  'Please configure an API key or switch to free mode in the AI Assistant plugin first'
+                ),
                 'err',
                 4000
               )
@@ -1598,7 +1776,10 @@ export async function activate(context) {
             const cfg = await loadConfig(context)
             if (!cfg.apiToken) {
               context.ui.notice(
-                '请先在 PDF2Doc 插件设置中配置密钥',
+                pdf2docText(
+                  '请先在 PDF2Doc 插件设置中配置密钥',
+                  'Please configure the PDF2Doc token in plugin settings first'
+                ),
                 'err',
                 3000
               )
@@ -1636,12 +1817,16 @@ export async function activate(context) {
                   undefined
                 )
                 if (!preConfirm || !preConfirm.confirmed) {
-                  context.ui.notice('已取消 PDF 翻译', 'info', 3000)
+                  context.ui.notice(
+                    pdf2docText('已取消 PDF 翻译', 'PDF translation cancelled'),
+                    'info',
+                    3000
+                  )
                   return
                 }
                 if (context.ui.showNotification) {
                   loadingId = context.ui.showNotification(
-                    '正在解析当前 PDF...',
+                    pdf2docText('正在解析当前 PDF...', 'Parsing current PDF...'),
                     {
                       type: 'info',
                       duration: 0
@@ -1649,7 +1834,7 @@ export async function activate(context) {
                   )
                 } else {
                   context.ui.notice(
-                    '正在解析当前 PDF...',
+                    pdf2docText('正在解析当前 PDF...', 'Parsing current PDF...'),
                     'ok',
                     3000
                   )
@@ -1674,7 +1859,9 @@ export async function activate(context) {
                   )
                   pages = result.pages || '?'
                 } else {
-                  throw new Error('解析成功，但返回格式不是 Markdown')
+                  throw new Error(
+                    pdf2docText('解析成功，但返回格式不是 Markdown', 'Parse succeeded but returned format is not Markdown')
+                  )
                 }
               }
             }
@@ -1691,7 +1878,11 @@ export async function activate(context) {
                 undefined
               )
               if (!preConfirm || !preConfirm.confirmed) {
-                context.ui.notice('已取消 PDF 翻译', 'info', 3000)
+                context.ui.notice(
+                  pdf2docText('已取消 PDF 翻译', 'PDF translation cancelled'),
+                  'info',
+                  3000
+                )
                 return
               }
 
@@ -1703,7 +1894,7 @@ export async function activate(context) {
                   loadingId = null
                 }
                 loadingId = context.ui.showNotification(
-                  '正在解析选中的 PDF...',
+                  pdf2docText('正在解析选中的 PDF...', 'Parsing selected PDF...'),
                   {
                     type: 'info',
                     duration: 0
@@ -1711,7 +1902,7 @@ export async function activate(context) {
                 )
               } else {
                 context.ui.notice(
-                  '正在解析选中的 PDF...',
+                  pdf2docText('正在解析选中的 PDF...', 'Parsing selected PDF...'),
                   'ok',
                   3000
                 )
@@ -1735,7 +1926,9 @@ export async function activate(context) {
                 )
                 pages = result.pages || '?'
               } else {
-                throw new Error('解析成功，但返回格式不是 Markdown')
+                throw new Error(
+                  pdf2docText('解析成功，但返回格式不是 Markdown', 'Parse succeeded but returned format is not Markdown')
+                )
               }
             }
 
@@ -1746,7 +1939,10 @@ export async function activate(context) {
                 } catch {}
               }
               context.ui.notice(
-                'PDF 解析成功但未获取到文本内容',
+                pdf2docText(
+                  'PDF 解析成功但未获取到文本内容',
+                  'PDF parsed but no text content was obtained'
+                ),
                 'err',
                 4000
               )
@@ -1777,8 +1973,8 @@ export async function activate(context) {
               if (!isCurrentPdf) {
                 const currentBefore = context.getEditorValue()
                 const originTitle = fileName
-                  ? '## PDF 原文：' + fileName
-                  : '## PDF 原文'
+                  ? pdf2docText('## PDF 原文：' + fileName, '## PDF original: ' + fileName)
+                  : pdf2docText('## PDF 原文', '## PDF original')
                 const originBlock =
                   '\n\n---\n\n' + originTitle + '\n\n' + markdown + '\n'
                 const mergedOrigin = currentBefore
@@ -1796,7 +1992,11 @@ export async function activate(context) {
                 loadingId = null
               }
             } else {
-              context.ui.notice('正在翻译 PDF 内容...', 'ok', 3000)
+              context.ui.notice(
+                pdf2docText('正在翻译 PDF 内容...', 'Translating PDF content...'),
+                'ok',
+                3000
+              )
             }
 
             const result = await translateMarkdownInBatches(
@@ -1813,8 +2013,14 @@ export async function activate(context) {
 
                 const msgPages =
                   from && to
-                    ? `正在翻译 PDF 第 ${from}-${to} 页（第 ${batchIndex + 1}/${batchCount} 批）...`
-                    : `正在翻译 PDF 内容（第 ${batchIndex + 1}/${batchCount} 批）...`
+                    ? pdf2docText(
+                        `正在翻译 PDF 第 ${from}-${to} 页（第 ${batchIndex + 1}/${batchCount} 批）...`,
+                        `Translating PDF pages ${from}-${to} (batch ${batchIndex + 1}/${batchCount})...`
+                      )
+                    : pdf2docText(
+                        `正在翻译 PDF 内容（第 ${batchIndex + 1}/${batchCount} 批）...`,
+                        `Translating PDF content (batch ${batchIndex + 1}/${batchCount})...`
+                      )
 
                 if (context.ui.showNotification) {
                   if (loadingRef.id && context.ui.hideNotification) {
@@ -1842,7 +2048,7 @@ export async function activate(context) {
                 } catch {}
               }
               context.ui.notice(
-                '翻译失败：未获取到结果',
+                pdf2docText('翻译失败：未获取到结果', 'Translation failed: no result received'),
                 'err',
                 4000
               )
@@ -1882,8 +2088,8 @@ export async function activate(context) {
             if (!isCurrentPdf) {
               const current = context.getEditorValue()
               const title = fileName
-                ? '## PDF 翻译：' + fileName
-                : '## PDF 中文翻译'
+                ? pdf2docText('## PDF 翻译：' + fileName, '## PDF translation: ' + fileName)
+                : pdf2docText('## PDF 中文翻译', '## PDF translation (Chinese)')
               const block =
                 '\n\n---\n\n' + title + '\n\n' + translation + '\n'
               const merged = current ? current + block : block
@@ -1891,9 +2097,11 @@ export async function activate(context) {
             }
 
             if (result.completed) {
+              const suffixPages = pages
+                ? pdf2docText('（' + pages + ' 页）', ' (' + pages + ' pages)')
+                : ''
               context.ui.notice(
-                'PDF 翻译完成' +
-                  (pages ? '（' + pages + ' 页）' : ''),
+                pdf2docText('PDF 翻译完成' + suffixPages, 'PDF translation completed' + suffixPages),
                 'ok',
                 5000
               )
@@ -1903,10 +2111,10 @@ export async function activate(context) {
                   ? result.translatedPages
                   : ''
               const suffix = donePages
-                ? `，已插入前 ${donePages} 页的翻译`
-                : '，已插入部分翻译结果'
+                ? pdf2docText('，已插入前 ' + donePages + ' 页的翻译', ', inserted translation for first ' + donePages + ' pages')
+                : pdf2docText('，已插入部分翻译结果', ', inserted partial translation')
               context.ui.notice(
-                'PDF 翻译过程中断' + suffix,
+                pdf2docText('PDF 翻译过程中断', 'PDF translation interrupted') + suffix,
                 'err',
                 6000
               )
@@ -1929,8 +2137,10 @@ export async function activate(context) {
               } catch {}
             }
             context.ui.notice(
-              'PDF 翻译失败：' +
-                (err && err.message ? err.message : String(err)),
+              pdf2docText(
+                'PDF 翻译失败：' + (err && err.message ? err.message : String(err)),
+                'PDF translation failed: ' + (err && err.message ? err.message : String(err))
+              ),
               'err',
               5000
             )
@@ -1949,23 +2159,27 @@ export async function activate(context) {
         parsePdfToMarkdownByPath: async (path) => {
           const p = String(path || '').trim()
           if (!p) {
-            throw new Error('path 不能为空')
+            throw new Error(pdf2docText('path 不能为空', 'path cannot be empty'))
           }
           if (!/\.pdf$/i.test(p)) {
-            throw new Error('仅支持解析 .pdf 文件')
+            throw new Error(pdf2docText('仅支持解析 .pdf 文件', 'Only .pdf files are supported'))
           }
           const cfg = await loadConfig(context)
           if (!cfg.apiToken) {
-            throw new Error('未配置 pdf2doc 密钥')
+            throw new Error(pdf2docText('未配置 pdf2doc 密钥', 'PDF2Doc token is not configured'))
           }
           if (typeof context.readFileBinary !== 'function') {
-            throw new Error('当前版本不支持按路径读取二进制文件')
+            throw new Error(
+              pdf2docText('当前版本不支持按路径读取二进制文件', 'This version cannot read binary files by path')
+            )
           }
           const bytes = await context.readFileBinary(p)
           const fileName = p.split(/[\\/]+/).pop() || 'document.pdf'
           const result = await parsePdfBytes(context, cfg, bytes, fileName, 'markdown')
           if (result.format !== 'markdown' || !result.markdown) {
-            throw new Error('解析成功，但返回格式不是 Markdown')
+            throw new Error(
+              pdf2docText('解析成功，但返回格式不是 Markdown', 'Parse succeeded but returned format is not Markdown')
+            )
           }
           return result
         },
@@ -1974,23 +2188,29 @@ export async function activate(context) {
         parseImageToMarkdownByPath: async (path) => {
           const p = String(path || '').trim()
           if (!p) {
-            throw new Error('path 不能为空')
+            throw new Error(pdf2docText('path 不能为空', 'path cannot be empty'))
           }
           if (!/\.(png|jpe?g|webp)$/i.test(p)) {
-            throw new Error('仅支持解析图片文件（png/jpg/webp）')
+            throw new Error(
+              pdf2docText('仅支持解析图片文件（png/jpg/webp）', 'Only image files (png/jpg/webp) are supported')
+            )
           }
           const cfg = await loadConfig(context)
           if (!cfg.apiToken) {
-            throw new Error('未配置 pdf2doc 密钥')
+            throw new Error(pdf2docText('未配置 pdf2doc 密钥', 'PDF2Doc token is not configured'))
           }
           if (typeof context.readFileBinary !== 'function') {
-            throw new Error('当前版本不支持按路径读取二进制文件')
+            throw new Error(
+              pdf2docText('当前版本不支持按路径读取二进制文件', 'This version cannot read binary files by path')
+            )
           }
           const bytes = await context.readFileBinary(p)
           const fileName = p.split(/[\\/]+/).pop() || 'image.jpg'
           const result = await parseImageBytes(context, cfg, bytes, fileName)
           if (result.format !== 'markdown' || !result.markdown) {
-            throw new Error('解析成功，但返回格式不是 Markdown')
+            throw new Error(
+              pdf2docText('解析成功，但返回格式不是 Markdown', 'Parse succeeded but returned format is not Markdown')
+            )
           }
           return result
         }
@@ -2009,7 +2229,10 @@ export async function openSettings(context) {
   const nextCfg = await openSettingsDialog(context, cfg)
   if (!nextCfg) return
   await saveConfig(context, nextCfg)
-  context.ui.notice('pdf2doc 插件配置已保存', 'ok')
+  context.ui.notice(
+    pdf2docText('pdf2doc 插件配置已保存', 'pdf2doc settings saved'),
+    'ok'
+  )
 }
 
 export function deactivate() {
