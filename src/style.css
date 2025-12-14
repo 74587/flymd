@@ -3417,7 +3417,7 @@ html, body { overflow: hidden; }
 }
 
 .ext-dialog {
-  width: 1100px;
+  width: 1280px;
   max-width: calc(100% - 40px);
   background: var(--bg);
   color: var(--fg);
@@ -3472,7 +3472,7 @@ html, body { overflow: hidden; }
 
 .ext-body {
   padding: 20px 24px 24px;
-  max-height: 75vh;
+  max-height: 80vh;
   overflow: auto;
   scrollbar-width: thin;
   scrollbar-color: rgba(127,127,127,0.3) transparent;
@@ -3484,7 +3484,7 @@ html, body { overflow: hidden; }
 
 .ext-section {
   margin: 0 0 24px 0;
-  padding: 16px;
+  padding: 18px;
   background: rgba(127,127,127,0.03);
   border-radius: 12px;
   border: 1px solid rgba(127,127,127,0.08);
@@ -3633,7 +3633,7 @@ html, body { overflow: hidden; }
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 14px;
-  padding: 4px;
+  padding: 2px;
 }
 
 .ext-item {
