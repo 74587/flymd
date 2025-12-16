@@ -7,7 +7,7 @@
 
 import { tabManager, TabManagerHooks } from './TabManager'
 import { TabBar } from './TabBar'
-import type { EditorMode, TabDocument } from './types'
+import { getTabDisplayName, type EditorMode, type TabDocument } from './types'
 import { TextareaUndoManager } from './TextareaUndoManager'
 import { FLYMD_PATH_DELETED_EVENT, type FlymdPathDeletedDetail } from '../core/pathEvents'
 
@@ -182,10 +182,8 @@ async function confirmTabClose(tab: TabDocument): Promise<boolean> {
   // 未修改直接允许关闭
   if (!tab.dirty) return true
 
-  // 获取文件名用于显示
-  const fileName = tab.filePath
-    ? tab.filePath.replace(/\\/g, '/').split('/').pop() || '未命名'
-    : '未命名'
+  // 使用标签显示名（未保存标签也能区分）
+  const fileName = getTabDisplayName(tab)
 
   // 显示三按钮对话框
   const result = await showCloseConfirmDialog(fileName)

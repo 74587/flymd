@@ -9,6 +9,7 @@ export type EditorMode = 'edit' | 'preview'
 export interface TabDocument {
   id: string                          // 唯一标识符
   filePath: string | null             // 文件路径，null 表示未保存的新文档
+  displayName?: string                // 显示名称（仅 filePath 为 null 时使用）
   content: string                     // 文档内容
   dirty: boolean                      // 是否有未保存的修改
   scrollTop: number                   // 滚动位置
@@ -45,6 +46,7 @@ export interface TabBarOptions {
 export interface PersistedTabState {
   tabs: Array<{
     filePath: string | null
+    displayName?: string
     content: string
     dirty: boolean
     mode: EditorMode
@@ -59,11 +61,12 @@ export function generateTabId(): string {
 }
 
 // 创建新的空白标签文档
-export function createEmptyTab(): TabDocument {
+export function createEmptyTab(displayName?: string): TabDocument {
   const now = Date.now()
   return {
     id: generateTabId(),
     filePath: null,
+    displayName,
     content: '',
     dirty: false,
     scrollTop: 0,
@@ -101,5 +104,6 @@ export function getTabDisplayName(tab: TabDocument): string {
     const parts = tab.filePath.replace(/\\/g, '/').split('/')
     return parts[parts.length - 1] || '未命名'
   }
+  if (tab.displayName) return tab.displayName
   return '未命名'
 }

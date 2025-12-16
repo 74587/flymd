@@ -131,7 +131,7 @@ export class TabBar {
     const name = document.createElement('span')
     name.className = 'tabbar-tab-name'
     name.textContent = getTabDisplayName(tab)
-    name.title = tab.filePath || '未命名'
+    name.title = tab.filePath || getTabDisplayName(tab)
     tabEl.appendChild(name)
 
     // 修改指示器
@@ -601,7 +601,7 @@ export class TabBar {
     const nameEl = tabEl.querySelector('.tabbar-tab-name')
     if (nameEl) {
       nameEl.textContent = getTabDisplayName(tab)
-      ;(nameEl as HTMLElement).title = tab.filePath || '未命名'
+      ;(nameEl as HTMLElement).title = tab.filePath || getTabDisplayName(tab)
     }
   }
 

@@ -60,6 +60,19 @@ export class TabManager {
   private listeners: TabEventListener[] = []
   private initialized = false
 
+  private getNextUntitledName(): string {
+    const prefix = '新建文档'
+    let max = 0
+    for (const t of this.tabs) {
+      if (t.filePath) continue
+      const m = String(t.displayName || '').match(/^新建文档(\d+)$/)
+      if (!m) continue
+      const n = Number(m[1])
+      if (Number.isFinite(n) && n > max) max = n
+    }
+    return `${prefix}${max + 1}`
+  }
+
   /**
    * 初始化标签管理器
    * 必须在 main.ts 加载完成后调用
@@ -88,6 +101,7 @@ export class TabManager {
     const tab: TabDocument = {
       id: `tab_${Date.now()}`,
       filePath,
+      displayName: filePath ? undefined : this.getNextUntitledName(),
       content,
       dirty,
       scrollTop: this.hooks.getScrollTop(),
@@ -223,7 +237,7 @@ export class TabManager {
     // 保存当前标签状态
     this.saveCurrentTabState()
 
-    const tab = createEmptyTab()
+    const tab = createEmptyTab(this.getNextUntitledName())
     this.tabs.push(tab)
 
     const fromTabId = this.activeTabId
@@ -424,6 +438,8 @@ export class TabManager {
     const tab = this.findTabById(tabId)
     if (!tab) return
 
+    // 保留解绑前的名称，避免直接退化成“未命名”导致用户无法区分来源
+    tab.displayName = getTabDisplayName(tab)
     tab.filePath = null
     tab.dirty = true
 
@@ -539,6 +555,7 @@ export class TabManager {
     return {
       tabs: this.tabs.map(t => ({
         filePath: t.filePath,
+        displayName: t.displayName,
         content: t.dirty ? t.content : '', // 只保存未保存的内容
         dirty: t.dirty,
         mode: t.mode,
@@ -557,10 +574,20 @@ export class TabManager {
     this.tabs = []
 
     for (const saved of state.tabs) {
+      if (!saved.filePath) {
+        const tab = createEmptyTab(saved.displayName || this.getNextUntitledName())
+        tab.content = saved.content
+        tab.dirty = saved.dirty
+        tab.mode = saved.mode
+        tab.wysiwygEnabled = saved.wysiwygEnabled
+        this.tabs.push(tab)
+        continue
+      }
+
       let content = saved.content
 
       // 如果有文件路径且没有未保存内容，从文件加载
-      if (saved.filePath && !saved.dirty) {
+      if (!saved.dirty) {
         try {
           content = await loadFileContent(saved.filePath)
         } catch {
@@ -569,8 +596,7 @@ export class TabManager {
         }
       }
 
-      const tab = createTabFromFile(saved.filePath ?? '', content)
-      tab.filePath = saved.filePath
+      const tab = createTabFromFile(saved.filePath, content)
       tab.dirty = saved.dirty
       tab.mode = saved.mode
       tab.wysiwygEnabled = saved.wysiwygEnabled
@@ -579,7 +605,7 @@ export class TabManager {
 
     // 如果没有成功恢复任何标签，创建空白标签
     if (this.tabs.length === 0) {
-      this.tabs.push(createEmptyTab())
+      this.tabs.push(createEmptyTab(this.getNextUntitledName()))
     }
 
     // 恢复活跃标签
