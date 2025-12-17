@@ -51,6 +51,8 @@ const DEFAULT_CFG = {
 
 let __CTX__ = null
 let __DIALOG__ = null
+let __MINIBAR__ = null
+let __MINI__ = null
 
 function detectLocale() {
   try {
@@ -1234,6 +1236,11 @@ async function projectMarkerExists(ctx, projectAbs) {
 
 function closeDialog() {
   try {
+    if (__MINIBAR__ && __MINIBAR__.remove) __MINIBAR__.remove()
+  } catch {}
+  __MINIBAR__ = null
+  __MINI__ = null
+  try {
     if (__DIALOG__ && __DIALOG__.remove) __DIALOG__.remove()
   } catch {}
   __DIALOG__ = null
@@ -1250,7 +1257,10 @@ function ensureDialogStyle() {
 .ain-dlg{width:min(980px,96vw);background:#0f172a;border:1px solid #1f2937;border-radius:12px;color:#e6e6e6}
 .ain-head{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid #1f2937}
 .ain-title{font-size:16px;font-weight:700}
-.ain-close{background:transparent;border:0;color:#e6e6e6;font-size:22px;cursor:pointer}
+.ain-winbtns{display:flex;gap:6px;align-items:center}
+.ain-winbtn{background:transparent;border:0;color:#e6e6e6;font-size:18px;cursor:pointer;min-width:32px;height:28px;line-height:28px;border-radius:8px}
+.ain-winbtn:hover{background:rgba(255,255,255,.08)}
+.ain-close{font-size:22px}
 .ain-body{padding:14px 16px}
 .ain-card{background:#0b1220;border:1px solid #243041;border-radius:10px;padding:12px;margin:10px 0}
 .ain-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -1273,8 +1283,121 @@ function ensureDialogStyle() {
 .ain-muted{color:#9ca3af;font-size:12px}
 .ain-ok{color:#bbf7d0}
 .ain-err{color:#fecaca}
+.ain-minibar{position:fixed;z-index:1000000;background:#0f172a;border:1px solid #1f2937;color:#e6e6e6;border-radius:999px;box-shadow:0 10px 28px rgba(0,0,0,.45);padding:0 8px;display:flex;align-items:center;gap:8px;height:var(--ain-bar-h,24px);line-height:var(--ain-bar-h,24px);user-select:none}
+.ain-minibar .ain-minititle{font-size:12px;font-weight:700;max-width:42vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:grab}
+.ain-minibar .ain-minititle:active{cursor:grabbing}
+.ain-minibar .ain-winbtn{height:calc(var(--ain-bar-h,24px) - 2px);line-height:calc(var(--ain-bar-h,24px) - 2px);min-width:28px;border-radius:999px}
 `
   doc.head.appendChild(st)
+}
+
+function _ainLineHeightPx() {
+  try {
+    const cs = window.getComputedStyle(document.body)
+    const lh = String(cs.lineHeight || '')
+    if (lh.endsWith('px')) {
+      const v = Math.round(parseFloat(lh))
+      if (Number.isFinite(v) && v > 0) return Math.min(44, Math.max(18, v))
+    }
+    const fs = Math.round(parseFloat(String(cs.fontSize || '16')) || 16)
+    return Math.min(44, Math.max(18, Math.round(fs * 1.4)))
+  } catch {}
+  return 24
+}
+
+function _ainMinimizeToBar(title, restoreFn, closeFn) {
+  const doc = document
+  if (!doc || !doc.body) return
+
+  try {
+    if (__MINIBAR__ && __MINIBAR__.remove) __MINIBAR__.remove()
+  } catch {}
+  __MINIBAR__ = null
+
+  const bar = doc.createElement('div')
+  bar.className = 'ain-minibar'
+  bar.style.left = '50%'
+  bar.style.bottom = '10px'
+  bar.style.transform = 'translateX(-50%)'
+  bar.style.setProperty('--ain-bar-h', _ainLineHeightPx() + 'px')
+
+  const ttl = doc.createElement('div')
+  ttl.className = 'ain-minititle'
+  ttl.textContent = String(title || t('AI 小说', 'AI Novel'))
+
+  const btnMax = doc.createElement('button')
+  btnMax.className = 'ain-winbtn'
+  btnMax.textContent = '▢'
+  btnMax.title = t('最大化', 'Maximize')
+  btnMax.onclick = () => {
+    try { if (typeof restoreFn === 'function') restoreFn() } catch {}
+    try { if (__MINIBAR__ && __MINIBAR__.remove) __MINIBAR__.remove() } catch {}
+    __MINIBAR__ = null
+    __MINI__ = null
+  }
+
+  const btnClose = doc.createElement('button')
+  btnClose.className = 'ain-winbtn ain-close'
+  btnClose.textContent = '×'
+  btnClose.title = t('关闭', 'Close')
+  btnClose.onclick = () => {
+    if (typeof closeFn === 'function') closeFn()
+    else closeDialog()
+  }
+
+  bar.appendChild(ttl)
+  bar.appendChild(btnMax)
+  bar.appendChild(btnClose)
+  doc.body.appendChild(bar)
+  __MINIBAR__ = bar
+
+  // 可拖拽：不影响宿主编辑，默认底部居中
+  let dragging = false
+  let startX = 0
+  let startY = 0
+  let baseL = 0
+  let baseT = 0
+
+  function _clamp(n, a, b) {
+    return Math.min(b, Math.max(a, n))
+  }
+
+  bar.addEventListener('pointerdown', (e) => {
+    try {
+      if (!e || e.button !== 0) return
+      if (e.target && e.target.closest && e.target.closest('button')) return
+      const r = bar.getBoundingClientRect()
+      bar.style.left = Math.round(r.left) + 'px'
+      bar.style.top = Math.round(r.top) + 'px'
+      bar.style.bottom = 'auto'
+      bar.style.transform = 'none'
+      dragging = true
+      startX = e.clientX
+      startY = e.clientY
+      baseL = r.left
+      baseT = r.top
+      bar.setPointerCapture(e.pointerId)
+      e.preventDefault()
+    } catch {}
+  })
+  bar.addEventListener('pointermove', (e) => {
+    if (!dragging) return
+    const dx = e.clientX - startX
+    const dy = e.clientY - startY
+    const w = bar.offsetWidth || 1
+    const h = bar.offsetHeight || 1
+    const maxL = (window.innerWidth || 0) - w
+    const maxT = (window.innerHeight || 0) - h
+    const l = _clamp(baseL + dx, 0, Math.max(0, maxL))
+    const t = _clamp(baseT + dy, 0, Math.max(0, maxT))
+    bar.style.left = Math.round(l) + 'px'
+    bar.style.top = Math.round(t) + 'px'
+  })
+  function _stopDrag() { dragging = false }
+  bar.addEventListener('pointerup', _stopDrag)
+  bar.addEventListener('pointercancel', _stopDrag)
+
+  __MINI__ = { title: String(title || ''), restore: restoreFn, close: closeFn }
 }
 
 async function openSettingsDialog(ctx) {
@@ -1295,12 +1418,29 @@ async function openSettingsDialog(ctx) {
   const title = document.createElement('div')
   title.className = 'ain-title'
   title.textContent = t('AI 小说引擎设置', 'AI Novel Engine Settings')
+
+  const btns = document.createElement('div')
+  btns.className = 'ain-winbtns'
+
+  const btnMin = document.createElement('button')
+  btnMin.className = 'ain-winbtn'
+  btnMin.textContent = '—'
+  btnMin.title = t('最小化', 'Minimize')
+  btnMin.onclick = () => {
+    try { overlay.style.display = 'none' } catch {}
+    _ainMinimizeToBar(title.textContent, () => { try { overlay.style.display = '' } catch {} }, () => closeDialog())
+  }
+
   const btnClose = document.createElement('button')
-  btnClose.className = 'ain-close'
+  btnClose.className = 'ain-winbtn ain-close'
   btnClose.textContent = '×'
+  btnClose.title = t('关闭', 'Close')
   btnClose.onclick = () => closeDialog()
+
+  btns.appendChild(btnMin)
+  btns.appendChild(btnClose)
   head.appendChild(title)
-  head.appendChild(btnClose)
+  head.appendChild(btns)
 
   const body = document.createElement('div')
   body.className = 'ain-body'
@@ -1648,16 +1788,35 @@ function createDialogShell(title, onClose) {
   ttl.className = 'ain-title'
   ttl.textContent = title
 
+  const btns = document.createElement('div')
+  btns.className = 'ain-winbtns'
+
+  const btnMin = document.createElement('button')
+  btnMin.className = 'ain-winbtn'
+  btnMin.textContent = '—'
+  btnMin.title = t('最小化', 'Minimize')
+  btnMin.onclick = () => {
+    try { overlay.style.display = 'none' } catch {}
+    const closeFn = () => {
+      if (typeof onClose === 'function') onClose()
+      else closeDialog()
+    }
+    _ainMinimizeToBar(ttl.textContent, () => { try { overlay.style.display = '' } catch {} }, closeFn)
+  }
+
   const btnX = document.createElement('button')
-  btnX.className = 'ain-close'
+  btnX.className = 'ain-winbtn ain-close'
   btnX.textContent = '×'
+  btnX.title = t('关闭', 'Close')
   btnX.onclick = () => {
     if (typeof onClose === 'function') onClose()
     else closeDialog()
   }
 
+  btns.appendChild(btnMin)
+  btns.appendChild(btnX)
   head.appendChild(ttl)
-  head.appendChild(btnX)
+  head.appendChild(btns)
 
   const body = document.createElement('div')
   body.className = 'ain-body'
