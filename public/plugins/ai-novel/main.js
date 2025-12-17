@@ -1261,6 +1261,25 @@ async function writeTextAny(ctx, path, content) {
   throw new Error(t('当前环境不支持写文件', 'File write is not supported in this environment'))
 }
 
+async function backupBeforeOverwrite(ctx, absPath, tag) {
+  try {
+    if (!ctx) return ''
+    const p = String(absPath || '').trim()
+    if (!p) return ''
+    if (!(await fileExists(ctx, p))) return ''
+    const old = safeText(await readTextAny(ctx, p))
+    if (!old.trim()) return ''
+    const ts = safeFileName(_fmtLocalTs(), 'ts')
+    const tg = safeFileName(String(tag || ''), '')
+    const suffix = tg ? ('.' + tg) : ''
+    const bak = p + '.bak.' + ts + suffix
+    await writeTextAny(ctx, bak, old)
+    return bak
+  } catch {
+    return ''
+  }
+}
+
 async function projectMarkerExists(ctx, projectAbs) {
   // 兼容旧版：00_项目.json；新版：00_项目.md；以及隐藏索引：.ainovel/index.json
   if (await fileExists(ctx, joinFsPath(projectAbs, '.ainovel/index.json'))) return true
@@ -4104,18 +4123,101 @@ async function openMetaUpdateDialog(ctx) {
   function fillFromData(data) {
     const d = data && typeof data === 'object' ? data : null
     if (!d) return false
-    if (d.world != null) pWorld.ta.value = safeText(d.world).trim()
-    if (d.characters != null) pChars.ta.value = safeText(d.characters).trim()
-    if (d.relations != null) pRels.ta.value = safeText(d.relations).trim()
-    if (d.outline != null) pOutline.ta.value = safeText(d.outline).trim()
+    function sanitizeOne(k, raw) {
+      const map = { world: '世界设定', characters: '主要角色', relations: '人物关系', outline: '章节大纲' }
+      const name = map[k] ? String(map[k]) : ''
+      const txt = safeText(raw).trim()
+      if (!name || !txt) return txt
+      try {
+        const sec = parseSectionedText('【' + name + '】\n' + txt)
+        return safeText(sec && sec[k]).trim() || txt
+      } catch {
+        return txt
+      }
+    }
+    if (d.world != null) pWorld.ta.value = sanitizeOne('world', d.world)
+    if (d.characters != null) pChars.ta.value = sanitizeOne('characters', d.characters)
+    if (d.relations != null) pRels.ta.value = sanitizeOne('relations', d.relations)
+    if (d.outline != null) pOutline.ta.value = sanitizeOne('outline', d.outline)
     return true
   }
 
-  function grabFromText(txt, sectionName) {
-    const t0 = safeText(txt)
-    const re = new RegExp('【' + sectionName + '】\\s*([\\s\\S]*?)(?=\\n\\s*【|$)', 'g')
-    const m = re.exec(t0)
-    return m && m[1] ? String(m[1]).trim() : ''
+  function parseSectionedText(txt) {
+    const t0 = safeText(txt).replace(/\r\n/g, '\n')
+    const keys = [
+      { k: 'world', names: ['世界设定', '世界观'] },
+      { k: 'characters', names: ['主要角色'] },
+      { k: 'relations', names: ['人物关系'] },
+      { k: 'outline', names: ['章节大纲'] },
+      { k: 'questions', names: ['需要你补充', '需要补充', '问题'] },
+    ]
+    const out0 = { world: [], characters: [], relations: [], outline: [], questions: [] }
+    let cur = 'world'
+
+    const lines = t0.split('\n')
+    for (let i = 0; i < lines.length; i++) {
+      const raw = String(lines[i] || '')
+      let x = raw.trim()
+      if (!x) continue
+
+      let head = x
+      const mm = /^#{1,6}\s*(.+)$/.exec(x)
+      if (mm && mm[1]) head = String(mm[1]).trim()
+
+      let matched = false
+      let rest = ''
+      for (let j = 0; j < keys.length; j++) {
+        const it = keys[j]
+        const names = Array.isArray(it.names) ? it.names : []
+        for (let n = 0; n < names.length; n++) {
+          const nm = String(names[n] || '').trim()
+          if (!nm) continue
+          if (head === `【${nm}】` || head === `[${nm}]`) {
+            cur = it.k
+            matched = true
+            rest = ''
+            break
+          }
+          let m1 = new RegExp(`^【${nm.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}】\\s*(.*)$`).exec(head)
+          if (m1 && m1[1] != null) {
+            cur = it.k
+            matched = true
+            rest = String(m1[1] || '').trim()
+            break
+          }
+          let m2 = new RegExp(`^\\[${nm.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\]\\s*(.*)$`).exec(head)
+          if (m2 && m2[1] != null) {
+            cur = it.k
+            matched = true
+            rest = String(m2[1] || '').trim()
+            break
+          }
+          let m3 = new RegExp(`^${nm.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\s*[:：]\\s*(.*)$`).exec(head)
+          if (m3 && m3[1] != null) {
+            cur = it.k
+            matched = true
+            rest = String(m3[1] || '').trim()
+            break
+          }
+        }
+        if (matched) break
+      }
+      if (matched) {
+        if (rest) out0[cur].push(rest)
+        continue
+      }
+      if (!out0[cur]) continue
+      out0[cur].push(x)
+    }
+
+    const pick = (arr) => safeText(Array.isArray(arr) ? arr.join('\n') : '').trim()
+    return {
+      world: pick(out0.world),
+      characters: pick(out0.characters),
+      relations: pick(out0.relations),
+      outline: pick(out0.outline),
+      questions: pick(out0.questions),
+    }
   }
 
   async function readMetaFiles(inf) {
@@ -4183,6 +4285,7 @@ async function openMetaUpdateDialog(ctx) {
           question: [
             '任务：基于“变更目标/要求”，对小说资料文件做增量修订（不是正文）。',
             '输出按分节：【世界设定】【主要角色】【人物关系】【章节大纲】【需要你补充】。',
+            '重要：你的输出会被分别写入资料文件。禁止在某个分节里输出其它分节标题；允许你全盘重写，但必须整理合并：现有资料的有效信息一条都不能丢（可去重/改写/重排/合并同义项）。',
             g
           ].join('\n')
         }
@@ -4197,10 +4300,11 @@ async function openMetaUpdateDialog(ctx) {
       const data = resp && resp.data && typeof resp.data === 'object' ? resp.data : null
       if (!fillFromData(data)) {
         const txt = safeText(resp && resp.text)
-        pWorld.ta.value = grabFromText(txt, '世界设定')
-        pChars.ta.value = grabFromText(txt, '主要角色')
-        pRels.ta.value = grabFromText(txt, '人物关系')
-        pOutline.ta.value = grabFromText(txt, '章节大纲')
+        const sec = parseSectionedText(txt)
+        pWorld.ta.value = safeText(sec.world).trim()
+        pChars.ta.value = safeText(sec.characters).trim()
+        pRels.ta.value = safeText(sec.relations).trim()
+        pOutline.ta.value = safeText(sec.outline).trim()
       }
 
       btnWrite.disabled = false
@@ -4220,11 +4324,24 @@ async function openMetaUpdateDialog(ctx) {
       if (!inf) throw new Error(t('无法推断当前项目', 'Cannot infer project'))
       if (!anySelected()) return
 
+      function cutSection(k, raw) {
+        const map = { world: '世界设定', characters: '主要角色', relations: '人物关系', outline: '章节大纲' }
+        const name = map[k] ? String(map[k]) : ''
+        const txt = safeText(raw).trim()
+        if (!name || !txt) return txt
+        try {
+          const sec = parseSectionedText('【' + name + '】\n' + txt)
+          return safeText(sec && sec[k]).trim() || txt
+        } catch {
+          return txt
+        }
+      }
+
       const todo = []
-      if (cWorld.cb.checked) todo.push(['02_世界设定.md', safeText(pWorld.ta.value).trim()])
-      if (cChars.cb.checked) todo.push(['03_主要角色.md', safeText(pChars.ta.value).trim()])
-      if (cRels.cb.checked) todo.push(['04_人物关系.md', safeText(pRels.ta.value).trim()])
-      if (cOutline.cb.checked) todo.push(['05_章节大纲.md', safeText(pOutline.ta.value).trim()])
+      if (cWorld.cb.checked) todo.push(['02_世界设定.md', cutSection('world', pWorld.ta.value)])
+      if (cChars.cb.checked) todo.push(['03_主要角色.md', cutSection('characters', pChars.ta.value)])
+      if (cRels.cb.checked) todo.push(['04_人物关系.md', cutSection('relations', pRels.ta.value)])
+      if (cOutline.cb.checked) todo.push(['05_章节大纲.md', cutSection('outline', pOutline.ta.value)])
 
       // 防呆：别把空内容覆盖掉
       const bad = todo.filter((x) => !x[1])
@@ -4241,6 +4358,7 @@ async function openMetaUpdateDialog(ctx) {
       setBusy(btnWrite, true)
       for (let i = 0; i < todo.length; i++) {
         const f = todo[i]
+        try { await backupBeforeOverwrite(ctx, joinFsPath(inf.projectAbs, f[0]), 'meta_update') } catch {}
         await writeTextAny(ctx, joinFsPath(inf.projectAbs, f[0]), f[1].trim() + '\n')
       }
       ctx.ui.notice(t('已写入资料文件', 'Meta files written'), 'ok', 1800)
@@ -4730,6 +4848,7 @@ async function openImportExistingDialog(ctx) {
       setBusy(btnWrite, true)
       await ensureProjectSkeleton(inf)
       for (let i = 0; i < todo.length; i++) {
+        try { await backupBeforeOverwrite(ctx, joinFsPath(inf.projectAbs, todo[i][0]), 'init_meta') } catch {}
         await writeTextAny(ctx, joinFsPath(inf.projectAbs, todo[i][0]), todo[i][1])
       }
       ctx.ui.notice(t('已写入资料文件', 'Meta files written'), 'ok', 1800)
