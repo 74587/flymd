@@ -1865,7 +1865,21 @@ async function openSettingsDialog(ctx) {
 
   btnDocs.onclick = () => {
     const url = 'https://www.llingfei.com/novel.html'
-    try { window.open(url, '_blank', 'noopener,noreferrer') } catch { try { location.href = url } catch {} }
+    try {
+      // FlyMD 环境里第三个 features 参数可能导致 window.open 失效：按 ai-assistant 的方式走最朴素的调用
+      const w = window.open(url, '_blank')
+      if (!w) {
+        const a = document.createElement('a')
+        a.href = url
+        a.target = '_blank'
+        a.rel = 'noopener noreferrer'
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+      }
+    } catch (e) {
+      try { location.href = url } catch {}
+    }
   }
 
   btnMe.onclick = async () => {
