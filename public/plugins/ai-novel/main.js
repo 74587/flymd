@@ -66,6 +66,7 @@ const DEFAULT_CFG = {
 }
 
 let __CTX__ = null
+let __CTX_MENU_DISPOSER__ = null
 let __DIALOG__ = null
 let __MINIBAR__ = null
 let __MINI__ = null
@@ -3182,13 +3183,16 @@ async function openWriteWithChoiceDialog(ctx) {
   const selAgentTarget = document.createElement('select')
   selAgentTarget.className = 'ain-in ain-select'
   selAgentTarget.style.width = '180px'
-  ;[1000, 2000, 3000, 4000].forEach((n) => {
+  ;[1000, 2000, 3000].forEach((n) => {
     const op = document.createElement('option')
     op.value = String(n)
-    op.textContent = t('≈ ', '≈ ') + String(n) + t(' 字', ' chars') + (n === 4000 ? t('（上限）', ' (max)') : '')
+    op.textContent = t('≈ ', '≈ ') + String(n) + t(' 字', ' chars') + (n === 3000 ? t('（上限）', ' (max)') : '')
     selAgentTarget.appendChild(op)
   })
-  try { selAgentTarget.value = String(a0.targetChars || 3000) } catch {}
+  try {
+    const v0 = parseInt(String(a0.targetChars || 3000), 10) || 3000
+    selAgentTarget.value = String((v0 === 1000 || v0 === 2000 || v0 === 3000) ? v0 : 3000)
+  } catch {}
   agentBox.appendChild(selAgentTarget)
 
   const auditLine = document.createElement('label')
@@ -3224,11 +3228,43 @@ async function openWriteWithChoiceDialog(ctx) {
   modeLine.appendChild(selThinkingMode)
   agentBox.appendChild(modeLine)
 
+  function _choiceAgentMaxChars(thinkingMode) {
+    const m = _ainAgentNormThinkingMode(thinkingMode) || 'none'
+    if (m === 'strong') return 1000
+    if (m === 'normal') return 2000
+    return 3000
+  }
+
+  function _choiceAgentClampTargetChars(thinkingMode, targetChars) {
+    const n0 = parseInt(String(targetChars == null ? '' : targetChars), 10) || 3000
+    const n = (n0 === 1000 || n0 === 2000 || n0 === 3000) ? n0 : 3000
+    const max = _choiceAgentMaxChars(thinkingMode)
+    return Math.min(n, max)
+  }
+
+  function _choiceAgentSyncTargetOptions() {
+    const max = _choiceAgentMaxChars(selThinkingMode.value)
+    try {
+      const opts = selAgentTarget.querySelectorAll('option')
+      for (let i = 0; i < opts.length; i++) {
+        const v = parseInt(String(opts[i].value || '0'), 10) || 0
+        opts[i].disabled = v > max
+      }
+    } catch {}
+    const cur = parseInt(String(selAgentTarget.value || '3000'), 10) || 3000
+    const next = _choiceAgentClampTargetChars(selThinkingMode.value, cur)
+    if (next !== cur) {
+      try { selAgentTarget.value = String(next) } catch {}
+    }
+  }
+  selThinkingMode.onchange = () => { _choiceAgentSyncTargetOptions() }
+  _choiceAgentSyncTargetOptions()
+
   const agentHint = document.createElement('div')
   agentHint.className = 'ain-muted'
   agentHint.textContent = t(
-    '提示：Agent 会先生成Plan，再逐项执行；思考模式：默认=普遍场景；中等=写作时会自查修整；加强=正常思考前提下加入额外的索引，适用复杂剧情。越高耗费token越多，甚至翻倍。中等和加强对模型能力有极高要求，慎重使用',
-    'Note: Agent generates TODO then executes step-by-step with live progress; prose is capped to ≤4000 chars (for review cost), usually costs more chars; Mode: None=consult shown only; Normal=inject consult checklist; Strong=refresh RAG before each segment + checklist (slower, steadier).'
+    '提示：Agent 会先生成 Plan，再逐项执行；字数目标上限：默认≤3000，中等≤2000，加强≤1000（越高越耗 token，甚至翻倍）。中等/加强对模型能力要求很高，慎用。',
+    'Note: Agent generates a plan then executes step-by-step; max output: None≤3000, Normal≤2000, Strong≤1000 (higher costs more tokens, sometimes ~2x). Normal/Strong require a capable model.'
   )
   sec.appendChild(agentBox)
   sec.appendChild(agentHint)
@@ -3518,10 +3554,15 @@ async function openWriteWithChoiceDialog(ctx) {
     try {
       const agentEnabled = !!cbAgent.checked
       if (agentEnabled) {
-        const targetChars = parseInt(String(selAgentTarget.value || '3000'), 10) || 3000
+        const thinkingMode = _ainAgentNormThinkingMode(selThinkingMode.value) || 'none'
+        const targetChars0 = parseInt(String(selAgentTarget.value || '3000'), 10) || 3000
+        const targetChars = _choiceAgentClampTargetChars(thinkingMode, targetChars0)
+        if (targetChars !== targetChars0) {
+          try { selAgentTarget.value = String(targetChars) } catch {}
+          ctx.ui.notice(t('已按思考模式收紧字数上限：', 'Target capped by mode: ') + String(targetChars), 'ok', 1800)
+        }
         const chunkCount = _ainAgentDeriveChunkCount(targetChars)
         const wantAudit = !!cbAudit.checked
-        const thinkingMode = _ainAgentNormThinkingMode(selThinkingMode.value) || 'none'
         // 记住用户选择（但不强行改动“是否默认启用 Agent”）
         try {
           const curEnabled = !!(cfg && cfg.agent && cfg.agent.enabled)
@@ -3563,7 +3604,7 @@ async function openWriteWithChoiceDialog(ctx) {
           model: cfg.upstream.model
         },
         input: {
-          instruction,
+          instruction: instruction + '\n\n' + t('长度要求：正文尽量控制在 3000 字以内。', 'Length: keep the prose within ~3000 chars.'),
           progress,
           bible,
           prev,
@@ -3616,10 +3657,15 @@ async function openWriteWithChoiceDialog(ctx) {
     try {
       const agentEnabled = !!cbAgent.checked
       if (agentEnabled) {
-        const targetChars = parseInt(String(selAgentTarget.value || '3000'), 10) || 3000
+        const thinkingMode = _ainAgentNormThinkingMode(selThinkingMode.value) || 'none'
+        const targetChars0 = parseInt(String(selAgentTarget.value || '3000'), 10) || 3000
+        const targetChars = _choiceAgentClampTargetChars(thinkingMode, targetChars0)
+        if (targetChars !== targetChars0) {
+          try { selAgentTarget.value = String(targetChars) } catch {}
+          ctx.ui.notice(t('已按思考模式收紧字数上限：', 'Target capped by mode: ') + String(targetChars), 'ok', 1800)
+        }
         const chunkCount = _ainAgentDeriveChunkCount(targetChars)
         const wantAudit = !!cbAudit.checked
-        const thinkingMode = _ainAgentNormThinkingMode(selThinkingMode.value) || 'none'
         // 记住用户选择（但不强行改动“是否默认启用 Agent”）
         try {
           const curEnabled = !!(cfg && cfg.agent && cfg.agent.enabled)
@@ -3661,7 +3707,7 @@ async function openWriteWithChoiceDialog(ctx) {
           model: cfg.upstream.model
         },
         input: {
-          instruction,
+          instruction: instruction + '\n\n' + t('长度要求：正文尽量控制在 3000 字以内。', 'Length: keep the prose within ~3000 chars.'),
           progress,
           bible,
           prev,
@@ -4050,7 +4096,7 @@ function buildFallbackAgentPlan(baseInstruction, targetChars, chunkCount, wantAu
       instruction: [
         ins,
         '',
-        `写作目标：本章总字数≈${t}（上限 4000）。本段建议≈${perChunk} 字。`,
+        `写作目标：本章总字数≈${t}。本段建议≈${perChunk} 字。`,
         `现在写第 ${i + 1}/${n} 段正文：承接前文，避免重复；保持叙事视角与风格一致；段尾自然收束但不要总结。`
       ].filter(Boolean).join('\n')
     })
@@ -4325,7 +4371,7 @@ async function agentRunPlan(ctx, cfg, base, ui) {
           '',
           checklistBlock,
           '',
-          `长度目标：本章总字数≈${targetChars}（上限 4000）；本段尽量控制在 ≈${wantLen} 字（允许 ±15%），避免超长。`
+          `长度目标：本章总字数≈${targetChars}；本段尽量控制在 ≈${wantLen} 字（允许 ±15%），避免超长。`
         ].filter(Boolean).join('\n')
 
         const r = await apiFetch(ctx, cfg, 'ai/proxy/chat/', {
@@ -4686,6 +4732,20 @@ async function loadLastDraftInfo(ctx) {
   } catch {
     return null
   }
+}
+
+async function openLastDraftReviewFromEditor(ctx) {
+  const doc = safeText(ctx && ctx.getEditorValue ? ctx.getEditorValue() : '')
+  let bid = findLastDraftIdInDoc(doc)
+  if (!bid) {
+    const last = await loadLastDraftInfo(ctx)
+    bid = last && last.blockId ? String(last.blockId) : ''
+  }
+  bid = String(bid || '').trim()
+  if (!bid) throw new Error(t('未发现草稿块：请先用“追加为草稿（可审阅）”。', 'No draft block: append as draft first.'))
+  const txt = extractDraftBlockText(doc, bid)
+  if (!txt) throw new Error(t('未找到草稿块：可能已被手动删除或当前文件不是写入文件。', 'Draft block not found in current doc.'))
+  await openDraftReviewDialog(ctx, { blockId: bid, text: txt })
 }
 
 function _fmtLocalTs() {
@@ -7273,6 +7333,40 @@ async function openProjectManagerDialog(ctx) {
 export function activate(context) {
   __CTX__ = context
   try {
+    // 右键菜单：源码/小说模式通用
+    try {
+      if (typeof __CTX_MENU_DISPOSER__ === 'function') __CTX_MENU_DISPOSER__()
+    } catch {}
+    __CTX_MENU_DISPOSER__ = null
+    try {
+      if (typeof context.addContextMenuItem === 'function') {
+        __CTX_MENU_DISPOSER__ = context.addContextMenuItem({
+          label: t('小说引擎', 'Novel Engine'),
+          icon: '📚',
+          condition: (ctx) => {
+            if (!ctx) return true
+            return ctx.mode === 'edit' || ctx.mode === 'wysiwyg'
+          },
+          children: [
+            {
+              label: t('写作咨询', 'Writing consult'),
+              onClick: () => { void openConsultDialog(context) }
+            },
+            {
+              label: t('走向续写', 'Options & Write'),
+              onClick: () => { void openWriteWithChoiceDialog(context) }
+            },
+            {
+              label: t('审阅草稿', 'Review draft'),
+              onClick: () => { void openLastDraftReviewFromEditor(context).catch((e) => context.ui.notice(t('失败：', 'Failed: ') + (e && e.message ? e.message : String(e)), 'err', 2600)) }
+            },
+          ]
+        })
+      }
+    } catch (e) {
+      try { console.error('[ai-novel] 注册右键菜单失败：', e) } catch {}
+    }
+
     context.addMenuItem({
       label: t('小说', 'Novel'),
       children: [
@@ -7405,20 +7499,7 @@ export function activate(context) {
           label: t('审阅/修改草稿（对话）', 'Review/Edit draft (chat)'),
           onClick: async () => {
             try {
-              const cfg = await loadCfg(context)
-              const doc = safeText(context.getEditorValue ? context.getEditorValue() : '')
-              let bid = findLastDraftIdInDoc(doc)
-              if (!bid) {
-                const last = await loadLastDraftInfo(context)
-                bid = last && last.blockId ? String(last.blockId) : ''
-              }
-              bid = String(bid || '').trim()
-              if (!bid) {
-                throw new Error(t('未发现草稿块：请先用“追加为草稿（可审阅）”。', 'No draft block: append as draft first.'))
-              }
-              const txt = extractDraftBlockText(doc, bid)
-              if (!txt) throw new Error(t('未找到草稿块：可能已被手动删除或当前文件不是写入文件。', 'Draft block not found in current doc.'))
-              await openDraftReviewDialog(context, { blockId: bid, text: txt })
+              await openLastDraftReviewFromEditor(context)
             } catch (e) {
               context.ui.notice(t('失败：', 'Failed: ') + (e && e.message ? e.message : String(e)), 'err', 2600)
             }
