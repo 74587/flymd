@@ -3077,7 +3077,7 @@ async function openWriteWithChoiceDialog(ctx) {
   selThinkingMode.style.width = '260px'
   ;[
     { v: 'none', zh: '不思考（普遍场景）', en: 'None (default)' },
-    { v: 'normal', zh: '正常思考（提升质量）', en: 'Normal (inject checklist)' },
+    { v: 'normal', zh: '正常思考（加入质询）', en: 'Normal (inject checklist)' },
     { v: 'strong', zh: '强思考（校对增强）', en: 'Strong (slower, steadier)' },
   ].forEach((it) => {
     const op = document.createElement('option')
