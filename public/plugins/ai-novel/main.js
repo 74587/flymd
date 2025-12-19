@@ -13,7 +13,7 @@ const API_FETCH_TIMEOUT_MS = 200000
 
 const DEFAULT_CFG = {
   // 后端地址：强制内置，不在设置里展示
-  backendBaseUrl: 'https://flymd.llingfei.com/xiaoshuo',
+  backendBaseUrl: 'https://flymd.nyc.mn/xiaoshuo',
   token: '',
   novelRootDir: '小说/', // 相对库根目录，用户可改
   currentProjectRel: '', // 当前小说项目（相对库根目录），为空则从当前文件路径推断
@@ -268,6 +268,7 @@ async function apiFetchConsultWithJob(ctx, cfg, body, opt) {
 
   const start = Date.now()
   let waitMs = 0
+  let netFail = 0
   for (;;) {
     waitMs = Date.now() - start
     if (waitMs > timeoutMs) {
@@ -278,8 +279,22 @@ async function apiFetchConsultWithJob(ctx, cfg, body, opt) {
       try { onTick({ jobId, waitMs }) } catch {}
     }
 
-    await sleep(1000)
-    const st = await apiGet(ctx, cfg, 'ai/proxy/consult/status/?id=' + encodeURIComponent(String(jobId)))
+    await sleep(netFail > 0 ? Math.min(5000, 1200 + netFail * 500) : 1000)
+    let st = null
+    try {
+      st = await apiGet(ctx, cfg, 'ai/proxy/consult/status/?id=' + encodeURIComponent(String(jobId)))
+      netFail = 0
+    } catch (e) {
+      // 轮询阶段允许网络抖动：只要总超时没到，就继续等（否则“任务已完成但客户端拿不到”）
+      netFail++
+      const msg = e && e.message ? String(e.message) : String(e)
+      if (onTick) {
+        try { onTick({ jobId, waitMs, netFail, netError: msg }) } catch {}
+      }
+      // 连续失败太久就别无限等：把错误抛出去让 UI 提示用户检查网络/站点
+      if (netFail >= 12 && waitMs > 45000) throw e
+      continue
+    }
     const s = st && st.status ? String(st.status) : ''
     if (s === 'pending') continue
     if (s === 'error') throw new Error(String(st.error || '任务失败'))
@@ -293,6 +308,12 @@ async function apiFetchChatWithJob(ctx, cfg, body, opt) {
   const timeoutMs = opt && opt.timeoutMs ? Number(opt.timeoutMs) : 190000
 
   const b = body && typeof body === 'object' ? body : {}
+  const action = safeText(b.action).trim().toLowerCase()
+  function timeoutMsg() {
+    if (action === 'audit') return t('审计超时：任务仍未完成，请稍后重试或换模型', 'Audit timeout: job still pending, please retry or switch model')
+    if (action === 'write') return t('写作超时：任务仍未完成，请稍后重试或换模型', 'Write timeout: job still pending, please retry or switch model')
+    return t('请求超时：任务仍未完成，请稍后重试或换模型', 'Request timeout: job still pending, please retry or switch model')
+  }
   const input = (b.input && typeof b.input === 'object') ? b.input : {}
   const body2 = { ...b, input: { ...input, async: true, mode: 'job' } }
 
@@ -303,18 +324,32 @@ async function apiFetchChatWithJob(ctx, cfg, body, opt) {
 
   const start = Date.now()
   let waitMs = 0
+  let netFail = 0
   for (;;) {
     waitMs = Date.now() - start
     if (waitMs > timeoutMs) {
-      throw new Error(t('审计超时：任务仍未完成，请稍后重试或换模型', 'Audit timeout: job still pending, please retry or switch model'))
+      throw new Error(timeoutMsg())
     }
 
     if (onTick) {
       try { onTick({ jobId, waitMs }) } catch {}
     }
 
-    await sleep(1000)
-    const st = await apiGet(ctx, cfg, 'ai/proxy/chat/status/?id=' + encodeURIComponent(String(jobId)))
+    await sleep(netFail > 0 ? Math.min(5000, 1200 + netFail * 500) : 1000)
+    let st = null
+    try {
+      st = await apiGet(ctx, cfg, 'ai/proxy/chat/status/?id=' + encodeURIComponent(String(jobId)))
+      netFail = 0
+    } catch (e) {
+      // 轮询阶段允许网络抖动：只要总超时没到，就继续等（否则“任务已完成但客户端拿不到”）
+      netFail++
+      const msg = e && e.message ? String(e.message) : String(e)
+      if (onTick) {
+        try { onTick({ jobId, waitMs, netFail, netError: msg }) } catch {}
+      }
+      if (netFail >= 12 && waitMs > 45000) throw e
+      continue
+    }
     const s = st && st.status ? String(st.status) : ''
     if (s === 'pending') continue
     if (s === 'error') throw new Error(String(st.error || '任务失败'))
@@ -3243,7 +3278,7 @@ async function openNextOptionsDialog(ctx) {
     lastText = ''
     lastDraftId = ''
     try {
-      const r = await apiFetch(ctx, cfg, 'ai/proxy/chat/', {
+      const r = await apiFetchChatWithJob(ctx, cfg, {
         mode: 'novel',
         action: 'write',
         upstream: {
@@ -3259,6 +3294,11 @@ async function openNextOptionsDialog(ctx) {
           choice: chosen,
           constraints: constraints || undefined,
           rag: rag || undefined
+        }
+      }, {
+        onTick: ({ waitMs }) => {
+          const s = Math.max(0, Math.round(Number(waitMs || 0) / 1000))
+          out.textContent = t('续写中… 已等待 ', 'Writing... waited ') + s + 's'
         }
       })
       lastText = safeText(r && r.text).trim()
@@ -4091,7 +4131,7 @@ async function openWriteWithChoiceDialog(ctx) {
         return
       }
 
-      const r = await apiFetch(ctx, cfg, 'ai/proxy/chat/', {
+      const r = await apiFetchChatWithJob(ctx, cfg, {
         mode: 'novel',
         action: 'write',
         upstream: {
@@ -4107,6 +4147,11 @@ async function openWriteWithChoiceDialog(ctx) {
           choice: chosen,
           constraints: constraints || undefined,
           rag: rag || undefined
+        }
+      }, {
+        onTick: ({ waitMs }) => {
+          const s = Math.max(0, Math.round(Number(waitMs || 0) / 1000))
+          out.textContent = t('续写中…（最多等 3 分钟）已等待 ', 'Writing... (up to 3 minutes) waited ') + s + 's'
         }
       })
       lastText = safeText(r && r.text).trim()
@@ -4194,7 +4239,7 @@ async function openWriteWithChoiceDialog(ctx) {
         return
       }
 
-      const r = await apiFetch(ctx, cfg, 'ai/proxy/chat/', {
+      const r = await apiFetchChatWithJob(ctx, cfg, {
         mode: 'novel',
         action: 'write',
         upstream: {
@@ -4210,6 +4255,11 @@ async function openWriteWithChoiceDialog(ctx) {
           choice: makeDirectChoice(instruction),
           constraints: constraints || undefined,
           rag: rag || undefined
+        }
+      }, {
+        onTick: ({ waitMs }) => {
+          const s = Math.max(0, Math.round(Number(waitMs || 0) / 1000))
+          out.textContent = t('续写中…（不走候选）已等待 ', 'Writing... (no options) waited ') + s + 's'
         }
       })
       lastText = safeText(r && r.text).trim()
@@ -4642,6 +4692,30 @@ function _ainAgentValidatePlan(items, chunkCount, wantAudit) {
   return true
 }
 
+function _ainAgentNormalizePlanRuntime(items, wantAudit) {
+  let arr = Array.isArray(items) ? items.slice(0) : []
+
+  // 用户没开“审计”就别自作主张塞 audit：这会浪费时间/预算，还制造“正文为空→跳过审计”的垃圾分支。
+  if (!wantAudit) {
+    arr = arr.filter((x) => !(x && x.type === 'audit'))
+  }
+
+  // 即使用户开了审计，也必须放在最后一段写作之后：否则审计对象为空，纯属自嗨。
+  const audits = arr.filter((x) => x && x.type === 'audit')
+  if (audits.length) {
+    const rest = arr.filter((x) => !(x && x.type === 'audit'))
+    let lastWrite = -1
+    for (let i = rest.length - 1; i >= 0; i--) {
+      if (rest[i] && rest[i].type === 'write') { lastWrite = i; break }
+    }
+    const insertAt = lastWrite >= 0 ? (lastWrite + 1) : rest.length
+    rest.splice(insertAt, 0, ...audits)
+    arr = rest
+  }
+
+  return arr
+}
+
 async function agentBuildPlan(ctx, cfg, base) {
   let targetChars = _ainAgentNormTargetChars(base && base.targetChars != null ? base.targetChars : null, 3000)
   const chunkCount = _clampInt(base && base.chunkCount != null ? base.chunkCount : _ainAgentDeriveChunkCount(targetChars), 1, 3)
@@ -4710,6 +4784,7 @@ async function agentRunPlan(ctx, cfg, base, ui) {
 
   let items = await agentBuildPlan(ctx, cfg, { ...base, targetChars, chunkCount, audit: wantAudit })
   if (!Array.isArray(items) || !items.length) items = buildFallbackAgentPlan(base && base.instruction, targetChars, chunkCount, wantAudit)
+  items = _ainAgentNormalizePlanRuntime(items, wantAudit)
 
   // 强思考模式：每段写作前都插入一个 rag（刷新命中片段，更稳但更慢）
   if (strongThinking) {
@@ -4881,7 +4956,7 @@ async function agentRunPlan(ctx, cfg, base, ui) {
           (rest <= 0 ? '提示：正文可能已接近/超过目标字数，本段请优先收束推进，避免灌水。' : '')
         ].filter(Boolean).join('\n')
 
-        const r = await apiFetch(ctx, cfg, 'ai/proxy/chat/', {
+        const r = await apiFetchChatWithJob(ctx, cfg, {
           mode: 'novel',
           action: 'write',
           upstream: {
@@ -4897,6 +4972,13 @@ async function agentRunPlan(ctx, cfg, base, ui) {
             choice: base && base.choice != null ? base.choice : undefined,
             constraints: constraints || undefined,
             rag: rag || undefined
+          }
+        }, {
+          onTick: ({ waitMs }) => {
+            const s = Math.max(0, Math.round(Number(waitMs || 0) / 1000))
+            if (render) {
+              try { render(items, logs.concat([t('写作中… 已等待 ', 'Writing... waited ') + s + 's'])) } catch {}
+            }
           }
         })
         const piece = safeText(r && r.text).trim()
@@ -6063,7 +6145,7 @@ async function openBootstrapDialog(ctx) {
 
         lastChapter = safeText(res && res.text).trim()
       } else {
-        const first = await apiFetch(ctx, cfg, 'ai/proxy/chat/', {
+        const first = await apiFetchChatWithJob(ctx, cfg, {
           mode: 'novel',
           action: 'write',
           upstream: {
@@ -6072,6 +6154,11 @@ async function openBootstrapDialog(ctx) {
             model: cfg.upstream.model
           },
           input: { instruction: promptIdea, progress: '', bible: '', prev: '', choice: chosen, constraints: constraints || undefined }
+        }, {
+          onTick: ({ waitMs }) => {
+            const s = Math.max(0, Math.round(Number(waitMs || 0) / 1000))
+            out.textContent = t('生成中… 已等待 ', 'Generating... waited ') + s + 's'
+          }
         })
         lastChapter = safeText(first && first.text).trim()
       }
