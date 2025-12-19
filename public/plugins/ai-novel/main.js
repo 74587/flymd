@@ -4702,9 +4702,31 @@ function _ainAgentNormalizePlanItem(raw, idx) {
   const it = (raw && typeof raw === 'object') ? raw : {}
   const id = safeText(it.id || '').trim()
   const title = safeText(it.title || it.name || '').trim() || (t('步骤', 'Step') + ' ' + String((idx | 0) + 1))
-  const typeRaw = safeText(it.type || it.kind || it.t || '').trim().toLowerCase()
+  const typeRaw0 = safeText(it.type || it.kind || it.t || '').trim().toLowerCase()
+  const typeRaw = typeRaw0
+    .replace(/^step[-_\s]*/, '')
+    .replace(/^todo[-_\s]*/, '')
+    .replace(/^task[-_\s]*/, '')
   const allow = { rag: 1, consult: 1, write: 1, audit: 1, final: 1, note: 1 }
-  const type = allow[typeRaw] ? typeRaw : 'note'
+  let type = allow[typeRaw] ? typeRaw : ''
+  if (!type) {
+    // 容错：一些模型会输出同义词/中文/带序号的 type
+    if (typeRaw === 'search' || typeRaw === 'retrieve' || typeRaw === 'retrieval' || typeRaw === 'lookup') type = 'rag'
+    else if (typeRaw === 'plan' || typeRaw === 'blueprint' || typeRaw === 'outline') type = 'consult'
+    else if (typeRaw === 'writing' || typeRaw === 'compose' || typeRaw === 'prose' || typeRaw === 'draft') type = 'write'
+    else if (typeRaw === 'review' || typeRaw === 'check' || typeRaw === 'verify') type = 'audit'
+    else if (typeRaw === 'deliver' || typeRaw === 'delivery') type = 'final'
+  }
+  if (!type) {
+    // 进一步从标题推断（Plan 模型最常在 type 字段上犯蠢）
+    const ti = title.toLowerCase()
+    if (/rag|检索|搜索|查找|补充检索|retriev|search|lookup/.test(ti)) type = 'rag'
+    else if (/consult|蓝图|大纲|写作蓝图|检查清单|建议|咨询|plan|outline|blueprint/.test(ti)) type = 'consult'
+    else if (/write|写作|正文|分段写作|续写|prose|draft/.test(ti)) type = 'write'
+    else if (/audit|审计|一致性|风险审计|校对|核对|review/.test(ti)) type = 'audit'
+    else if (/final|交付|总结|下一步|deliver/.test(ti)) type = 'final'
+    else type = 'note'
+  }
   const instruction = safeText(it.instruction || it.prompt || it.task || '').trim()
   const ragQuery = safeText(it.rag_query || it.ragQuery || it.query || '').trim()
   return { id, title, type, instruction, rag_query: ragQuery, status: 'pending', error: '' }
@@ -4761,6 +4783,54 @@ function buildFallbackAgentPlan(baseInstruction, targetChars, chunkCount, wantAu
     instruction: t('交付说明（不要写正文）', 'Delivery note (no prose)')
   })
   return plan.map((x, i) => _ainAgentNormalizePlanItem(x, i))
+}
+
+function _ainAgentCoercePlanToExecutable(aiItems, baseInstruction, targetChars, chunkCount, wantAudit) {
+  // 目标：尽量保留 Plan 模型给出的“好内容”，但把结构修成必定可执行，别动不动就整套兜底。
+  const basePlan = buildFallbackAgentPlan(baseInstruction, targetChars, chunkCount, wantAudit)
+  const ai = Array.isArray(aiItems) ? aiItems.map((x, i) => _ainAgentNormalizePlanItem(x, i)) : []
+  if (!ai.length) return basePlan
+
+  function takeFirst(kind) {
+    for (let i = 0; i < ai.length; i++) {
+      const it = ai[i]
+      if (it && it.type === kind) return it
+    }
+    return null
+  }
+
+  const consult = takeFirst('consult')
+  const rag = takeFirst('rag')
+  const final = takeFirst('final')
+  const audits = ai.filter((x) => x && x.type === 'audit')
+  const writes = ai.filter((x) => x && x.type === 'write')
+
+  const out = basePlan.slice(0).map((x) => ({ ...x }))
+  let widx = 0
+  for (let i = 0; i < out.length; i++) {
+    const it = out[i]
+    if (!it || !it.type) continue
+    if (it.type === 'consult' && consult && consult.instruction) {
+      it.instruction = consult.instruction
+      if (consult.title) it.title = consult.title
+    } else if (it.type === 'rag' && rag) {
+      if (rag.rag_query) it.rag_query = rag.rag_query
+      if (rag.instruction && !it.rag_query) it.rag_query = rag.instruction
+      if (rag.title) it.title = rag.title
+    } else if (it.type === 'write') {
+      const w = writes[widx++]
+      if (w && w.instruction) it.instruction = w.instruction
+      if (w && w.title) it.title = w.title
+    } else if (it.type === 'audit' && wantAudit) {
+      const a = audits[0]
+      if (a && a.instruction) it.instruction = a.instruction
+      if (a && a.title) it.title = a.title
+    } else if (it.type === 'final' && final && final.instruction) {
+      it.instruction = final.instruction
+      if (final.title) it.title = final.title
+    }
+  }
+  return out.map((x, i) => _ainAgentNormalizePlanItem(x, i))
 }
 
 function _ainAgentValidatePlan(items, chunkCount, wantAudit) {
@@ -4848,6 +4918,10 @@ async function agentBuildPlan(ctx, cfg, base) {
     if (!raw && resp && resp.text) raw = tryParseAgentPlanDataFromText(resp.text)
     const norm = Array.isArray(raw) ? raw.map((x, i) => _ainAgentNormalizePlanItem(x, i)) : null
     if (norm && _ainAgentValidatePlan(norm, chunkCount, wantAudit)) return norm
+    if (norm && norm.length) {
+      // Plan 模型输出不合格：尽量修复成可执行计划，而不是直接废掉。
+      return _ainAgentCoercePlanToExecutable(norm, base && base.instruction, targetChars, chunkCount, wantAudit)
+    }
   } catch (e) {
     if (!isActionNotSupportedError(e)) throw e
   }
