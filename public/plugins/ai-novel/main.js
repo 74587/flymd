@@ -2478,7 +2478,7 @@ async function openSettingsDialog(ctx) {
 
   const hintCtx = document.createElement('div')
   hintCtx.className = 'ain-muted'
-  hintCtx.textContent = t('提示：这里的单位是“字符”，不是 token；按你的上游模型能力调整即可（例如 128K/256K/1M）。', 'Note: units are characters (not tokens). Tune based on your upstream model window (e.g. 128K/256K/1M).')
+  hintCtx.textContent = t('提示：这里的单位是“字符”，不是 token；按你的上游模型能力调整即可（例如 128K/256K/400K/1M）。', 'Note: units are characters (not tokens). Tune based on your upstream model window (e.g. 128K/256K/400K/1M).')
   secCtx.appendChild(hintCtx)
 
   const presets = [
@@ -2486,6 +2486,7 @@ async function openSettingsDialog(ctx) {
     { label: '32K', value: '32000' },
     { label: '128K', value: '128000' },
     { label: '256K', value: '256000' },
+    { label: '400K', value: '400000' },
     { label: '1M', value: '1000000' },
     { label: t('自定义', 'Custom'), value: '' },
   ]
@@ -2524,14 +2525,28 @@ async function openSettingsDialog(ctx) {
   function applyCtxPreset(totalChars) {
     const total = _clampInt(totalChars, 8000, 10000000)
     inpWindow.inp.value = String(total)
-    // 粗暴但实用的预算：让“前文/资料/进度”都有份额，避免某一项饿死。
-    const prev = Math.max(4000, Math.round(total * 0.25))
-    const prog = Math.max(4000, Math.round(total * 0.15))
-    const bible = Math.max(4000, Math.round(total * 0.25))
+
+    // 更“科学”的预算：
+    // - 上下文窗口不是越塞越好：前文/圣经太长会显著增加复述/重写概率，还会把成本/延迟拉爆。
+    // - 我们对核心上下文做“递增但封顶”的分配，留出足够余量给：系统包装/指令/走向 choice/RAG 片段/模型输出。
+    // - 预设只给保守建议；想塞更多就选“自定义”自己改。
+    if (total <= 12000) {
+      inpPrevChars.inp.value = String(1500)
+      inpProgChars.inp.value = String(1500)
+      inpBibleChars.inp.value = String(1500)
+      inpUpdChars.inp.value = String(3000)
+      return
+    }
+
+    const prev = _clampInt(Math.round(total * 0.20), 2000, 20000)
+    const prog = _clampInt(Math.round(total * 0.18), 2000, 26000)
+    const bible = _clampInt(Math.round(total * 0.22), 2000, 32000)
+    // “进度生成源文本”会与 progress/bible/prev 同时进入摘要提示词，不能按比例无限膨胀。
+    const upd = _clampInt(Math.round(total * 0.30), 6000, 80000)
+
     inpPrevChars.inp.value = String(prev)
     inpProgChars.inp.value = String(prog)
     inpBibleChars.inp.value = String(bible)
-    const upd = Math.max(20000, Math.round(total * 0.35))
     inpUpdChars.inp.value = String(upd)
   }
 
