@@ -3491,7 +3491,7 @@ async function openNextOptionsDialog(ctx) {
     cfg = await loadCfg(ctx)
     const instruction = safeText(inp.ta.value).trim()
     const localConstraints = safeText(extra.ta.value).trim()
-    const constraints = await mergeConstraintsWithCharState(ctx, cfg, localConstraints)
+    const constraints = _ainAppendWritingStyleHintToConstraints(await mergeConstraintsWithCharState(ctx, cfg, localConstraints))
     if (!instruction) {
       ctx.ui.notice(t('请先写一句“指令/目标”', 'Please provide instruction/goal'), 'err', 1800)
       return
@@ -3528,8 +3528,7 @@ async function openNextOptionsDialog(ctx) {
           prev,
           choice: chosen,
           constraints: constraints || undefined,
-          rag: rag || undefined,
-          novel_style: 'iceberg'
+          rag: rag || undefined
         }
       }, {
         onTick: ({ waitMs }) => {
@@ -4383,7 +4382,7 @@ async function openWriteWithChoiceDialog(ctx) {
     cfg = await loadCfg(ctx)
     const instruction = ensureInstruction(getInstructionText(), t('按选中走向续写本章', 'Write with the selected option'))
     const localConstraints = getLocalConstraintsText()
-    const constraints = await mergeConstraintsWithCharState(ctx, cfg, localConstraints)
+    const constraints = _ainAppendWritingStyleHintToConstraints(await mergeConstraintsWithCharState(ctx, cfg, localConstraints))
 
     const prev = await getPrevTextForRequest(ctx, cfg)
     const progress = await getProgressDocText(ctx, cfg)
@@ -4481,14 +4480,13 @@ async function openWriteWithChoiceDialog(ctx) {
           model: cfg.upstream.model
         },
         input: {
-          instruction: instruction,
+          instruction: instruction + '\n\n' + t('长度要求：正文尽量控制在 3000 字以内。', 'Length: keep the prose within ~3000 chars.'),
           progress,
           bible,
           prev,
           choice: chosen,
           constraints: constraints || undefined,
-          rag: rag || undefined,
-          novel_style: 'iceberg'
+          rag: rag || undefined
         }
       }, {
         onTick: ({ waitMs }) => {
@@ -4517,7 +4515,7 @@ async function openWriteWithChoiceDialog(ctx) {
     cfg = await loadCfg(ctx)
     const instruction = getInstructionText()
     const localConstraints = getLocalConstraintsText()
-    const constraints = await mergeConstraintsWithCharState(ctx, cfg, localConstraints)
+    const constraints = _ainAppendWritingStyleHintToConstraints(await mergeConstraintsWithCharState(ctx, cfg, localConstraints))
     if (!instruction) {
       ctx.ui.notice(t('请先写清楚“本章目标/要求”', 'Please provide instruction/goal'), 'err', 2000)
       return
@@ -4620,14 +4618,13 @@ async function openWriteWithChoiceDialog(ctx) {
           model: cfg.upstream.model
         },
         input: {
-          instruction: instruction,
+          instruction: instruction + '\n\n' + t('长度要求：正文尽量控制在 3000 字以内。', 'Length: keep the prose within ~3000 chars.'),
           progress,
           bible,
           prev,
           choice: makeDirectChoice(instruction),
           constraints: constraints || undefined,
-          rag: rag || undefined,
-          novel_style: 'iceberg'
+          rag: rag || undefined
         }
       }, {
         onTick: ({ waitMs }) => {
@@ -5040,7 +5037,11 @@ function buildFallbackAgentPlan(baseInstruction, targetChars, chunkCount, wantAu
     id: 'blueprint',
     title: t('写作蓝图', 'Blueprint'),
     type: 'consult',
-    instruction: ins
+    instruction: [
+      '任务：为“下一章续写”给出写作蓝图（不是正文）。',
+      '请输出要点清单：本章目标/关键冲突/必出人物/必回收伏笔/禁写雷区/节奏与视角。',
+      '要求：条目化，尽量一行一条，避免长段落。',
+    ].join('\n')
   })
   plan.push({
     id: 'rag',
@@ -5054,7 +5055,12 @@ function buildFallbackAgentPlan(baseInstruction, targetChars, chunkCount, wantAu
       id: 'w' + String(i + 1),
       title: t('分段写作 ', 'Write ') + String(i + 1) + '/' + String(n),
       type: 'write',
-      instruction: ins
+      instruction: [
+        ins,
+        '',
+        `写作目标：本章总字数≈${totalChars}。本段建议≈${perChunk} 字。`,
+        `现在写第 ${i + 1}/${n} 段正文：承接前文，避免重复；保持叙事视角与风格一致；段尾自然收束但不要总结。`
+      ].filter(Boolean).join('\n')
     })
   }
   if (wantAudit) {
@@ -5062,14 +5068,14 @@ function buildFallbackAgentPlan(baseInstruction, targetChars, chunkCount, wantAu
       id: 'audit',
       title: t('一致性审计', 'Audit'),
       type: 'audit',
-      instruction: ''
+      instruction: '任务：对合并后的正文做一致性审计（进度脉络/故事圣经/硬约束），列出冲突点与修复建议。'
     })
   }
   plan.push({
     id: 'final',
     title: t('交付', 'Deliver'),
     type: 'final',
-    instruction: ''
+    instruction: t('交付说明（不要写正文）', 'Delivery note (no prose)')
   })
   return plan.map((x, i) => _ainAgentNormalizePlanItem(x, i))
 }
@@ -5199,9 +5205,20 @@ async function agentBuildPlan(ctx, cfg, base) {
       safeText(pu.apiKey).trim() ||
       (cfg && cfg.upstream ? cfg.upstream.apiKey : '')
 
-    const baseConstraints = safeText(base && base.constraints).trim()
+    // 只有用户显式配置了“Plan 单独上游/模型”才追加质量约束，避免影响旧用户行为。
     const hasPlanOverride = !!(safeText(pu.model).trim() || safeText(pu.baseUrl).trim() || safeText(pu.apiKey).trim() || planModel)
-    const constraints = baseConstraints
+    const baseConstraints = safeText(base && base.constraints).trim()
+    const planQualityHint = hasPlanOverride ? [
+      '【Plan 生成要求（只影响 TODO，不影响正文）】',
+      '- TODO 至少 10 条，尽量贴合“进度脉络/故事圣经/前文尾部/走向选择”，避免通用模板措辞。',
+      '- 至少 2 个 rag，rag_query 必须具体（包含人物/地点/设定/伏笔关键词）。',
+      '- 至少 2 个 consult（蓝图/风险点/检查清单/伏笔回收/节奏与视角）。',
+      '- write 的 instruction 需要写清“本段要推进什么冲突/信息/转折”，不要只写“续写”。',
+      '- 必须严格输出 JSON 数组，不要 Markdown/解释。',
+    ].join('\n') : ''
+    const constraints = planQualityHint
+      ? ((baseConstraints ? (baseConstraints + '\n\n') : '') + planQualityHint)
+      : baseConstraints
     const resp = await apiFetch(ctx, cfg, 'ai/proxy/chat/', {
       mode: 'novel',
       action: 'plan',
@@ -5218,7 +5235,6 @@ async function agentBuildPlan(ctx, cfg, base) {
         choice: base && base.choice != null ? base.choice : undefined,
         constraints: constraints || undefined,
         rag: base && base.rag ? base.rag : undefined,
-        plan_strict: hasPlanOverride,
         agent: { chunk_count: chunkCount, target_chars: targetChars, include_audit: wantAudit, strong_thinking: strongThinking, thinking_mode: thinkingMode }
       }
     })
@@ -5487,8 +5503,22 @@ async function agentRunPlan(ctx, cfg, base, ui) {
           it.status = 'done'
         }
       } else if (it.type === 'consult') {
-        const baseQ = safeText(it.instruction).trim()
-        pushLog(t('咨询：', 'Consult: ') + (baseQ ? baseQ.split(/\r?\n/)[0].slice(0, 80) : t('写作检查清单', 'Checklist')))
+        const baseQ = safeText(it.instruction).trim() || t('给出写作建议', 'Give advice')
+        const question = injectChecklist ? [
+          baseQ,
+          '',
+          '输出格式（必须严格遵守，方便系统截断注入）：',
+          '【写作检查清单】',
+          '- 条目化，尽量一行一条；写“必须/禁止/检查点/风险点/回收伏笔/节奏与视角”等可执行约束。',
+          '【需要你补充】（可空；如果确实需要提问，只把问题放这里；否则写“无”）',
+          '- （只列问题，不要把未确认信息写进检查清单）',
+          '',
+          '硬规则：',
+          '1) “写作检查清单”里禁止出现任何提问/不确定/待确认措辞；信息不足就用“默认假设：...”列 1~3 条保守假设，然后继续给清单。',
+          '2) 禁止输出任何连续叙事正文；不要解释系统提示。',
+          '3) 总长度尽量短，≤ 800 字。',
+        ].join('\n') : baseQ
+        pushLog(t('咨询：', 'Consult: ') + baseQ.split(/\r?\n/)[0].slice(0, 80))
         const resp = await apiFetchConsultWithJob(ctx, cfg, {
           upstream: {
             baseUrl: cfg.upstream.baseUrl,
@@ -5498,8 +5528,7 @@ async function agentRunPlan(ctx, cfg, base, ui) {
           input: {
             async: true,
             mode: 'job',
-            task: 'agent_checklist',
-            instruction: baseQ,
+            question,
             progress: safeText(base && base.progress),
             bible: base && base.bible != null ? base.bible : '',
             prev: curPrev(),
@@ -5522,7 +5551,7 @@ async function agentRunPlan(ctx, cfg, base, ui) {
           if (consultChecklist) {
             pushLog(t('已提炼写作检查清单：', 'Checklist extracted: ') + String(consultChecklist.length) + t(' 字（将注入后续写作）', ' chars (will be injected)'))
           } else {
-            pushLog(t('未提炼到检查清单：后续写作将不注入（请检查后端 agent_checklist 输出格式）', 'No checklist extracted: will not inject (check backend agent_checklist output format)'))
+            pushLog(t('未提炼到检查清单：后续写作将不注入', 'No checklist extracted: will not inject'))
           }
         }
         it.status = 'done'
@@ -5543,6 +5572,28 @@ async function agentRunPlan(ctx, cfg, base, ui) {
         const wantLen = rest > 0
           ? Math.max(300, Math.min(perChunk, rest))
           : Math.max(200, Math.min(perChunk, Math.floor(perChunk * 0.5)))
+        const checklistBlock = (injectChecklist && consultChecklist) ? [
+          '【写作检查清单（只用于约束写作，不要在正文中直接输出）】',
+          consultChecklist,
+          '注意：不要在正文中复述/列出检查清单，只需要遵守它。'
+        ].join('\n') : ''
+        const segRule = [
+          '【分段续写硬规则】',
+          `当前为第 ${writeNo}/${writeTotal} 段：只输出“新增正文”，必须紧接【前文尾部】最后一句继续写。`,
+          '禁止：复述/重写/润色【前文尾部】中已经出现过的句子或段落；禁止从头回顾剧情；禁止重复段落。',
+          '如果你发现自己在写重复内容：立刻跳过重复处，直接写新的推进。'
+        ].join('\n')
+        const ins2 = [
+          instruction,
+          '',
+          checklistBlock,
+          '',
+          segRule,
+          '',
+          `长度目标：本章总字数≈${targetChars}（目标值，允许略超）；本段尽量控制在 ≈${wantLen} 字（允许 ±15%）。`,
+          (rest <= 0 ? '提示：正文可能已接近/超过目标字数，本段请优先收束推进，避免灌水。' : '')
+        ].filter(Boolean).join('\n')
+
         const r = await apiFetchChatWithJob(ctx, cfg, {
           mode: 'novel',
           action: 'write',
@@ -5552,7 +5603,7 @@ async function agentRunPlan(ctx, cfg, base, ui) {
             model: cfg.upstream.model
           },
           input: {
-            instruction,
+            instruction: ins2,
             progress,
             bible,
             prev,
@@ -5560,17 +5611,7 @@ async function agentRunPlan(ctx, cfg, base, ui) {
             constraints: constraints || undefined,
             rag: rag || undefined,
             // 可选字段：仅用于 Agent 分段续写的增量约束/去重兜底；不影响旧后端/非 Agent。
-            novel_style: 'iceberg',
-            agent: {
-              segmented: true,
-              seg_no: writeNo,
-              seg_total: writeTotal,
-              prev_tail_chars: prev.length,
-              chunk_count: chunkCount,
-              target_chars: targetChars,
-              want_len: wantLen,
-              checklist: (injectChecklist && consultChecklist) ? consultChecklist : ''
-            }
+            agent: { segmented: true, seg_no: writeNo, seg_total: writeTotal, prev_tail_chars: prev.length }
           }
         }, {
           control,
@@ -5700,6 +5741,18 @@ function setBusy(btn, busy) {
 
 function safeText(v) {
   return v == null ? '' : String(v)
+}
+
+function _ainWritingStyleHumanHintBlock() {
+  // 统一的写作风格约束：续写/修订都复用，避免到处复制导致口径漂移。
+  return '请完全采用‘冰山理论’（Iceberg Theory）写作：只通过客观的动作、环境细节和对话来推动剧情，禁止任何直接的心理描写、形容词堆砌和情感总结。请像电影镜头一样展示画面（Show, don\'t tell）。'
+}
+
+function _ainAppendWritingStyleHintToConstraints(constraintsText) {
+  const base = safeText(constraintsText).trim()
+  if (/写作风格要求：避免明显\s*AI\s*味|冰山理论|Iceberg\s*Theory|Show,\s*don'?t\s*tell/u.test(base)) return base
+  const hint = _ainWritingStyleHumanHintBlock()
+  return base ? (base + '\n\n' + hint) : hint
 }
 
 function _safeInt(v, fallback) {
@@ -6316,6 +6369,16 @@ async function progress_generate_update(ctx, cfg, deltaText, extraNote) {
   } catch (e) {
     // 兼容旧后端：如果它不支持 summary，就降级走 consult（不计费），至少保证“更新进度脉络”可用。
     if (!isActionNotSupportedError(e)) throw e
+
+    const q = [
+      '任务：基于【新增章节文本】，生成“进度脉络更新提议”。',
+      '要求：按结构化小节输出（主线/时间线/人物状态/伏笔）；只写变更点；条目化；不要正文；不要复述全书。',
+      '输出：Markdown 纯文本（允许列表），不要 JSON，不要 ``` 代码块。',
+      '',
+      '【新增章节文本】',
+      mergedText
+    ].join('\n')
+
     const resp = await apiFetchConsultWithJob(ctx, cfg, {
       upstream: {
         baseUrl: cfg.upstream.baseUrl,
@@ -6323,12 +6386,10 @@ async function progress_generate_update(ctx, cfg, deltaText, extraNote) {
         model: cfg.upstream.model
       },
       input: {
-        task: 'progress_update',
-        text: mergedText,
+        question: q,
         progress,
         bible,
         prev,
-        constraints: constraints || undefined,
         rag: rag || undefined
       }
     }, { timeoutMs: 190000 })
@@ -7086,6 +7147,22 @@ async function openBootstrapDialog(ctx) {
 
       // 兼容旧后端：它只认 question，不认 task/idea；所以同时带上 question
       // 新后端会识别 task=bootstrap 并返回结构化 data
+      const q = [
+        '任务：为“小说项目”生成资料文件内容（不是正文续写）。',
+        '硬规则：禁止输出任何可直接当作小说正文的连续叙事文本，只能是设定/要点/大纲。',
+        '请按以下分节输出（不要 JSON，不要 ``` 代码块）：',
+        '【标题】',
+        '【世界设定】（规则/地点/阵营）',
+        '【主要角色】（性格/动机/当前状态）',
+        '【人物关系】（角色之间关系/矛盾/利益）',
+        '【章节大纲】（粗略 8 章左右即可；每章一行）',
+        '【需要你补充】（信息不足时，只列问题）',
+        '格式约束：每个分节最多 6 条要点；每条尽量一行；总字数越短越好。',
+        '',
+        (title0 ? ('标题提示：' + title0) : ''),
+        '故事概念：',
+        promptIdea
+      ].filter(Boolean).join('\n')
 
       const resp = await apiFetchConsultWithJob(ctx, cfg, {
         upstream: {
@@ -7099,6 +7176,7 @@ async function openBootstrapDialog(ctx) {
           task: 'bootstrap',
           idea: promptIdea,
           title_hint: title0,
+          question: q,
           answers: safeText(followA.ta.value).trim(),
           world: safeText(world.ta.value).trim(),
           characters: safeText(chars.ta.value).trim(),
@@ -7242,21 +7320,21 @@ async function openBootstrapDialog(ctx) {
           return
         }
       } else {
-      const first = await apiFetchChatWithJob(ctx, cfg, {
-        mode: 'novel',
-        action: 'write',
-        upstream: {
-          baseUrl: cfg.upstream.baseUrl,
-          apiKey: cfg.upstream.apiKey,
-          model: cfg.upstream.model
-        },
-        input: { instruction: promptIdea, progress: '', bible: '', prev: '', choice: chosen, constraints: constraints || undefined, novel_style: 'iceberg' }
-      }, {
-        onTick: ({ waitMs }) => {
-          const s = Math.max(0, Math.round(Number(waitMs || 0) / 1000))
-          out.textContent = t('生成中… 已等待 ', 'Generating... waited ') + s + 's'
-        }
-      })
+        const first = await apiFetchChatWithJob(ctx, cfg, {
+          mode: 'novel',
+          action: 'write',
+          upstream: {
+            baseUrl: cfg.upstream.baseUrl,
+            apiKey: cfg.upstream.apiKey,
+            model: cfg.upstream.model
+          },
+          input: { instruction: promptIdea, progress: '', bible: '', prev: '', choice: chosen, constraints: constraints || undefined }
+        }, {
+          onTick: ({ waitMs }) => {
+            const s = Math.max(0, Math.round(Number(waitMs || 0) / 1000))
+            out.textContent = t('生成中… 已等待 ', 'Generating... waited ') + s + 's'
+          }
+        })
         lastChapter = safeText(first && first.text).trim()
       }
       if (!lastChapter) throw new Error(t('后端未返回正文', 'Backend returned empty text'))
@@ -8021,6 +8099,13 @@ async function openMetaUpdateDialog(ctx) {
           characters: cur.characters,
           relations: cur.relations,
           outline: cur.outline,
+          // 兼容旧实现：同时带 question，防止后端忽略 task
+          question: [
+            '任务：基于“变更目标/要求”，对小说资料文件做增量修订（不是正文）。',
+            '输出按分节：【世界设定】【主要角色】【人物关系】【章节大纲】【需要你补充】。',
+            '重要：你的输出会被分别写入资料文件。禁止在某个分节里输出其它分节标题；允许你全盘重写，但必须整理合并：现有资料的有效信息一条都不能丢（可去重/改写/重排/合并同义项）。',
+            g
+          ].join('\n')
         }
       }, {
         onTick: ({ waitMs }) => {
@@ -8498,6 +8583,11 @@ async function openImportExistingDialog(ctx) {
           prev,
           chapters,
           rag: rag || undefined,
+          // 兼容旧后端：带 question 兜底
+          question: [
+            '任务：从现有正文中反向提取并重建项目资料文件（进度/设定/角色/关系/大纲）。',
+            '必须按分节输出并最后写【END】。',
+          ].join('\n')
         }
       }, {
         onTick: ({ waitMs }) => {
@@ -8832,7 +8922,7 @@ async function callNovelRevise(ctx, cfg, baseText, instruction, localConstraints
   const prev = await getPrevTextForRevise(ctx, cfg, text)
   const progress = await getProgressDocText(ctx, cfg)
   const bible = await getBibleDocText(ctx, cfg)
-  const constraints = await mergeConstraintsWithCharState(ctx, cfg, localConstraints)
+  const constraints = _ainAppendWritingStyleHintToConstraints(await mergeConstraintsWithCharState(ctx, cfg, localConstraints))
 
   let rag = null
   try {
@@ -8856,8 +8946,7 @@ async function callNovelRevise(ctx, cfg, baseText, instruction, localConstraints
       bible,
       prev,
       constraints: constraints || undefined,
-      rag: rag || undefined,
-      novel_style: 'iceberg'
+      rag: rag || undefined
     }
   })
 
