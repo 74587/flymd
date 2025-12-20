@@ -340,9 +340,10 @@
     {
       "homepage": "https://github.com/flyhunterl/flymd",
       "name": "AI 小说引擎",
-      "description": "内部测试：非测试人员无法使用。",
+      "description": "beta测试中",
       "author": "flyMD",
       "id": "ai-novel",
+      "featured": true,
       "category": "AI",
       "install": {
         "ref": "https://raw.githubusercontent.com/flyhunterl/flymd/main/public/plugins/ai-novel/manifest.json",
