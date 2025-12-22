@@ -21,6 +21,8 @@ const DEFAULT_CFG = {
   // 后端地址：强制内置，不在设置里展示
   backendBaseUrl: 'https://flymd.nyc.mn/xiaoshuo',
   token: '',
+  // 网文排版：把正文按“每段 1-2 句”自动提行（仅前端后处理，不改模型）
+  typesetWebNovel: false,
   novelRootDir: '小说/', // 相对库根目录，用户可改
   currentProjectRel: '', // 当前小说项目（相对库根目录），为空则从当前文件路径推断
   upstream: {
@@ -3861,6 +3863,7 @@ async function openNextOptionsDialog(ctx) {
       })
       lastText = safeText(r && r.text).trim()
       if (!lastText) throw new Error(t('后端未返回正文', 'Backend returned empty text'))
+      lastText = _ainMaybeTypesetWebNovel(cfg, lastText)
       out.textContent = lastText
       btnAppend.disabled = false
       btnAppendDraft.disabled = false
@@ -3977,6 +3980,26 @@ async function openWriteWithChoiceDialog(ctx) {
     ''
   )
   sec.appendChild(extra.wrap)
+
+  // 网文排版：仅对“生成的正文”做前端提行；不改 prompt，避免引入成本与不确定性
+  const typesetLine = document.createElement('label')
+  typesetLine.style.display = 'flex'
+  typesetLine.style.gap = '8px'
+  typesetLine.style.alignItems = 'center'
+  typesetLine.style.marginTop = '6px'
+  const cbTypeset = document.createElement('input')
+  cbTypeset.type = 'checkbox'
+  cbTypeset.checked = !!cfg.typesetWebNovel
+  cbTypeset.onchange = async () => {
+    try { cfg = await saveCfg(ctx, { typesetWebNovel: !!cbTypeset.checked }) } catch {}
+  }
+  typesetLine.appendChild(cbTypeset)
+  typesetLine.appendChild(document.createTextNode(t('网文排版（每段 1-2 句，自动提行）', 'Web novel typesetting (1–2 sentences/paragraph)')))
+  sec.appendChild(typesetLine)
+  const typesetHint = document.createElement('div')
+  typesetHint.className = 'ain-muted'
+  typesetHint.textContent = t('只影响显示/写入的正文文本，不影响走向候选与提示词。', 'Affects only displayed/written prose; does not change options/prompt.')
+  sec.appendChild(typesetHint)
 
   // 人物状态（06_人物状态.md）——自动注入到硬约束，避免“人被忘掉”（这会直接影响剧情走向）
   const _castState = { items: [] }
@@ -4774,6 +4797,7 @@ async function openWriteWithChoiceDialog(ctx) {
 
         const aborted = !!(agentControl && agentControl.aborted)
         lastText = safeText(res && res.text).trim()
+        lastText = _ainMaybeTypesetWebNovel(cfg, lastText)
         out.textContent = lastText || (aborted ? t('已终止（无输出）', 'Aborted (no output)') : '')
         btnAgentAbort.disabled = true
         _syncAgentCtrlUiRunning()
@@ -4818,6 +4842,7 @@ async function openWriteWithChoiceDialog(ctx) {
       })
       lastText = safeText(r && r.text).trim()
       if (!lastText) throw new Error(t('后端未返回正文', 'Backend returned empty text'))
+      lastText = _ainMaybeTypesetWebNovel(cfg, lastText)
       out.textContent = lastText
       btnAppend.disabled = false
       btnAppendDraft.disabled = false
@@ -4912,6 +4937,7 @@ async function openWriteWithChoiceDialog(ctx) {
 
         const aborted = !!(agentControl && agentControl.aborted)
         lastText = safeText(res && res.text).trim()
+        lastText = _ainMaybeTypesetWebNovel(cfg, lastText)
         out.textContent = lastText || (aborted ? t('已终止（无输出）', 'Aborted (no output)') : '')
         btnAgentAbort.disabled = true
         _syncAgentCtrlUiRunning()
@@ -4956,6 +4982,7 @@ async function openWriteWithChoiceDialog(ctx) {
       })
       lastText = safeText(r && r.text).trim()
       if (!lastText) throw new Error(t('后端未返回正文', 'Backend returned empty text'))
+      lastText = _ainMaybeTypesetWebNovel(cfg, lastText)
       out.textContent = lastText
       btnAppend.disabled = false
       btnAppendDraft.disabled = false
@@ -6083,6 +6110,136 @@ function _ainAppendWritingStyleHintToConstraints(constraintsText) {
   return base ? (base + '\n\n' + hint) : hint
 }
 
+function _ainTypesetSplitSentences(text) {
+  // 极简分句：按中英文句末标点切，吞掉结尾引号/括号。用于“网文排版提行”，不追求 NLP 完美。
+  const s0 = safeText(text).trim()
+  if (!s0) return []
+  const s = s0.replace(/\s+/g, ' ')
+  const out = []
+  const closers = new Set(['”', '’', '」', '』', '）', ')', '】', ']', '》', '>', '】'])
+
+  let cur = ''
+  let i = 0
+  while (i < s.length) {
+    const ch = s[i]
+    cur += ch
+
+    let end = false
+    // 句号/问号/感叹号
+    if (ch === '。' || ch === '？' || ch === '！' || ch === '?' || ch === '!') {
+      end = true
+    } else if (ch === '…') {
+      // “……”：以最后一个 … 作为句末
+      if (i + 1 < s.length && s[i + 1] === '…') {
+        while (i + 1 < s.length && s[i + 1] === '…') {
+          i++
+          cur += s[i]
+        }
+        end = true
+      }
+    } else if (ch === '.') {
+      // “...”：以最后一个 . 作为句末
+      if (i + 2 < s.length && s[i + 1] === '.' && s[i + 2] === '.') {
+        while (i + 1 < s.length && s[i + 1] === '.') {
+          i++
+          cur += s[i]
+        }
+        end = true
+      }
+    }
+
+    if (end) {
+      // 把结尾引号/括号吞进来
+      while (i + 1 < s.length) {
+        const nx = s[i + 1]
+        if (!closers.has(nx)) break
+        i++
+        cur += nx
+      }
+      const one = cur.trim()
+      if (one) out.push(one)
+      cur = ''
+    }
+
+    i++
+  }
+
+  const tail = cur.trim()
+  if (tail) out.push(tail)
+  return out
+}
+
+function _ainTypesetWebNovelText(text, maxSentencesPerPara) {
+  // 网文排版：每段 1-2 句（用空行分段，适配 Markdown）
+  const src = safeText(text)
+  if (!src.trim()) return src
+  const maxN = Math.max(1, Math.min(2, (maxSentencesPerPara | 0) || 2))
+
+  const norm = _ainDiffNormEol(src)
+  const lines = norm.split('\n')
+  const out = []
+  let buf = []
+  let inFence = false
+
+  function flush() {
+    const raw = buf.join('').trim()
+    buf = []
+    if (!raw) return
+    const sents = _ainTypesetSplitSentences(raw)
+    const arr = sents && sents.length ? sents : [raw]
+    for (let i = 0; i < arr.length; i += maxN) {
+      const para = arr.slice(i, i + maxN).join('').trim()
+      if (!para) continue
+      out.push(para)
+      out.push('')
+    }
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const lineRaw = String(lines[i] || '')
+    const line = lineRaw.replace(/\s+$/g, '')
+    const trim = line.trim()
+
+    // 保留代码围栏/结构化 Markdown，避免“提行”破坏结构
+    if (/^```/.test(trim)) {
+      flush()
+      out.push(line)
+      inFence = !inFence
+      continue
+    }
+    if (inFence) {
+      out.push(line)
+      continue
+    }
+    if (!trim) {
+      flush()
+      out.push('')
+      continue
+    }
+    if (/^(#{1,6})\s+/.test(trim) || /^[-*]\s+/.test(trim) || /^>\s*/.test(trim)) {
+      flush()
+      out.push(line)
+      continue
+    }
+
+    // 普通正文：拼成一段再分句提行
+    buf.push(trim)
+  }
+  flush()
+
+  while (out.length && out[out.length - 1] === '') out.pop()
+  return out.join('\n')
+}
+
+function _ainMaybeTypesetWebNovel(cfg, text) {
+  try {
+    if (!(cfg && cfg.typesetWebNovel)) return text
+    return _ainTypesetWebNovelText(text, 2)
+  } catch {
+    return text
+  }
+}
+
 function _safeInt(v, fallback) {
   const n = parseInt(String(v == null ? '' : v), 10)
   return Number.isFinite(n) ? n : (fallback | 0)
@@ -7195,6 +7352,20 @@ async function openBootstrapDialog(ctx) {
   volLine.appendChild(cbSplitVolume)
   volLine.appendChild(document.createTextNode(t('开启分卷（推荐：创建 卷01_第一卷 并把第一章放入其中）', 'Use volumes (recommended): create Vol01 and put Chapter 1 inside')))
   structBox.appendChild(volLine)
+
+  const typesetLine = document.createElement('label')
+  typesetLine.style.display = 'flex'
+  typesetLine.style.gap = '8px'
+  typesetLine.style.alignItems = 'center'
+  const cbTypeset = document.createElement('input')
+  cbTypeset.type = 'checkbox'
+  cbTypeset.checked = !!cfg.typesetWebNovel
+  cbTypeset.onchange = async () => {
+    try { cfg = await saveCfg(ctx, { typesetWebNovel: !!cbTypeset.checked }) } catch {}
+  }
+  typesetLine.appendChild(cbTypeset)
+  typesetLine.appendChild(document.createTextNode(t('网文排版（每段 1-2 句，自动提行）', 'Web novel typesetting (1–2 sentences/paragraph)')))
+  structBox.appendChild(typesetLine)
   sec.appendChild(structBox)
 
   const a0 = _ainAgentGetCfg(cfg)
@@ -7634,6 +7805,7 @@ async function openBootstrapDialog(ctx) {
 
         const aborted = !!(agentControl && agentControl.aborted)
         lastChapter = safeText(res && res.text).trim()
+        lastChapter = _ainMaybeTypesetWebNovel(cfg, lastChapter)
         out.textContent = lastChapter || (aborted ? t('已终止（无输出）', 'Aborted (no output)') : '')
         btnAgentAbort.disabled = true
         _syncAgentCtrlUiRunning()
@@ -7661,6 +7833,7 @@ async function openBootstrapDialog(ctx) {
           }
         })
         lastChapter = safeText(first && first.text).trim()
+        lastChapter = _ainMaybeTypesetWebNovel(cfg, lastChapter)
       }
       if (!lastChapter) throw new Error(t('后端未返回正文', 'Backend returned empty text'))
       out.textContent = lastChapter
