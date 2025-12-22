@@ -2294,7 +2294,7 @@ function ensureDialogStyle() {
 .ain-winbtn{background:transparent;border:0;color:#94a3b8;font-size:16px;cursor:pointer;min-width:28px;height:28px;line-height:28px;border-radius:6px}
 .ain-winbtn:hover{background:rgba(148,163,184,.15);color:#e2e8f0}
 .ain-close{font-size:20px}
-.ain-notice-host{display:none;padding:10px 20px;border-bottom:1px solid #334155;background:#0b1220}
+.ain-notice-host{display:block;padding:10px 20px;border-bottom:1px solid #334155;background:#0b1220}
 .ain-notice{display:flex;gap:10px;align-items:flex-start}
 .ain-notice-badge{flex:0 0 auto;font-size:12px;padding:2px 8px;border-radius:999px;border:1px solid #334155;color:#e2e8f0;user-select:none}
 .ain-notice-badge.info{background:rgba(59,130,246,.15);border-color:rgba(59,130,246,.45)}
@@ -7181,7 +7181,7 @@ function notice_mount_banner(ctx, hostEl) {
         }
 
         host.textContent = ''
-        host.style.display = ''
+        host.style.display = 'block'
 
         const wrap = document.createElement('div')
         wrap.className = 'ain-notice'
