@@ -1,4 +1,4 @@
-<h1 align="center">飞速MarkDown</h1>
+<img width="970" height="710" alt="e70dc0ff088e225df7343ca524ab50a2" src="https://github.com/user-attachments/assets/0650c9f9-9dd6-4c34-b8fd-98d56293f7da" /><h1 align="center">飞速MarkDown</h1>
 
 <p align="center">
   <strong>仅 7MB,免费且强大的 Markdown 编辑 / PDF 阅读工具</strong>
@@ -31,6 +31,18 @@ FlyMD 是一款轻量级、高性能的本地 Markdown 编辑器,支持 PDF 高�
 
 ---
 
+
+## 新功能：AI小说引擎（插件）
+
+✅ 自动生成至少3个剧情走向
+✅ 智能伏笔回收+自动审计
+✅ 进度脉络自动更新，多级并发召回
+✅ 人物状态管理、章节字数统计，草稿审定，结构清晰
+✅ 支持多模型协作 & 可配合Git版本控制插件
+
+<img width="970" height="710" alt="e70dc0ff088e225df7343ca524ab50a2" src="https://github.com/user-attachments/assets/005545ee-6377-4f5a-9ae8-e21f7f3330d9" />
+
+
 ## 核心特性
 
 ### 编辑体验
@@ -54,6 +66,8 @@ FlyMD 是一款轻量级、高性能的本地 Markdown 编辑器,支持 PDF 高�
 > 💡 AI 助手扩展会在首次启动后后台静默安装;如卸载,将不会再次自动安装。
 >
 > ⚠️ 内置 AI 模型旨在降低 AI 应用门槛。本应用已对内置模型设置严格速率限制,请勿滥用。推荐[注册硅基流动账号](https://cloud.siliconflow.cn/i/X96CT74a)解锁更强模型和更高额度。
+
+
 
 ### 平台与格式
 
