@@ -1935,6 +1935,9 @@ async function sendFromInputAgent(context) {
   aiAgentRenderPanel(context)
   const removeThinking = aiAgentAddThinking(context)
   try {
+    // 强制重新获取当前文档内容（避免切换文档后上下文过期）
+    __AI_AGENT__.original = ''
+    __AI_AGENT__.current = ''
     await aiAgentPickSource(context, __AI_AGENT__.target)
     const base = String(__AI_AGENT__.current || '')
     __AI_AGENT__.base = base
@@ -3901,6 +3904,8 @@ async function mountWindow(context){
             return
           }
           aiAgentBindPanelEvents(context)
+          // 开启 Agent 时重置状态，确保使用当前文档内容
+          aiAgentResetState()
           await aiAgentPickSource(context, __AI_AGENT__.target)
           aiAgentRenderPanel(context)
           try { context.ui.notice(aiText('Agent 模式已开启', 'Agent enabled: tell me how to edit; you confirm to apply.'), 'ok', 2200) } catch {}
