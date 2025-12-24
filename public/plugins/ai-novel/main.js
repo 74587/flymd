@@ -51,6 +51,8 @@ const DEFAULT_CFG = {
     maxPrevChars: 8000,
     maxProgressChars: 10000,
     maxBibleChars: 10000,
+    // 人物风格（08_人物风格.md）注入上限（字符）
+    maxStyleChars: 5000,
     // “更新进度脉络”用于生成提议的源文本上限（字符）
     maxUpdateSourceChars: 20000
   },
@@ -1281,6 +1283,366 @@ async function getCharStateConstraintsText(ctx, cfg) {
   } catch {
     return ''
   }
+}
+
+function _ainStyleSplitH2Blocks(mdText) {
+  const text = _ainDiffNormEol(mdText)
+  const re = /^##\s+.*$/gm
+  const hits = []
+  let m
+  while ((m = re.exec(text))) {
+    hits.push({ i: m.index, header: m[0] ? String(m[0]).trim() : '##' })
+    if (hits.length >= 200) break
+  }
+  if (!hits.length) return []
+  const blocks = []
+  for (let k = 0; k < hits.length; k++) {
+    const start = hits[k].i
+    const end = (k + 1 < hits.length) ? hits[k + 1].i : text.length
+    const full = text.slice(start, end).trim()
+    if (!full) continue
+    blocks.push({ header: hits[k].header, full })
+  }
+  return blocks
+}
+
+function _ainStylePickLatestBlock(mdText) {
+  const blocks = _ainStyleSplitH2Blocks(mdText)
+  if (!blocks.length) return ''
+  // 风格文件同样优先取“快照”块；没有就取最后一块
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const h = safeText(blocks[i].header)
+    if (/^##\s*快照\b/u.test(h)) return blocks[i].full
+  }
+  return blocks[blocks.length - 1].full
+}
+
+async function getStyleDocRaw(ctx, cfg) {
+  try {
+    if (!ctx) return ''
+    const inf = await inferProjectDir(ctx, cfg)
+    if (!inf) return ''
+    const abs = joinFsPath(inf.projectAbs, '08_人物风格.md')
+    const text = await readTextAny(ctx, abs)
+    return safeText(text)
+  } catch {
+    return ''
+  }
+}
+
+async function getStyleBlockForContext(ctx, cfg) {
+  try {
+    const raw = await getStyleDocRaw(ctx, cfg)
+    const block = _ainStylePickLatestBlock(raw)
+    if (!safeText(block).trim()) return ''
+    const lim = (cfg && cfg.ctx && cfg.ctx.maxStyleChars) ? Math.max(0, cfg.ctx.maxStyleChars | 0) : 5000
+    return sliceHeadTail(block, lim, 0.55).trim()
+  } catch {
+    return ''
+  }
+}
+
+async function getStyleConstraintsText(ctx, cfg) {
+  try {
+    const block = await getStyleBlockForContext(ctx, cfg)
+    if (!block) return ''
+    return [
+      t('【人物风格（自动注入）】', '[Character style (auto)]'),
+      block,
+      t('规则：以上仅用于“语言/行为呈现”的风格约束，不得新增事实；若与【人物状态】或【主要角色】冲突，以事实为准，风格自动作废。', 'Rule: Style constraints only; do not add facts. If conflicts with states/canon, canon wins.'),
+    ].join('\n')
+  } catch {
+    return ''
+  }
+}
+
+async function style_append_block(ctx, cfg, blockText, title) {
+  const inf = await inferProjectDir(ctx, cfg)
+  if (!inf) throw new Error(t('无法推断当前项目，请先在“项目管理”选择小说项目', 'Cannot infer project; select one in Project Manager'))
+  const p = joinFsPath(inf.projectAbs, '08_人物风格.md')
+  let cur = ''
+  try { cur = await readTextAny(ctx, p) } catch { cur = '' }
+  const base = safeText(cur).trim() ? safeText(cur) : t('# 人物风格\n\n', '# Character style\n\n')
+  const head = title ? ('## ' + String(title)) : ('## 快照 ' + _fmtLocalTs())
+  const next = (safeText(base).trimEnd() + '\n\n' + head + '\n\n' + safeText(blockText).trim() + '\n').trimStart()
+  await writeTextAny(ctx, p, next)
+  return p
+}
+
+async function mergeConstraintsWithCharStateOnly(ctx, cfg, localConstraints) {
+  // 仅注入“人物状态”，用于生成/更新其它资料文件时避免把“人物风格”自身循环塞回去
+  const base = mergeConstraints(cfg, localConstraints)
+  try {
+    const cs = await getCharStateConstraintsText(ctx, cfg)
+    if (!cs) return base
+    if (base && /【人物状态/u.test(base)) return base
+    if (base) return base + '\n\n' + cs
+    return cs
+  } catch {
+    return base
+  }
+}
+
+function _ainNormName(name) {
+  return safeText(name).replace(/\s+/g, ' ').trim()
+}
+
+function _ainSplitNameAliases(name) {
+  const s = _ainNormName(name)
+  if (!s) return []
+  // 形如：克莱曼婷 (Clementine) / 克莱曼婷（Clementine）
+  const base = s.replace(/\s*[（(].*?[)）]\s*$/, '').trim()
+  const arr = []
+  if (base) arr.push(base)
+  // 英文别名也收一下（可选）
+  const m = /[（(]\s*([^()（）]{1,40})\s*[)）]\s*$/.exec(s)
+  if (m && m[1]) {
+    const a = String(m[1]).trim()
+    if (a) arr.push(a)
+  }
+  // 去重
+  return Array.from(new Set(arr)).filter(Boolean)
+}
+
+function _ainParseNamesFromMainCharsDoc(mdText) {
+  const s = safeText(mdText).replace(/\r\n/g, '\n')
+  const lines = s.split('\n')
+  const out = []
+  for (let i = 0; i < lines.length; i++) {
+    const line = String(lines[i] || '').trim()
+    if (!line) continue
+    // 常见：* **克莱曼婷 (Clementine)：** xxx
+    const m = /\*\*([^*]{1,80})\*\*/.exec(line)
+    if (!m || !m[1]) continue
+    const nm0 = String(m[1]).trim()
+    if (!nm0) continue
+    out.push(..._ainSplitNameAliases(nm0))
+    if (out.length >= 200) break
+  }
+  return Array.from(new Set(out)).filter(Boolean)
+}
+
+function _ainParseNamesFromStyleBlock(mdText) {
+  const s = safeText(mdText).replace(/\r\n/g, '\n')
+  const lines = s.split('\n')
+  const out = []
+  for (let i = 0; i < lines.length; i++) {
+    const line = String(lines[i] || '').trim()
+    if (!line) continue
+    // 约定：风格卡按人物分节：### 名字
+    const m = /^###\s+(.+)$/.exec(line)
+    if (!m || !m[1]) continue
+    const nm0 = String(m[1]).trim()
+    out.push(..._ainSplitNameAliases(nm0))
+    if (out.length >= 200) break
+  }
+  return Array.from(new Set(out)).filter(Boolean)
+}
+
+async function getMainCharactersDocRaw(ctx, cfg) {
+  // 仅用于“新增人物差集”的已知集合；不要求完整，但越全越少误报
+  try {
+    if (!ctx) return ''
+    const inf = await inferProjectDir(ctx, cfg)
+    if (!inf) return ''
+    const cand = ['03_主要角色.md', '03_主要人物.md', '03_角色设定.md', '03_人物设定.md']
+    for (let i = 0; i < cand.length; i++) {
+      const abs = joinFsPath(inf.projectAbs, cand[i])
+      try {
+        const text = await readTextAny(ctx, abs)
+        if (safeText(text).trim()) return safeText(text)
+      } catch {}
+    }
+    return ''
+  } catch {
+    return ''
+  }
+}
+
+async function listKnownCharacterNames(ctx, cfg) {
+  const set = new Set()
+  try {
+    const rawChars = await getMainCharactersDocRaw(ctx, cfg)
+    const names0 = _ainParseNamesFromMainCharsDoc(rawChars)
+    for (let i = 0; i < names0.length; i++) set.add(names0[i])
+  } catch {}
+  try {
+    const rawState = await getCharStateDocRaw(ctx, cfg)
+    const block = _ainCharStatePickLatestBlock(rawState)
+    const items = _ainCharStateParseItemsFromBlock(block)
+    for (let i = 0; i < items.length; i++) {
+      const nm = _ainNormName(items[i] && items[i].name)
+      if (nm) set.add(nm)
+    }
+  } catch {}
+  try {
+    const rawStyle = await getStyleDocRaw(ctx, cfg)
+    const block = _ainStylePickLatestBlock(rawStyle)
+    const names1 = _ainParseNamesFromStyleBlock(block)
+    for (let i = 0; i < names1.length; i++) set.add(names1[i])
+  } catch {}
+  return set
+}
+
+function _ainLikelyPersonName(name) {
+  const s = _ainNormName(name)
+  if (!s) return false
+  // 过滤明显的泛称/组织/地点（宁可让用户手动勾选，也别自动误判）
+  if (/^(我们|他们|她们|你们|大家|众人|士兵|队员|队伍|小队|军队|基地|营地|城市|村子|博士|队长|指挥官)$/u.test(s)) return false
+  // 太长的通常不是人名
+  if (s.length > 32) return false
+  // 纯英文缩写允许（AJ / MVP）
+  if (/^[A-Za-z][A-Za-z\s\.\-]{0,15}$/.test(s)) return true
+  // 中文名一般 >=2
+  const hasCjk = /[\u4e00-\u9fff]/.test(s)
+  if (hasCjk && s.length >= 2) return true
+  // 其它情况：保守一点，交给用户确认
+  return s.length >= 2
+}
+
+function _ainUniqNames(names) {
+  const arr = Array.isArray(names) ? names : []
+  const out = []
+  const seen = new Set()
+  for (let i = 0; i < arr.length; i++) {
+    const nm = _ainNormName(arr[i])
+    if (!nm) continue
+    if (seen.has(nm)) continue
+    seen.add(nm)
+    out.push(nm)
+  }
+  return out
+}
+
+async function extractCharacterNamesFromText(ctx, cfg, text) {
+  // 复用 cast 接口：比正则猜测更可靠；这里只取“名字集合”，不做状态写入
+  try {
+    const base = safeText(text)
+    const lim = 18000
+    const clip = sliceHeadTail(base, lim, 0.6)
+    const resp = await char_state_extract_from_text(ctx, cfg, { text: clip, existing: '' })
+    const data = resp && resp.data ? resp.data : []
+    const out = []
+    if (Array.isArray(data) && data.length) {
+      for (let i = 0; i < data.length; i++) {
+        const it = data[i] && typeof data[i] === 'object' ? data[i] : null
+        const nm = _ainNormName(it && (it.name != null ? it.name : (it.character != null ? it.character : '')))
+        if (nm) out.push(nm)
+      }
+      return _ainUniqNames(out)
+    }
+    // 兜底：尝试从 raw 里解析 "- 名字：" 行
+    const raw = safeText(resp && resp.raw).trim()
+    if (raw) {
+      const lines = raw.replace(/\r\n/g, '\n').split('\n')
+      for (let i = 0; i < lines.length; i++) {
+        const line = String(lines[i] || '').trim()
+        if (!/^[-*]\s+/.test(line)) continue
+        let s = line.replace(/^[-*]\s+/, '').trim()
+        let p = s.indexOf('：')
+        if (p < 0) p = s.indexOf(':')
+        if (p < 0) continue
+        const nm = _ainNormName(s.slice(0, p))
+        if (nm) out.push(nm)
+      }
+      return _ainUniqNames(out)
+    }
+  } catch {}
+  return []
+}
+
+async function detectNewCharacterCandidates(ctx, cfg, chapterText) {
+  try {
+    const known = await listKnownCharacterNames(ctx, cfg)
+    const extracted = await extractCharacterNamesFromText(ctx, cfg, chapterText)
+    const out = []
+    for (let i = 0; i < extracted.length; i++) {
+      const nm = extracted[i]
+      if (!nm) continue
+      if (known.has(nm)) continue
+      if (!_ainLikelyPersonName(nm)) continue
+      out.push(nm)
+      if (out.length >= 20) break
+    }
+    return out
+  } catch {
+    return []
+  }
+}
+
+async function style_generate_for_names(ctx, cfg, names, opt) {
+  const arr0 = _ainUniqNames(names).filter(_ainLikelyPersonName)
+  if (!arr0.length) return ''
+  const arr = arr0.slice(0, 12)
+  const listLine = arr.join('、')
+
+  const progress = await getProgressDocText(ctx, cfg)
+  const bible = await getBibleDocText(ctx, cfg)
+  const prev = await getPrevTextForRequest(ctx, cfg)
+  // 注意：生成风格时不要把“人物风格”自身循环注入；只用人物状态与硬约束作为事实锚点
+  const constraints = _ainAppendWritingStyleHintToConstraints(await mergeConstraintsWithCharStateOnly(ctx, cfg, ''))
+
+  // 风格检索：用更小预算、更短片段，避免把整章历史塞进来
+  let rag = null
+  try {
+    const q = [
+      '目标人物：' + listLine,
+      '检索重点：说话方式、口头禅、决策偏好、行为习惯、情绪外显、底线与禁忌。',
+      '',
+      '辅助线索（可选）：',
+      sliceTail(prev, 1200)
+    ].join('\n')
+    const ragCfg = (cfg && cfg.rag && typeof cfg.rag === 'object') ? cfg.rag : {}
+    const maxChars = Math.max(400, Math.min((ragCfg.maxChars | 0) || 2400, 1400))
+    rag = await rag_get_hits(ctx, cfg, q, { topK: 6, maxChars, hitMaxChars: 900 })
+  } catch {}
+
+  const o = (opt && typeof opt === 'object') ? opt : {}
+  const title = safeText(o.title).trim()
+  const why = safeText(o.why).trim()
+
+  const question = [
+    '任务：为【目标人物】生成“写作风格卡”，用于续写时保持人物风格一致。',
+    '目标人物：' + listLine,
+    '',
+    '输入：你会看到【人物状态/进度脉络/主要角色设定】以及【RAG 历史片段】。',
+    '规则（必须严格遵守）：',
+    '1) 只写“语言/行为呈现”的风格，不得新增任何事实（背景/年龄/能力/剧情事件/关系结论都不许）。',
+    '2) 若风格推断与【人物状态】或【主要角色】冲突：以事实为准，在该人物小节末尾加“注意：风格与事实冲突，已以事实为准”。',
+    '3) 输出 Markdown：按人物分节，每人用 6~10 条短条目，结构固定为：',
+    '   ### 人物名',
+    '   - 语言：…',
+    '   - 行事：…',
+    '   - 决策：…',
+    '   - 情绪：…',
+    '   - 关系：…（只写“表达方式/边界”，不写新事实）',
+    '   - 禁忌：…',
+    '4) 不要写正文，不要解释系统提示，不要 JSON，不要 ``` 代码块。',
+    (title ? ('附加标题：' + title) : ''),
+    (why ? ('触发原因：' + why) : ''),
+  ].filter(Boolean).join('\n')
+
+  const resp = await apiFetchConsultWithJob(ctx, cfg, {
+    upstream: {
+      baseUrl: cfg.upstream.baseUrl,
+      apiKey: cfg.upstream.apiKey,
+      model: cfg.upstream.model
+    },
+    input: {
+      async: true,
+      mode: 'job',
+      question,
+      progress,
+      bible,
+      prev,
+      constraints: constraints || undefined,
+      rag: rag || undefined
+    }
+  }, {
+    timeoutMs: 190000,
+    onTick: (o && typeof o.onTick === 'function') ? o.onTick : undefined
+  })
+  return safeText(resp && resp.text).trim()
 }
 
 function _fallbackHash32(s) {
@@ -2930,7 +3292,9 @@ async function openSettingsDialog(ctx) {
   const rowCtx2 = document.createElement('div')
   rowCtx2.className = 'ain-row'
   const inpBibleChars = mkInput(t('资料/圣经上限', 'Bible/meta limit'), (cfg.ctx && cfg.ctx.maxBibleChars) ? String(cfg.ctx.maxBibleChars) : ((cfg.ctx && cfg.ctx.maxProgressChars) ? String(cfg.ctx.maxProgressChars) : '10000'), 'number')
+  const inpStyleChars = mkInput(t('人物风格上限', 'Style limit'), (cfg.ctx && cfg.ctx.maxStyleChars) ? String(cfg.ctx.maxStyleChars) : '5000', 'number')
   rowCtx2.appendChild(inpBibleChars.wrap)
+  rowCtx2.appendChild(inpStyleChars.wrap)
   secCtx.appendChild(rowCtx2)
 
   const rowCtx3 = document.createElement('div')
@@ -2954,6 +3318,7 @@ async function openSettingsDialog(ctx) {
       inpPrevChars.inp.value = String(1500)
       inpProgChars.inp.value = String(1500)
       inpBibleChars.inp.value = String(1500)
+      inpStyleChars.inp.value = String(1200)
       inpUpdChars.inp.value = String(3000)
       return
     }
@@ -2961,12 +3326,14 @@ async function openSettingsDialog(ctx) {
     const prev = _clampInt(Math.round(total * 0.20), 2000, 20000)
     const prog = _clampInt(Math.round(total * 0.18), 2000, 26000)
     const bible = _clampInt(Math.round(total * 0.22), 2000, 32000)
+    const style = _clampInt(Math.round(total * 0.12), 1200, 20000)
     // “进度生成源文本”会与 progress/bible/prev 同时进入摘要提示词，不能按比例无限膨胀。
     const upd = _clampInt(Math.round(total * 0.30), 6000, 80000)
 
     inpPrevChars.inp.value = String(prev)
     inpProgChars.inp.value = String(prog)
     inpBibleChars.inp.value = String(bible)
+    inpStyleChars.inp.value = String(style)
     inpUpdChars.inp.value = String(upd)
   }
 
@@ -3180,6 +3547,7 @@ async function openSettingsDialog(ctx) {
           maxPrevChars: _clampInt(inpPrevChars.inp.value, 1000, 10000000),
           maxProgressChars: _clampInt(inpProgChars.inp.value, 1000, 10000000),
           maxBibleChars: _clampInt(inpBibleChars.inp.value, 1000, 10000000),
+          maxStyleChars: _clampInt(inpStyleChars.inp.value, 500, 10000000),
           maxUpdateSourceChars: _clampInt(inpUpdChars.inp.value, 1000, 10000000),
         },
         constraints: {
@@ -3858,6 +4226,17 @@ async function openNextOptionsDialog(ctx) {
     lastText = ''
     lastDraftId = ''
     try {
+      const input0 = {
+        instruction,
+        progress,
+        bible,
+        prev,
+        choice: chosen,
+        constraints: constraints || undefined,
+        rag: rag || undefined
+      }
+      const b = _ainCtxApplyBudget(cfg, input0, { mode: 'write' })
+      updateCtxUsage(b && b.usage ? b.usage : null)
       const r = await apiFetchChatWithJob(ctx, cfg, {
         mode: 'novel',
         action: 'write',
@@ -3866,15 +4245,7 @@ async function openNextOptionsDialog(ctx) {
           apiKey: cfg.upstream.apiKey,
           model: cfg.upstream.model
         },
-        input: {
-          instruction,
-          progress,
-          bible,
-          prev,
-          choice: chosen,
-          constraints: constraints || undefined,
-          rag: rag || undefined
-        }
+        input: b && b.input ? b.input : input0
       }, {
         onTick: ({ waitMs }) => {
           const s = Math.max(0, Math.round(Number(waitMs || 0) / 1000))
@@ -3885,6 +4256,7 @@ async function openNextOptionsDialog(ctx) {
       if (!lastText) throw new Error(t('后端未返回正文', 'Backend returned empty text'))
       lastText = _ainMaybeTypesetWebNovel(cfg, lastText)
       out.textContent = lastText
+      try { void afterGeneratedProseForNewCharacters(lastText).catch(() => {}) } catch {}
       btnAppend.disabled = false
       btnAppendDraft.disabled = false
       ctx.ui.notice(t('已生成正文（未写入文档）', 'Generated (not inserted)'), 'ok', 1600)
@@ -4238,6 +4610,219 @@ async function openWriteWithChoiceDialog(ctx) {
   castCard.appendChild(castList)
   sec.appendChild(castCard)
 
+  // 人物风格（08_人物风格.md）——软约束：只影响“写得像”，不覆盖事实（事实以人物状态/主要角色为准）
+  const styleCard = document.createElement('div')
+  styleCard.className = 'ain-card'
+  styleCard.style.marginTop = '10px'
+  styleCard.innerHTML = `<div style="font-weight:700;margin-bottom:6px">${t('人物风格（08_人物风格.md）', 'Character style (08_人物风格.md)')}</div>`
+  const styleHint = document.createElement('div')
+  styleHint.className = 'ain-muted'
+  styleHint.textContent = t(
+    '说明：风格卡用于“口癖/语气/行事方式”等呈现层约束；不得新增事实。若与人物状态/主要角色冲突，以事实为准。',
+    'Note: style cards constrain presentation (tone/habits). Do not add facts. Canon wins on conflicts.'
+  )
+  styleCard.appendChild(styleHint)
+
+  const styleTools = mkBtnRow()
+  const btnStyleFromFile = document.createElement('button')
+  btnStyleFromFile.className = 'ain-btn gray'
+  btnStyleFromFile.textContent = t('从文件刷新', 'Reload from file')
+  const btnStyleRefreshMust = document.createElement('button')
+  btnStyleRefreshMust.className = 'ain-btn gray'
+  btnStyleRefreshMust.textContent = t('刷新风格（本章必须出场）', 'Refresh style (must-appear)')
+  const btnStyleOpen = document.createElement('button')
+  btnStyleOpen.className = 'ain-btn gray'
+  btnStyleOpen.textContent = t('打开 08_人物风格.md', 'Open 08_人物风格.md')
+  styleTools.appendChild(btnStyleFromFile)
+  styleTools.appendChild(btnStyleRefreshMust)
+  styleTools.appendChild(btnStyleOpen)
+  styleCard.appendChild(styleTools)
+
+  const styleStatus = document.createElement('div')
+  styleStatus.className = 'ain-muted'
+  styleStatus.style.marginTop = '6px'
+  styleStatus.textContent = t('未读取人物风格。', 'No style loaded.')
+  styleCard.appendChild(styleStatus)
+
+  const styleOut = document.createElement('div')
+  styleOut.className = 'ain-out'
+  styleOut.style.minHeight = '90px'
+  styleOut.style.marginTop = '8px'
+  styleOut.textContent = t('（无）', '(none)')
+  styleCard.appendChild(styleOut)
+
+  const newCharBox = document.createElement('div')
+  newCharBox.style.marginTop = '10px'
+  styleCard.appendChild(newCharBox)
+
+  sec.appendChild(styleCard)
+
+  // 上下文占用（按字符粗估，便于调参；并在超窗时优先裁剪低优先级片段）
+  const ctxCard = document.createElement('div')
+  ctxCard.className = 'ain-card'
+  ctxCard.style.marginTop = '10px'
+  ctxCard.innerHTML = `<div style="font-weight:700;margin-bottom:6px">${t('上下文占用', 'Context usage')}</div>`
+  const ctxUsageHost = document.createElement('div')
+  ctxCard.appendChild(ctxUsageHost)
+  sec.appendChild(ctxCard)
+  _ainCtxRenderUsageInto(ctxUsageHost, null)
+
+  let _styleLastBlockFull = ''
+  let _newCharCandidates = []
+  let _lastCtxUsage = null
+
+  function updateCtxUsage(usage) {
+    _lastCtxUsage = usage && typeof usage === 'object' ? usage : null
+    try { _ainCtxRenderUsageInto(ctxUsageHost, _lastCtxUsage) } catch {}
+  }
+
+  function _getMustAppearNamesInUi() {
+    try {
+      const must = _ainCastGetMustAppearItems()
+      return _ainUniqNames(must.map((x) => safeText(x && x.name))).filter(_ainLikelyPersonName)
+    } catch {
+      return []
+    }
+  }
+
+  async function refreshStyleFromFile() {
+    try {
+      cfg = await loadCfg(ctx)
+      const raw = await getStyleDocRaw(ctx, cfg)
+      const blockFull = _ainStylePickLatestBlock(raw)
+      _styleLastBlockFull = safeText(blockFull).trim()
+      const show = _styleLastBlockFull ? sliceHeadTail(_styleLastBlockFull, 6000, 0.55).trim() : ''
+      styleOut.textContent = show || t('（无）', '(none)')
+      styleStatus.textContent = _styleLastBlockFull
+        ? t('已读取人物风格快照。', 'Style snapshot loaded.')
+        : t('未发现人物风格快照。', 'No style snapshot found.')
+    } catch (e) {
+      styleStatus.textContent = t('读取失败：', 'Read failed: ') + (e && e.message ? e.message : String(e))
+    }
+  }
+
+  function renderNewCharCandidates() {
+    newCharBox.innerHTML = ''
+    const arr = Array.isArray(_newCharCandidates) ? _newCharCandidates : []
+    if (!arr.length) return
+    const tip = document.createElement('div')
+    tip.className = 'ain-muted'
+    tip.textContent = t('检测到疑似新增人物：勾选确认后可一键刷新风格卡（不会改动主要角色文件）。', 'Possible new characters detected: confirm to refresh style cards (won’t modify main characters file).')
+    newCharBox.appendChild(tip)
+
+    const list = document.createElement('div')
+    list.style.display = 'flex'
+    list.style.flexWrap = 'wrap'
+    list.style.gap = '10px'
+    list.style.marginTop = '8px'
+    const checks = []
+    for (let i = 0; i < arr.length; i++) {
+      const nm = safeText(arr[i]).trim()
+      if (!nm) continue
+      const lab = document.createElement('label')
+      lab.style.display = 'inline-flex'
+      lab.style.alignItems = 'center'
+      lab.style.gap = '6px'
+      lab.style.padding = '6px 10px'
+      lab.style.border = '1px solid #334155'
+      lab.style.borderRadius = '999px'
+      lab.style.background = 'rgba(15,23,42,.35)'
+      const cb = document.createElement('input')
+      cb.type = 'checkbox'
+      cb.checked = true
+      const sp = document.createElement('span')
+      sp.className = 'ain-muted'
+      sp.textContent = nm
+      lab.appendChild(cb)
+      lab.appendChild(sp)
+      list.appendChild(lab)
+      checks.push({ name: nm, cb })
+    }
+    newCharBox.appendChild(list)
+
+    const row = mkBtnRow()
+    row.style.marginTop = '8px'
+    const btnConfirm = document.createElement('button')
+    btnConfirm.className = 'ain-btn gray'
+    btnConfirm.textContent = t('确认新增并刷新风格', 'Confirm & refresh style')
+    row.appendChild(btnConfirm)
+    newCharBox.appendChild(row)
+
+    btnConfirm.onclick = async () => {
+      try {
+        const pick = checks.filter((x) => x && x.cb && x.cb.checked).map((x) => x.name)
+        await doStyleUpdate(pick, t('新增人物确认', 'new character confirmed'))
+        // 刷新后清空候选，避免反复提示
+        _newCharCandidates = []
+        renderNewCharCandidates()
+      } catch (e) {
+        ctx.ui.notice(t('失败：', 'Failed: ') + (e && e.message ? e.message : String(e)), 'err', 2600)
+      }
+    }
+  }
+
+  async function doStyleUpdate(names, why) {
+    const list = _ainUniqNames(names).filter(_ainLikelyPersonName)
+    if (!list.length) {
+      ctx.ui.notice(t('未选择人物', 'No characters selected'), 'err', 1800)
+      return
+    }
+    setBusy(btnStyleRefreshMust, true)
+    setBusy(btnStyleFromFile, true)
+    try {
+      cfg = await loadCfg(ctx)
+      if (!cfg.token) throw new Error(t('请先登录后端', 'Please login first'))
+      if (!cfg.upstream || !cfg.upstream.baseUrl || !cfg.upstream.model) {
+        throw new Error(t('请先在设置里填写上游 BaseURL 和模型', 'Please set upstream BaseURL and model in Settings first'))
+      }
+      styleStatus.textContent = t('生成风格卡中…', 'Generating style cards...')
+      const txt = await style_generate_for_names(ctx, cfg, list, {
+        why: safeText(why).trim(),
+        onTick: ({ waitMs }) => {
+          const s = Math.max(0, Math.round(Number(waitMs || 0) / 1000))
+          styleStatus.textContent = t('生成风格卡中… 已等待 ', 'Generating style... waited ') + s + 's'
+        }
+      })
+      if (!txt) throw new Error(t('后端未返回风格卡', 'Backend returned empty style'))
+      await style_append_block(ctx, cfg, txt, t('自动更新（人物风格） ', 'Auto update (style) ') + _fmtLocalTs())
+      await refreshStyleFromFile()
+      ctx.ui.notice(t('已更新人物风格（08_人物风格.md）', 'Style updated (08_人物风格.md)'), 'ok', 2200)
+    } finally {
+      setBusy(btnStyleRefreshMust, false)
+      setBusy(btnStyleFromFile, false)
+    }
+  }
+
+  btnStyleFromFile.onclick = () => { refreshStyleFromFile().catch(() => {}) }
+  btnStyleRefreshMust.onclick = () => {
+    const names = _getMustAppearNamesInUi()
+    doStyleUpdate(names, t('本章必须出场', 'must-appear')).catch((e) => ctx.ui.notice(t('失败：', 'Failed: ') + (e && e.message ? e.message : String(e)), 'err', 2600))
+  }
+  btnStyleOpen.onclick = async () => {
+    try {
+      cfg = await loadCfg(ctx)
+      const inf = await inferProjectDir(ctx, cfg)
+      if (!inf) throw new Error(t('无法推断当前项目', 'Cannot infer project'))
+      const p = joinFsPath(inf.projectAbs, '08_人物风格.md')
+      if (typeof ctx.openFileByPath === 'function') await ctx.openFileByPath(p)
+      else styleStatus.textContent = t('当前环境不支持打开文件：', 'openFileByPath not available: ') + p
+    } catch (e) {
+      styleStatus.textContent = t('失败：', 'Failed: ') + (e && e.message ? e.message : String(e))
+    }
+  }
+
+  async function afterGeneratedProseForNewCharacters(proseText) {
+    try {
+      cfg = await loadCfg(ctx)
+      const names = await detectNewCharacterCandidates(ctx, cfg, proseText)
+      _newCharCandidates = _ainUniqNames(names)
+      renderNewCharCandidates()
+    } catch {
+      _newCharCandidates = []
+      renderNewCharCandidates()
+    }
+  }
+
   let _charStateLastBlockFull = ''
 
   async function refreshCharStateFromFile(opt) {
@@ -4442,6 +5027,7 @@ async function openWriteWithChoiceDialog(ctx) {
   }
   renderCastList()
   refreshCharStateFromFile({ overwriteItems: true }).catch(() => {})
+  refreshStyleFromFile().catch(() => {})
 
   const a0 = _ainAgentGetCfg(cfg)
   const agentBox = document.createElement('div')
@@ -4928,6 +5514,18 @@ async function openWriteWithChoiceDialog(ctx) {
         _syncAgentCtrlUiRunning()
 
         out.textContent = t('Agent 执行中…（多轮）', 'Agent running... (multi-round)')
+        try {
+          const b0 = _ainCtxApplyBudget(cfg, {
+            instruction,
+            progress,
+            bible,
+            prev,
+            choice: chosen,
+            constraints: constraints || undefined,
+            rag: rag || undefined
+          }, { mode: 'write' })
+          updateCtxUsage(b0 && b0.usage ? b0.usage : null)
+        } catch {}
         const res = await agentRunPlan(ctx, cfg, {
           instruction,
           choice: chosen,
@@ -4948,6 +5546,9 @@ async function openWriteWithChoiceDialog(ctx) {
         text0 = _ainMaybeTypesetWebNovel(cfg, text0)
         lastText = text0
         out.textContent = lastText || (aborted ? t('已终止（无输出）', 'Aborted (no output)') : '')
+        if (lastText) {
+          try { void afterGeneratedProseForNewCharacters(lastText).catch(() => {}) } catch {}
+        }
         btnAgentAbort.disabled = true
         _syncAgentCtrlUiRunning()
         agentControl = null
@@ -4966,6 +5567,17 @@ async function openWriteWithChoiceDialog(ctx) {
         return
       }
 
+      const input0 = {
+        instruction: instruction + '\n\n' + t('长度要求：正文尽量控制在 3000 字以内。', 'Length: keep the prose within ~3000 chars.'),
+        progress,
+        bible,
+        prev,
+        choice: chosen,
+        constraints: constraints || undefined,
+        rag: rag || undefined
+      }
+      const b = _ainCtxApplyBudget(cfg, input0, { mode: 'write' })
+      updateCtxUsage(b && b.usage ? b.usage : null)
       const r = await apiFetchChatWithJob(ctx, cfg, {
         mode: 'novel',
         action: 'write',
@@ -4974,15 +5586,7 @@ async function openWriteWithChoiceDialog(ctx) {
           apiKey: cfg.upstream.apiKey,
           model: cfg.upstream.model
         },
-        input: {
-          instruction: instruction + '\n\n' + t('长度要求：正文尽量控制在 3000 字以内。', 'Length: keep the prose within ~3000 chars.'),
-          progress,
-          bible,
-          prev,
-          choice: chosen,
-          constraints: constraints || undefined,
-          rag: rag || undefined
-        }
+        input: b && b.input ? b.input : input0
       }, {
         onTick: ({ waitMs }) => {
           const s = Math.max(0, Math.round(Number(waitMs || 0) / 1000))
@@ -4995,6 +5599,7 @@ async function openWriteWithChoiceDialog(ctx) {
       text0 = _ainMaybeTypesetWebNovel(cfg, text0)
       lastText = text0
       out.textContent = lastText
+      try { void afterGeneratedProseForNewCharacters(lastText).catch(() => {}) } catch {}
       btnAppend.disabled = false
       btnAppendDraft.disabled = false
       ctx.ui.notice(t('已生成正文（未写入文档）', 'Generated (not inserted)'), 'ok', 1600)
@@ -5072,6 +5677,18 @@ async function openWriteWithChoiceDialog(ctx) {
         _syncAgentCtrlUiRunning()
 
         out.textContent = t('Agent 执行中…（多轮，不走候选）', 'Agent running... (multi-round, no options)')
+        try {
+          const b0 = _ainCtxApplyBudget(cfg, {
+            instruction,
+            progress,
+            bible,
+            prev,
+            choice: makeDirectChoice(instruction),
+            constraints: constraints || undefined,
+            rag: rag || undefined
+          }, { mode: 'write' })
+          updateCtxUsage(b0 && b0.usage ? b0.usage : null)
+        } catch {}
         const res = await agentRunPlan(ctx, cfg, {
           instruction,
           choice: makeDirectChoice(instruction),
@@ -5092,6 +5709,9 @@ async function openWriteWithChoiceDialog(ctx) {
         text0 = _ainMaybeTypesetWebNovel(cfg, text0)
         lastText = text0
         out.textContent = lastText || (aborted ? t('已终止（无输出）', 'Aborted (no output)') : '')
+        if (lastText) {
+          try { void afterGeneratedProseForNewCharacters(lastText).catch(() => {}) } catch {}
+        }
         btnAgentAbort.disabled = true
         _syncAgentCtrlUiRunning()
         agentControl = null
@@ -5110,6 +5730,17 @@ async function openWriteWithChoiceDialog(ctx) {
         return
       }
 
+      const input0 = {
+        instruction: instruction + '\n\n' + t('长度要求：正文尽量控制在 3000 字以内。', 'Length: keep the prose within ~3000 chars.'),
+        progress,
+        bible,
+        prev,
+        choice: makeDirectChoice(instruction),
+        constraints: constraints || undefined,
+        rag: rag || undefined
+      }
+      const b = _ainCtxApplyBudget(cfg, input0, { mode: 'write' })
+      updateCtxUsage(b && b.usage ? b.usage : null)
       const r = await apiFetchChatWithJob(ctx, cfg, {
         mode: 'novel',
         action: 'write',
@@ -5118,15 +5749,7 @@ async function openWriteWithChoiceDialog(ctx) {
           apiKey: cfg.upstream.apiKey,
           model: cfg.upstream.model
         },
-        input: {
-          instruction: instruction + '\n\n' + t('长度要求：正文尽量控制在 3000 字以内。', 'Length: keep the prose within ~3000 chars.'),
-          progress,
-          bible,
-          prev,
-          choice: makeDirectChoice(instruction),
-          constraints: constraints || undefined,
-          rag: rag || undefined
-        }
+        input: b && b.input ? b.input : input0
       }, {
         onTick: ({ waitMs }) => {
           const s = Math.max(0, Math.round(Number(waitMs || 0) / 1000))
@@ -5139,6 +5762,7 @@ async function openWriteWithChoiceDialog(ctx) {
       text0 = _ainMaybeTypesetWebNovel(cfg, text0)
       lastText = text0
       out.textContent = lastText
+      try { void afterGeneratedProseForNewCharacters(lastText).catch(() => {}) } catch {}
       btnAppend.disabled = false
       btnAppendDraft.disabled = false
       ctx.ui.notice(t('已生成正文（未写入文档）', 'Generated (not inserted)'), 'ok', 1600)
@@ -5527,7 +6151,15 @@ function _ainAgentNormalizePlanItem(raw, idx) {
   }
   const instruction = safeText(it.instruction || it.prompt || it.task || '').trim()
   const ragQuery = safeText(it.rag_query || it.ragQuery || it.query || '').trim()
-  return { id, title, type, instruction, rag_query: ragQuery, status: 'pending', error: '' }
+  // rag_kind：仅用于前端把多次检索分为“风格/事实”两类合并，不影响后端协议
+  let ragKind = safeText(it.rag_kind || it.ragKind || it.rag_type || it.ragType || '').trim().toLowerCase()
+  if (ragKind !== 'style' && ragKind !== 'facts') ragKind = ''
+  if (!ragKind && type === 'rag') {
+    const tx = (title + '\n' + ragQuery).toLowerCase()
+    if (/风格|性格|口癖|语气|说话|style|persona|tone/.test(tx)) ragKind = 'style'
+    else ragKind = 'facts'
+  }
+  return { id, title, type, instruction, rag_query: ragQuery, rag_kind: ragKind, status: 'pending', error: '' }
 }
 
 function buildFallbackAgentPlan(baseInstruction, targetChars, chunkCount, wantAudit) {
@@ -5892,7 +6524,78 @@ async function agentRunPlan(ctx, cfg, base, ui) {
     try { render(items, logs) } catch {}
   }
 
-  let rag = base && base.rag ? base.rag : null
+  // Agent 的 rag：允许多次检索累积（否则后一次会覆盖前一次，前面的检索基本白做）
+  const ragCfg0 = (cfg && cfg.rag && typeof cfg.rag === 'object') ? cfg.rag : {}
+  const ragTotalBudget = Math.max(400, (ragCfg0.maxChars | 0) || 2400)
+  // 默认比例：风格:事实 = 1:2（风格用于“写得像”，事实用于“不写错”）
+  const _ragRatioStyle = 1
+  const _ragRatioFacts = 2
+  const ragBudgetStyle = Math.max(200, Math.floor(ragTotalBudget * _ragRatioStyle / (_ragRatioStyle + _ragRatioFacts)))
+  const ragBudgetFacts = Math.max(200, ragTotalBudget - ragBudgetStyle)
+  const ragPools = { style: [], facts: [] }
+
+  function _ainRagPoolChars(list) {
+    const arr = Array.isArray(list) ? list : []
+    let n = 0
+    for (let i = 0; i < arr.length; i++) n += safeText(arr[i] && arr[i].text).length
+    return n
+  }
+
+  function _ainRagPoolMerge(pool, hits, maxChars) {
+    const out = Array.isArray(pool) ? pool : []
+    const arr = Array.isArray(hits) ? hits : []
+    const limit = Math.max(0, maxChars | 0)
+    if (!limit || !arr.length) return out
+
+    const seen = new Set()
+    let used = 0
+    for (let i = 0; i < out.length; i++) {
+      const it = out[i]
+      const src = safeText(it && it.source).trim() || 'unknown'
+      const txt = safeText(it && it.text).trim()
+      if (!txt) continue
+      const key = src + '\n' + txt
+      if (seen.has(key)) continue
+      seen.add(key)
+      used += txt.length
+    }
+
+    for (let i = 0; i < arr.length; i++) {
+      const it = arr[i]
+      const src = safeText(it && it.source).trim() || 'unknown'
+      let txt = safeText(it && it.text).trim()
+      if (!txt) continue
+      const key = src + '\n' + txt
+      if (seen.has(key)) continue
+      if (used >= limit) break
+      const rest = limit - used
+      if (txt.length > rest) {
+        // 最后一条尽量塞满预算（比直接丢掉更实用）
+        txt = txt.slice(0, Math.max(0, rest - 1)) + '…'
+      }
+      used += txt.length
+      seen.add(src + '\n' + txt)
+      out.push({ source: src, text: txt })
+    }
+    return out
+  }
+
+  function _ainRagPoolCompose() {
+    // 先风格后事实：风格片段更短，且更接近“写作口味”约束；事实片段留给细节查证兜底。
+    const style = Array.isArray(ragPools.style) ? ragPools.style : []
+    const facts = Array.isArray(ragPools.facts) ? ragPools.facts : []
+    const merged = style.concat(facts)
+    // 再兜底一次总预算，避免合并时的“截尾省略号”误差
+    return _ainRagPoolMerge([], merged, ragTotalBudget)
+  }
+
+  // 初始 rag：作为“事实”池的种子（来自 base 构建时的单次检索）
+  try {
+    const seed = base && base.rag ? base.rag : null
+    if (Array.isArray(seed) && seed.length) ragPools.facts = _ainRagPoolMerge([], seed, ragBudgetFacts)
+  } catch {}
+
+  let rag = _ainRagPoolCompose()
   let draft = ''
   let auditText = ''
   let consultChecklist = ''
@@ -6000,9 +6703,23 @@ async function agentRunPlan(ctx, cfg, base, ui) {
           it.status = 'skipped'
           pushLog(t('跳过检索：RAG 已关闭', 'Skip RAG: disabled'))
         } else {
-          rag = await rag_get_hits(ctx, cfg, q + '\n\n' + sliceTail(curPrev(), 1800))
-          const n = Array.isArray(rag) ? rag.length : 0
-          pushLog(t('检索命中：', 'RAG hits: ') + String(n))
+          const kind = (it.rag_kind === 'style' || it.rag_kind === 'facts') ? it.rag_kind : 'facts'
+          const budget = kind === 'style' ? ragBudgetStyle : ragBudgetFacts
+          const hits = await rag_get_hits(ctx, cfg, q + '\n\n' + sliceTail(curPrev(), 1800), {
+            // 风格片段更短更碎；事实片段允许更长
+            topK: kind === 'style' ? 6 : 6,
+            maxChars: budget,
+            hitMaxChars: kind === 'style' ? 900 : 1200
+          })
+          if (kind === 'style') ragPools.style = _ainRagPoolMerge(ragPools.style, hits, ragBudgetStyle)
+          else ragPools.facts = _ainRagPoolMerge(ragPools.facts, hits, ragBudgetFacts)
+          rag = _ainRagPoolCompose()
+          pushLog(t('检索命中：', 'RAG hits: ') + String(Array.isArray(hits) ? hits.length : 0))
+          pushLog(
+            t('RAG 累积：风格 ', 'RAG pool: style ') + String(_ainRagPoolChars(ragPools.style)) +
+            t(' 字符；事实 ', ', facts ') + String(_ainRagPoolChars(ragPools.facts)) +
+            t(' 字符；合计 ', ', total ') + String(_ainRagPoolChars(rag)) + t(' 字符', ' chars')
+          )
           it.status = 'done'
         }
       } else if (it.type === 'consult') {
@@ -6425,13 +7142,250 @@ async function mergeConstraintsWithCharState(ctx, cfg, localConstraints) {
   const base = mergeConstraints(cfg, localConstraints)
   try {
     const cs = await getCharStateConstraintsText(ctx, cfg)
-    if (!cs) return base
+    const st = await getStyleConstraintsText(ctx, cfg)
+
+    let out = base
     // 用户手动写了【人物状态】就别重复注入
-    if (base && /【人物状态/u.test(base)) return base
-    if (base) return base + '\n\n' + cs
-    return cs
+    if (cs && !(out && /【人物状态/u.test(out))) out = out ? (out + '\n\n' + cs) : cs
+    // 用户手动写了【人物风格】就别重复注入
+    if (st && !(out && /【人物风格/u.test(out))) out = out ? (out + '\n\n' + st) : st
+    return out
   } catch {
     return base
+  }
+}
+
+function _ainSafeJsonLen(v) {
+  try {
+    if (v == null) return 0
+    return JSON.stringify(v).length
+  } catch {
+    return safeText(v).length
+  }
+}
+
+function _ainRagChars(rag) {
+  const arr = Array.isArray(rag) ? rag : null
+  if (!arr || !arr.length) return 0
+  let n = 0
+  for (let i = 0; i < arr.length; i++) n += safeText(arr[i] && arr[i].text).length
+  return n
+}
+
+function _ainRagPruneToChars(rag, maxChars) {
+  const arr0 = Array.isArray(rag) ? rag : null
+  const lim = Math.max(0, maxChars | 0)
+  if (!arr0 || !arr0.length) return null
+  if (!lim) return null
+  const out = []
+  let used = 0
+  for (let i = 0; i < arr0.length; i++) {
+    const it0 = arr0[i] && typeof arr0[i] === 'object' ? arr0[i] : null
+    const src = safeText(it0 && it0.source).trim() || 'unknown'
+    let txt = safeText(it0 && it0.text).trim()
+    if (!txt) continue
+    if (used >= lim) break
+    const rest = lim - used
+    if (txt.length > rest) txt = txt.slice(0, Math.max(0, rest - 1)) + '…'
+    used += txt.length
+    out.push({ source: src, text: txt })
+  }
+  return out.length ? out : null
+}
+
+function _ainCtxWindow(cfg) {
+  const w = (cfg && cfg.ctx && cfg.ctx.modelContextChars) ? (cfg.ctx.modelContextChars | 0) : 32000
+  return Math.max(8000, w)
+}
+
+function _ainCtxEffectiveBudget(cfg) {
+  // 给 system 包装/多语言标题/后端额外字段留余量，避免“看似没超但上游截断”的抖动
+  const w = _ainCtxWindow(cfg)
+  return Math.max(4000, Math.floor(w * 0.85))
+}
+
+function _ainCtxBuildUsage(cfg, input, pruned) {
+  const inp = input && typeof input === 'object' ? input : {}
+  const out = pruned && typeof pruned === 'object' ? pruned : inp
+  const segs = [
+    { k: 'instruction', label: 'instruction', raw: safeText(inp.instruction).length, used: safeText(out.instruction).length },
+    { k: 'text', label: 'text', raw: safeText(inp.text).length, used: safeText(out.text).length },
+    { k: 'history', label: 'history', raw: _ainSafeJsonLen(inp.history), used: _ainSafeJsonLen(out.history) },
+    { k: 'constraints', label: 'constraints', raw: safeText(inp.constraints).length, used: safeText(out.constraints).length },
+    { k: 'progress', label: 'progress', raw: safeText(inp.progress).length, used: safeText(out.progress).length },
+    { k: 'bible', label: 'bible', raw: safeText(inp.bible).length, used: safeText(out.bible).length },
+    { k: 'prev', label: 'prev', raw: safeText(inp.prev).length, used: safeText(out.prev).length },
+    { k: 'rag', label: 'rag', raw: _ainRagChars(inp.rag), used: _ainRagChars(out.rag) },
+    { k: 'choice', label: 'choice', raw: _ainSafeJsonLen(inp.choice), used: _ainSafeJsonLen(out.choice) },
+  ]
+  const totalRaw = segs.reduce((a, s) => a + (s.raw | 0), 0)
+  const totalUsed = segs.reduce((a, s) => a + (s.used | 0), 0)
+  const win = _ainCtxWindow(cfg)
+  const eff = _ainCtxEffectiveBudget(cfg)
+  return {
+    window: win,
+    effective: eff,
+    totalRaw,
+    totalUsed,
+    overflow: Math.max(0, totalUsed - eff),
+    segments: segs.map((s) => ({ ...s, trimmed: Math.max(0, (s.raw | 0) - (s.used | 0)) }))
+  }
+}
+
+function _ainCtxApplyBudget(cfg, input, opt) {
+  const inp0 = input && typeof input === 'object' ? input : {}
+  const o = (opt && typeof opt === 'object') ? opt : {}
+  const mode = safeText(o.mode).trim() || 'write'
+  const eff = _ainCtxEffectiveBudget(cfg)
+
+  // required：宁可丢上下文，也不要动这些（Never break userspace）
+  const requiredKeys = new Set()
+  if (mode === 'revise') {
+    requiredKeys.add('instruction')
+    requiredKeys.add('text')
+  } else if (mode === 'audit') {
+    requiredKeys.add('text')
+  } else {
+    requiredKeys.add('instruction')
+  }
+
+  const out = { ...inp0 }
+  const reqChars =
+    (requiredKeys.has('instruction') ? safeText(out.instruction).length : 0) +
+    (requiredKeys.has('text') ? safeText(out.text).length : 0) +
+    (requiredKeys.has('history') ? _ainSafeJsonLen(out.history) : 0)
+
+  let used = reqChars +
+    safeText(out.constraints).length +
+    safeText(out.progress).length +
+    safeText(out.bible).length +
+    safeText(out.prev).length +
+    _ainRagChars(out.rag) +
+    _ainSafeJsonLen(out.choice)
+
+  if (used <= eff) return { input: out, usage: _ainCtxBuildUsage(cfg, inp0, out) }
+
+  // 先裁剪：rag -> prev -> bible -> progress -> constraints（最后才动 constraints）
+  function trimTextByStrategy(text, maxLen, strategy) {
+    const s = safeText(text)
+    const lim = Math.max(0, maxLen | 0)
+    if (!lim) return ''
+    if (s.length <= lim) return s
+    if (strategy === 'tail') return sliceTail(s, lim)
+    return sliceHeadTail(s, lim, 0.6)
+  }
+
+  function applyTrim(key, newVal) {
+    const before = key === 'rag' ? _ainRagChars(out.rag) : safeText(out[key]).length
+    out[key] = newVal
+    const after = key === 'rag' ? _ainRagChars(out.rag) : safeText(out[key]).length
+    used -= Math.max(0, before - after)
+  }
+
+  // rag：允许直接清空
+  if (used > eff && out.rag) {
+    const keep = Math.max(0, _ainRagChars(out.rag) - (used - eff))
+    applyTrim('rag', _ainRagPruneToChars(out.rag, keep))
+  }
+  // prev
+  if (used > eff && out.prev) {
+    const keep = Math.max(0, safeText(out.prev).length - (used - eff))
+    applyTrim('prev', trimTextByStrategy(out.prev, keep, 'tail'))
+  }
+  // bible
+  if (used > eff && out.bible) {
+    const keep = Math.max(0, safeText(out.bible).length - (used - eff))
+    applyTrim('bible', trimTextByStrategy(out.bible, keep, 'headTail'))
+  }
+  // progress
+  if (used > eff && out.progress) {
+    const keep = Math.max(0, safeText(out.progress).length - (used - eff))
+    applyTrim('progress', trimTextByStrategy(out.progress, keep, 'tail'))
+  }
+  // constraints：最后才动（你说它不大，通常不会走到这一步）
+  if (used > eff && out.constraints) {
+    const keep = Math.max(0, safeText(out.constraints).length - (used - eff))
+    applyTrim('constraints', trimTextByStrategy(out.constraints, keep, 'headTail'))
+  }
+
+  // 如果 required 本身就超窗：只能把其它全裁到空，尽量保住 required
+  if (used > eff) {
+    if (!requiredKeys.has('constraints')) out.constraints = ''
+    if (!requiredKeys.has('progress')) out.progress = ''
+    if (!requiredKeys.has('bible')) out.bible = ''
+    if (!requiredKeys.has('prev')) out.prev = ''
+    if (!requiredKeys.has('rag')) out.rag = null
+  }
+
+  return { input: out, usage: _ainCtxBuildUsage(cfg, inp0, out) }
+}
+
+function _ainCtxRenderUsageInto(container, usage) {
+  const host = container && typeof container === 'object' ? container : null
+  if (!host || !host.appendChild) return
+  host.innerHTML = ''
+  const u = usage && typeof usage === 'object' ? usage : null
+  if (!u) {
+    const em = document.createElement('div')
+    em.className = 'ain-muted'
+    em.textContent = t('暂无统计。', 'No stats yet.')
+    host.appendChild(em)
+    return
+  }
+
+  const head = document.createElement('div')
+  head.className = 'ain-muted'
+  const ov = (u.overflow | 0) || 0
+  head.textContent = ov > 0
+    ? (t('上下文可能超窗：已超出 ', 'Context may overflow: +') + String(ov) + t(' 字符（已自动裁剪低优先级片段）', ' chars (auto-trimmed low-priority segments)'))
+    : (t('上下文占用：', 'Context usage: ') + String((u.totalUsed | 0) || 0) + '/' + String((u.effective | 0) || 0) + t(' 字符（有效预算）', ' chars (effective)'))
+  host.appendChild(head)
+
+  const wrap = document.createElement('div')
+  wrap.className = 'ain-table-wrap'
+  wrap.style.marginTop = '8px'
+  host.appendChild(wrap)
+
+  const table = document.createElement('table')
+  table.className = 'ain-table'
+  wrap.appendChild(table)
+
+  table.innerHTML = `
+    <thead>
+      <tr>
+        <th>${t('段', 'Segment')}</th>
+        <th class="num mono">${t('原始', 'Raw')}</th>
+        <th class="num mono">${t('使用', 'Used')}</th>
+        <th class="num mono">${t('裁剪', 'Trim')}</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  `
+  const tbody = table.querySelector('tbody')
+  const segs = Array.isArray(u.segments) ? u.segments : []
+  const show = ['instruction', 'text', 'history', 'constraints', 'progress', 'bible', 'prev', 'rag', 'choice']
+  const byKey = new Map(segs.map((s) => [s.k, s]))
+  for (let i = 0; i < show.length; i++) {
+    const k = show[i]
+    const s = byKey.get(k) || { label: k, raw: 0, used: 0, trimmed: 0 }
+    const tr = document.createElement('tr')
+    const td0 = document.createElement('td')
+    td0.textContent = safeText(s.label || k)
+    const td1 = document.createElement('td')
+    td1.className = 'num mono'
+    td1.textContent = String((s.raw | 0) || 0)
+    const td2 = document.createElement('td')
+    td2.className = 'num mono'
+    td2.textContent = String((s.used | 0) || 0)
+    const td3 = document.createElement('td')
+    td3.className = 'num mono'
+    td3.textContent = String((s.trimmed | 0) || 0)
+    tr.appendChild(td0)
+    tr.appendChild(td1)
+    tr.appendChild(td2)
+    tr.appendChild(td3)
+    if ((s.trimmed | 0) > 0) td0.style.color = '#fbbf24'
+    tbody.appendChild(tr)
   }
 }
 
@@ -8468,6 +9422,8 @@ async function openAuditDialog(ctx) {
     try {
       rag = await rag_get_hits(ctx, cfg, inputText + '\n\n' + sliceTail(prev, 2000))
     } catch {}
+    const input0 = { text: inputText, progress, bible, prev, constraints: constraints || undefined, rag: rag || undefined }
+    const b = _ainCtxApplyBudget(cfg, input0, { mode: 'audit' })
     const json = await apiFetchChatWithJob(ctx, cfg, {
       mode: 'novel',
       action: 'audit',
@@ -8476,7 +9432,7 @@ async function openAuditDialog(ctx) {
         apiKey: cfg.upstream.apiKey,
         model: cfg.upstream.model
       },
-      input: { text: inputText, progress, bible, prev, constraints: constraints || undefined, rag: rag || undefined }
+      input: b && b.input ? b.input : input0
     }, {
       timeoutMs: AUDIT_TIMEOUT_MS,
     })
@@ -10059,6 +11015,18 @@ async function callNovelRevise(ctx, cfg, baseText, instruction, localConstraints
     rag = await rag_get_hits(ctx, cfg, q)
   } catch {}
 
+  const input0 = {
+    instruction: inst,
+    text,
+    history: Array.isArray(history) ? history.slice(-10) : undefined,
+    progress,
+    bible,
+    prev,
+    constraints: constraints || undefined,
+    rag: rag || undefined
+  }
+  const b = _ainCtxApplyBudget(cfg, input0, { mode: 'revise' })
+
   // 修订草稿可能比写作更慢：强制走 job 模式，避免桌面端长连接被 180s 掐断导致“后端完成但前端无返回”
   const json = await apiFetchChatWithJob(ctx, cfg, {
     mode: 'novel',
@@ -10068,16 +11036,7 @@ async function callNovelRevise(ctx, cfg, baseText, instruction, localConstraints
       apiKey: cfg.upstream.apiKey,
       model: cfg.upstream.model
     },
-    input: {
-      instruction: inst,
-      text,
-      history: Array.isArray(history) ? history.slice(-10) : undefined,
-      progress,
-      bible,
-      prev,
-      constraints: constraints || undefined,
-      rag: rag || undefined
-    }
+    input: (b && b.input) ? b.input : input0
   }, {
     timeoutMs: (opt && typeof opt === 'object' && opt.timeoutMs) ? Number(opt.timeoutMs) : 240000,
     onTick: (opt && typeof opt === 'object' && typeof opt.onTick === 'function') ? opt.onTick : undefined,
@@ -10096,7 +11055,8 @@ async function callNovelRevise(ctx, cfg, baseText, instruction, localConstraints
         prevChars: safeText(prev).length,
         constraintsChars: safeText(constraints).length,
         ragHits,
-        ragChars
+        ragChars,
+        ctxUsage: b && b.usage ? b.usage : null
       }
     } catch {
       return null
@@ -10256,6 +11216,10 @@ async function openDraftReviewDialog(ctx, opts) {
       const ctxm = lastDiff.ctxMeta || null
       let ctxText = ''
       if (ctxm && typeof ctxm === 'object') {
+        const u = (ctxm.ctxUsage && typeof ctxm.ctxUsage === 'object') ? ctxm.ctxUsage : null
+        const budgetText = u
+          ? ('；' + t('占用 ', 'usage ') + String((u.totalUsed | 0) || 0) + '/' + String((u.effective | 0) || 0) + t(' 字符', ' chars'))
+          : ''
         ctxText =
           t('上下文：进度 ', 'Context: progress ') +
           String(ctxm.progressChars | 0) +
@@ -10263,7 +11227,8 @@ async function openDraftReviewDialog(ctx, opts) {
           String(ctxm.bibleChars | 0) +
           t(' 字，检索 ', ' chars, rag ') +
           String(ctxm.ragHits | 0) +
-          t(' 条', ' hits')
+          t(' 条', ' hits') +
+          budgetText
       }
 
       const metaText = chg <= 0
