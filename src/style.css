@@ -1346,6 +1346,17 @@ body.focus-mode .lib-float-toggle.show { display: flex; }
 .library .lib-action-btn { -webkit-app-region: no-drag; cursor: pointer; border: none; background: transparent; color: var(--muted); padding: 4px 8px; font-size: 12px; flex: 1; text-align: center; white-space: nowrap; font-family: inherit; }
 .library .lib-action-btn:hover { color: var(--fg); }
 .library .lib-action-btn.active { color: var(--fg); font-weight: 500; }
+.library .lib-search { display: flex; align-items: center; gap: 8px; padding: 0 12px 10px 12px; }
+.library .lib-search-input { flex: 1; border: 1px solid var(--border); border-radius: 10px; padding: 7px 10px; font-size: 13px; background: var(--bg); color: var(--fg); outline: none; }
+.library .lib-search-input:focus { border-color: rgba(37,99,235,0.7); box-shadow: 0 0 0 3px rgba(37,99,235,0.15); }
+.library .lib-search-clear { border: 1px solid var(--border); border-radius: 10px; background: rgba(127,127,127,0.06); color: var(--muted); padding: 6px 10px; cursor: pointer; font-size: 14px; line-height: 1; }
+.library .lib-search-clear:hover { color: var(--fg); background: rgba(127,127,127,0.10); }
+.library .lib-search-results { padding: 6px 6px 10px 6px; -webkit-app-region: no-drag; }
+.library .lib-search-item { padding: 8px 10px; border-radius: 8px; cursor: pointer; display: flex; flex-direction: column; gap: 2px; }
+.library .lib-search-item:hover { background: rgba(127, 127, 127, 0.08); }
+.library .lib-search-item .name { font-size: 13px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.library .lib-search-item .rel { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.library .lib-search-empty { padding: 10px 10px; color: var(--muted); font-size: 12px; }
 .library .hidden { display: none !important; }
 .library { -webkit-app-region: no-drag; }
 .library .lib-tree { padding: 8px 6px 14px 6px; font-size: 13px; -webkit-app-region: no-drag; }

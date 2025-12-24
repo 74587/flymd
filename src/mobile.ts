@@ -1,11 +1,13 @@
 /*
   移动端 UI 交互逻辑
   - FAB（浮动操作按钮）
-  - 抽屉式文件库
+  - 抽屉式文件库（复用 #library 侧栏）
   - 虚拟键盘适配
 */
 
 import { isMobile } from './platform'
+
+let _autoCloseBindTries = 0
 
 // 初始化移动端 UI
 export function initMobileUI(): void {
@@ -22,6 +24,9 @@ export function initMobileUI(): void {
 
   // 禁用桌面端拖拽打开文件
   disableDragDrop()
+
+  // 点击文件后自动关闭抽屉（仅文件，不关闭目录）
+  bindAutoCloseDrawerOnFileClick()
 }
 
 // 创建浮动操作按钮
@@ -112,9 +117,10 @@ function createDrawerOverlay(): void {
 
 // 打开抽屉（文件库）
 export function openDrawer(): void {
-  const panel = document.getElementById('fileTreePanel')
+  const panel = document.getElementById('library')
   const overlay = document.getElementById('drawerOverlay')
   if (panel && overlay) {
+    panel.classList.remove('hidden')
     panel.classList.add('mobile-open')
     overlay.classList.add('show')
     document.body.style.overflow = 'hidden' // 防止背景滚动
@@ -123,9 +129,10 @@ export function openDrawer(): void {
 
 // 关闭抽屉
 export function closeDrawer(): void {
-  const panel = document.getElementById('fileTreePanel')
+  const panel = document.getElementById('library')
   const overlay = document.getElementById('drawerOverlay')
   if (panel && overlay) {
+    panel.classList.add('hidden')
     panel.classList.remove('mobile-open')
     overlay.classList.remove('show')
     document.body.style.overflow = ''
@@ -160,6 +167,39 @@ function adaptVirtualKeyboard(): void {
 function disableDragDrop(): void {
   document.addEventListener('dragover', (e) => e.preventDefault(), true)
   document.addEventListener('drop', (e) => e.preventDefault(), true)
+}
+
+function bindAutoCloseDrawerOnFileClick(): void {
+  try {
+    const lib = document.getElementById('library')
+    if (!lib) {
+      // main.ts 会在模块加载后续步骤里创建 #library，这里做一个温和的重试即可
+      if (_autoCloseBindTries++ < 20) {
+        window.setTimeout(() => {
+          try { bindAutoCloseDrawerOnFileClick() } catch {}
+        }, 80)
+      }
+      return
+    }
+    if ((lib as any)._mobileAutoCloseBound) return
+    ;(lib as any)._mobileAutoCloseBound = true
+
+    lib.addEventListener(
+      'click',
+      (ev) => {
+        try {
+          const target = ev.target as HTMLElement | null
+          const fileNode = target?.closest?.('.lib-node.lib-file') as HTMLElement | null
+          if (!fileNode) return
+          // 给 openFile2 / 渲染留一点时间，避免偶发“点击无效”的错觉
+          window.setTimeout(() => {
+            try { closeDrawer() } catch {}
+          }, 60)
+        } catch {}
+      },
+      { capture: true },
+    )
+  } catch {}
 }
 
 // 监听屏幕旋转

@@ -3,19 +3,20 @@
 /* ========== 响应式布局 ========== */
 @media (max-width: 768px) {
   /* 隐藏桌面端文件库侧边栏，改为抽屉式 */
-  #fileTreePanel {
+  #library {
     position: fixed !important;
-    left: -85vw;
+    left: 0;
     top: 0;
     width: 85vw;
     height: 100vh;
     z-index: 9999;
-    transition: left 0.3s ease;
+    transition: transform 0.3s ease;
     box-shadow: 2px 0 8px rgba(0, 0, 0, 0.3);
   }
 
-  #fileTreePanel.mobile-open {
-    left: 0;
+  /* flymd 原有的隐藏逻辑使用 transform；移动端在此基础上增加 mobile-open 语义 */
+  #library.mobile-open {
+    transform: translateX(0) !important;
   }
 
   /* 编辑器全屏 */
@@ -45,9 +46,7 @@
   }
 
   /* 文件库按钮（触发抽屉） */
-  #toggleFileTree {
-    display: block !important;
-  }
+  /* 旧版本按钮 id 已废弃：移动端通过 FAB / 标题栏“库”按钮打开 */
 }
 
 /* ========== 浮动操作按钮 (FAB) ========== */
@@ -207,7 +206,13 @@
 
 /* ========== 移动端顶部工具栏精简 ========== */
 @media (max-width: 768px) {
-  .toolbar {
+  /* flymd 顶栏：允许横向滚动，避免菜单被挤没 */
+  .titlebar {
+    height: 48px !important;
+    min-height: 48px !important;
+  }
+
+  .menubar {
     height: 48px !important;
     padding: 4px 8px !important;
     overflow-x: auto;
@@ -215,14 +220,22 @@
     white-space: nowrap;
   }
 
-  /* 工具栏按钮图标模式（隐藏文字） */
-  .toolbar button span.text {
-    display: none;
+  .menu-item {
+    min-width: 44px !important;
+    min-height: 44px !important;
+    padding: 0 10px !important;
   }
 
-  /* 溢出菜单（三点） */
-  .toolbar-overflow {
-    display: inline-block !important;
+  /* Android 不需要窗口控制按钮 */
+  body.platform-android .window-controls {
+    display: none !important;
+  }
+
+  /* Android MVP：库目录固定为应用私有目录，隐藏“选库/固定/左右切换”这些桌面概念 */
+  body.platform-android #lib-choose,
+  body.platform-android #lib-pin,
+  body.platform-android #lib-side {
+    display: none !important;
   }
 }
 
@@ -230,7 +243,7 @@
 @media (max-width: 768px) {
   #editor,
   #preview,
-  #fileTreePanel {
+  #library {
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
   }

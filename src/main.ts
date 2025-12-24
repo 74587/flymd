@@ -45,13 +45,15 @@ import type { UpdateAssetInfo, CheckUpdateResp, UpdateExtra } from './core/updat
 // htmlToMarkdown 改为按需动态导入（仅在粘贴 HTML 时使用）
 import { initWebdavSync, openWebdavSyncDialog, getWebdavSyncConfig, isWebdavConfiguredForActiveLibrary, syncNow as webdavSyncNow, setOnSyncComplete, openSyncLog as webdavOpenSyncLog } from './extensions/webdavSync'
 // 平台适配层（Android 支持）
-import { initPlatformIntegration, mobileSaveFile, isMobilePlatform } from './platform-integration'
+import { initPlatformIntegration } from './platform-integration'
+import { ensureAndroidDefaultLibraryRoot } from './platform/androidLibrary'
 import { createImageUploader } from './core/imageUpload'
 import { createPluginMarket, compareInstallableItems, FALLBACK_INSTALLABLES } from './extensions/market'
 import type { InstallableItem } from './extensions/market'
 import { listDirOnce, type LibEntry } from './core/libraryFs'
 import { normSep, isInside, ensureDir, moveFileSafe, renameFileSafe, normalizePath, readTextFileAnySafe, writeTextFileAnySafe } from './core/fsSafe'
 import { getLibrarySort, setLibrarySort, type LibSortMode } from './core/librarySort'
+import { searchLibraryFilesByName, type LibrarySearchResult } from './core/librarySearch'
 import { createCustomTitleBar, removeCustomTitleBar, applyWindowDecorationsCore } from './modes/focusMode'
 import {
   toggleFocusMode,
@@ -2317,15 +2319,20 @@ wysiwygCaretEl.id = 'wysiwyg-caret'
         <div class="lib-name" id="lib-path"></div>
         <button class="lib-toggle-btn" id="lib-toggle">&lt;</button>
       </div>
-        <div class="lib-actions">
-          <button class="lib-action-btn active" id="lib-tab-files">${t('tab.files')}</button>
-          <button class="lib-action-btn" id="lib-tab-outline">${t('tab.outline')}</button>
-          <button class="lib-action-btn" id="lib-refresh">${t('lib.refresh')}</button>
-          <button class="lib-action-btn" id="lib-side">${t('lib.side.left')}</button>
-          <button class="lib-action-btn" id="lib-pin">${t('lib.pin.auto')}</button>
-        </div>
+      <div class="lib-actions">
+        <button class="lib-action-btn active" id="lib-tab-files">${t('tab.files')}</button>
+        <button class="lib-action-btn" id="lib-tab-outline">${t('tab.outline')}</button>
+        <button class="lib-action-btn" id="lib-refresh">${t('lib.refresh')}</button>
+        <button class="lib-action-btn" id="lib-side">${t('lib.side.left')}</button>
+        <button class="lib-action-btn" id="lib-pin">${t('lib.pin.auto')}</button>
       </div>
-      <div class="lib-tree" id="lib-tree"></div>
+      <div class="lib-search">
+        <input class="lib-search-input" id="lib-search" type="text" placeholder="搜索文件…" />
+        <button class="lib-search-clear" id="lib-search-clear" title="清空">×</button>
+      </div>
+    </div>
+    <div class="lib-search-results hidden" id="lib-search-results"></div>
+    <div class="lib-tree" id="lib-tree"></div>
     <div class="lib-outline hidden" id="lib-outline"></div>
   `
   containerEl.appendChild(library)
@@ -2356,12 +2363,127 @@ wysiwygCaretEl.id = 'wysiwyg-caret'
       const tabOutline = library.querySelector('#lib-tab-outline') as HTMLButtonElement | null
       const treeEl = library.querySelector('#lib-tree') as HTMLDivElement | null
       const outlineEl = document.getElementById('lib-outline') as HTMLDivElement | null
+      const searchRowEl = library.querySelector('.lib-search') as HTMLDivElement | null
+      const searchInput = library.querySelector('#lib-search') as HTMLInputElement | null
+      const searchClear = library.querySelector('#lib-search-clear') as HTMLButtonElement | null
+      const searchResultsEl = library.querySelector('#lib-search-results') as HTMLDivElement | null
+      let _libSearchTimer: number | null = null
+      let _libSearchToken = 0
+
+      const clearLibSearchView = () => {
+        try {
+          if (searchResultsEl) searchResultsEl.classList.add('hidden')
+          if (treeEl) treeEl.classList.remove('hidden')
+        } catch {}
+      }
+
+      const renderLibSearchResults = (items: LibrarySearchResult[]) => {
+        if (!searchResultsEl) return
+        try {
+          searchResultsEl.innerHTML = ''
+          if (!items || items.length === 0) {
+            const empty = document.createElement('div')
+            empty.className = 'lib-search-empty'
+            empty.textContent = '未找到匹配文件'
+            searchResultsEl.appendChild(empty)
+            return
+          }
+          for (const it of items) {
+            const row = document.createElement('div')
+            row.className = 'lib-search-item'
+            row.dataset.path = it.path
+
+            const nameEl = document.createElement('div')
+            nameEl.className = 'name'
+            nameEl.textContent = it.name
+
+            const relEl = document.createElement('div')
+            relEl.className = 'rel'
+            relEl.textContent = it.relative
+
+            row.appendChild(nameEl)
+            row.appendChild(relEl)
+            row.addEventListener('click', () => {
+              try { void openFile2(it.path) } catch {}
+            })
+            searchResultsEl.appendChild(row)
+          }
+        } catch {}
+      }
+
+      const scheduleLibSearch = (termRaw: string) => {
+        const term = String(termRaw || '').trim()
+        if (!term) {
+          clearLibSearchView()
+          return
+        }
+        if (!searchResultsEl || !treeEl) return
+
+        // 进入搜索视图
+        try {
+          treeEl.classList.add('hidden')
+          searchResultsEl.classList.remove('hidden')
+          searchResultsEl.textContent = '搜索中…'
+        } catch {}
+
+        if (_libSearchTimer != null) {
+          try { clearTimeout(_libSearchTimer) } catch {}
+          _libSearchTimer = null
+        }
+        const token = ++_libSearchToken
+        _libSearchTimer = window.setTimeout(async () => {
+          _libSearchTimer = null
+          try {
+            const root = await getLibraryRoot()
+            if (!root) {
+              if (searchResultsEl) searchResultsEl.textContent = '当前未打开任何库'
+              return
+            }
+            const list = await searchLibraryFilesByName(root, term, { maxResults: 200 })
+            if (token !== _libSearchToken) return
+            renderLibSearchResults(list)
+          } catch {
+            try { if (searchResultsEl) searchResultsEl.textContent = '搜索失败' } catch {}
+          }
+        }, 200)
+      }
+
+      // 搜索输入绑定
+      searchInput?.addEventListener('input', () => {
+        try { scheduleLibSearch(searchInput.value) } catch {}
+      })
+      searchInput?.addEventListener('keydown', (ev) => {
+        try {
+          if (ev.key !== 'Escape') return
+          ev.preventDefault()
+          if (searchInput) searchInput.value = ''
+          clearLibSearchView()
+          try { searchInput.blur() } catch {}
+        } catch {}
+      })
+      searchClear?.addEventListener('click', () => {
+        try {
+          if (searchInput) searchInput.value = ''
+          clearLibSearchView()
+          try { searchInput?.focus() } catch {}
+        } catch {}
+      })
       function activateLibTab(kind: 'files' | 'outline') {
         try {
           tabFiles?.classList.toggle('active', kind === 'files')
           tabOutline?.classList.toggle('active', kind === 'outline')
+          // 搜索只在“目录”页可用
+          if (searchRowEl) searchRowEl.classList.toggle('hidden', kind !== 'files')
+          if (kind !== 'files') {
+            // 切到大纲：隐藏搜索结果，避免覆盖大纲面板
+            try { if (searchResultsEl) searchResultsEl.classList.add('hidden') } catch {}
+          } else {
+            // 切回目录：若有搜索词则恢复搜索视图
+            try { scheduleLibSearch(String(searchInput?.value || '')) } catch {}
+          }
           if (treeEl) {
-            const hideTree = (outlineLayout === 'embedded') && (kind !== 'files')
+            const hasSearch = kind === 'files' && !!String(searchInput?.value || '').trim()
+            const hideTree = ((outlineLayout === 'embedded') && (kind !== 'files')) || hasSearch
             treeEl.classList.toggle('hidden', hideTree)
           }
           if (outlineEl) {
@@ -8500,6 +8622,17 @@ function bindEvents() {
 
     // 尝试初始化存储（确保完成后再加载扩展，避免读取不到已安装列表）
     await initStore()
+    // Android：默认初始化一个“应用私有目录”的本地库，先把基础能力跑通（浏览/搜索/编辑/WebDAV/插件）
+    try { await ensureAndroidDefaultLibraryRoot() } catch (e) { console.warn('[Android] 初始化默认库失败:', e) }
+    // Android：库侧栏不固定（固定会挤压编辑区，这在手机上就是垃圾体验）
+    try {
+      const p = await invoke<string>('get_platform')
+      if (p === 'android' && store) {
+        libraryDocked = false
+        await store.set('libraryDocked', false)
+        await store.save()
+      }
+    } catch {}
     try { await getAutoSave().loadFromStore() } catch {}
     // 初始化扩展管理面板宿主（依赖 store 等全局状态）
     try {
