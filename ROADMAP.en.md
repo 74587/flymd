@@ -2,6 +2,11 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v0.8.6 - v0.8.9
+- Improved: Plugin text-edit APIs now integrate with the browser undo stack, so AI-generated inserts can be undone (Ctrl+Z)
+- Fixed: WYSIWYG scroll container and code-block copy overlay positioning/refresh issues (buttons could be missing until the first edit)
+- Improved: WYSIWYG code-block copy button now copies plain code only (no ``` fences or language markers)
+
 ## Update v0.8.5
 - New: Drag a tab out of the window to open it in a new instance (only for saved tabs with no unsaved changes)
 - Improved: Wider edge trigger area to re-open the library sidebar after it’s hidden
