@@ -6,6 +6,7 @@ import { readFile } from '@tauri-apps/plugin-fs'
 import type { Store } from '@tauri-apps/plugin-store'
 import { addToPluginsMenu } from './pluginMenu'
 import { getHttpClient } from './runtime'
+import { acquireMic, type MicLease, getActiveMicOwner } from './micManager'
 
 const FEATURE_ID = 'speech-transcribe'
 
@@ -41,7 +42,7 @@ export type SpeechTranscribeDeps = {
 
 type ActiveSpeechRecorder = {
   recorder: MediaRecorder
-  stream: MediaStream
+  lease: MicLease
   chunks: BlobPart[]
   mimeType: string
   startedAt: number
@@ -539,17 +540,32 @@ async function toggleRecordAndTranscribeMenu(): Promise<void> {
 
     const cfg = await manualTranscribeStoreGet()
     deps.pluginNotice('请求麦克风权限…', 'ok', 1400)
-    const stream = await (navigator as any).mediaDevices.getUserMedia({ audio: true })
+
+    let lease: MicLease
+    try {
+      lease = await acquireMic('speech-transcribe')
+    } catch (e) {
+      const msg = String((e as any)?.message || e || '')
+      const owner = getActiveMicOwner()
+      if (owner === 'asr-note') {
+        deps.pluginNotice('麦克风正在被“自动语音笔记”占用：请先暂停或停止后再录音', 'err', 3600)
+      } else if (msg) {
+        deps.pluginNotice('获取麦克风失败：' + msg, 'err', 3200)
+      } else {
+        deps.pluginNotice('获取麦克风失败', 'err', 3200)
+      }
+      return
+    }
 
     const mimeType = pickRecorderMimeType()
     const chunks: BlobPart[] = []
-    const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
+    const recorder = new MediaRecorder(lease.stream, mimeType ? { mimeType } : undefined)
     recorder.addEventListener('dataavailable', (ev: any) => {
       try { if (ev?.data) chunks.push(ev.data) } catch {}
     })
 
     const startedAt = Date.now()
-    _active = { recorder, stream, chunks, mimeType: mimeType || recorder.mimeType || 'audio/webm', startedAt }
+    _active = { recorder, lease, chunks, mimeType: mimeType || recorder.mimeType || 'audio/webm', startedAt }
     updateMenu()
 
     recorder.addEventListener('stop', () => {
@@ -577,7 +593,7 @@ async function toggleRecordAndTranscribeMenu(): Promise<void> {
         } finally {
           _busy = false
           updateMenu()
-          try { local?.stream?.getTracks?.().forEach((t: any) => { try { t.stop() } catch {} }) } catch {}
+          try { local?.lease?.release?.() } catch {}
         }
       })()
     })
@@ -587,7 +603,7 @@ async function toggleRecordAndTranscribeMenu(): Promise<void> {
         const msg = String((ev as any)?.error?.message || (ev as any)?.message || '')
         deps.pluginNotice('录音异常中断' + (msg ? `：${msg}` : ''), 'err', 3200)
       } catch {}
-      try { stream.getTracks().forEach((t) => { try { t.stop() } catch {} }) } catch {}
+      try { lease.release() } catch {}
       _active = null
       updateMenu()
     })
@@ -599,7 +615,7 @@ async function toggleRecordAndTranscribeMenu(): Promise<void> {
       const r = _active
       _active = null
       updateMenu()
-      try { r?.stream?.getTracks?.().forEach((t: any) => { try { t.stop() } catch {} }) } catch {}
+      try { r?.lease?.release?.() } catch {}
     } catch {}
     deps.pluginNotice('录音失败：' + String((e as any)?.message || e || ''), 'err', 3200)
   }

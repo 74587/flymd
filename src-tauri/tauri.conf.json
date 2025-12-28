@@ -226,6 +226,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "macOS": {
+      "infoPlist": "Info.plist"
+    },
     "fileAssociations": [
       {
         "ext": [

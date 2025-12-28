@@ -45,6 +45,7 @@ import type { UpdateAssetInfo, CheckUpdateResp, UpdateExtra } from './core/updat
 // htmlToMarkdown 改为按需动态导入（仅在粘贴 HTML 时使用）
 import { initWebdavSync, openWebdavSyncDialog, getWebdavSyncConfig, isWebdavConfiguredForActiveLibrary, syncNow as webdavSyncNow, setOnSyncComplete, openSyncLog as webdavOpenSyncLog } from './extensions/webdavSync'
 import { initSpeechTranscribeFeature } from './extensions/speechTranscribe'
+import { initAsrNoteFeature } from './extensions/asrNote'
 // 平台适配层（Android 支持）
 import { initPlatformIntegration, mobileSaveFile, isMobilePlatform } from './platform-integration'
 import { createImageUploader } from './core/imageUpload'
@@ -8576,6 +8577,21 @@ function bindEvents() {
               insertAtCursor: (text: string) => { try { insertAtCursor(text) } catch {} },
               pluginNotice: (msg: string, level?: 'ok' | 'err', ms?: number) => { try { pluginNotice(msg, level, ms) } catch {} },
               confirmNative: (message: string, title?: string) => confirmNative(message, title || '确认'),
+            })
+          } catch {}
+          // 桌面端：自动语音笔记（流式 ASR：登录/余额/充值/实时听写）
+          try {
+            initAsrNoteFeature({
+              appVersion: APP_VERSION,
+              getStore: () => store,
+              getEditor: () => editor,
+              isPreviewMode: () => mode === 'preview',
+              isWysiwyg: () => !!wysiwyg || !!wysiwygV2Active,
+              renderPreview: () => { void renderPreview() },
+              scheduleWysiwygRender: () => { try { scheduleWysiwygRender() } catch {} },
+              markDirtyAndRefresh: () => { try { dirty = true; refreshTitle(); refreshStatus() } catch {} },
+              pluginNotice: (msg: string, level?: 'ok' | 'err', ms?: number) => { try { pluginNotice(msg, level, ms) } catch {} },
+              openInBrowser: (url: string) => { try { void openInBrowser(url) } catch {} },
             })
           } catch {}
           await loadAndActivateEnabledPlugins()
