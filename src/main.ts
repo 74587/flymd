@@ -44,6 +44,7 @@ import { APP_VERSION } from './core/appInfo'
 import type { UpdateAssetInfo, CheckUpdateResp, UpdateExtra } from './core/updateTypes'
 // htmlToMarkdown 改为按需动态导入（仅在粘贴 HTML 时使用）
 import { initWebdavSync, openWebdavSyncDialog, getWebdavSyncConfig, isWebdavConfiguredForActiveLibrary, syncNow as webdavSyncNow, setOnSyncComplete, openSyncLog as webdavOpenSyncLog } from './extensions/webdavSync'
+import { initSpeechTranscribeFeature } from './extensions/speechTranscribe'
 // 平台适配层（Android 支持）
 import { initPlatformIntegration, mobileSaveFile, isMobilePlatform } from './platform-integration'
 import { createImageUploader } from './core/imageUpload'
@@ -8568,6 +8569,15 @@ function bindEvents() {
           await ensurePluginsDir()
           // 初始化统一的"插件"菜单按钮
           initPluginsMenu()
+          // 桌面端：语音转写（内置模块，入口收纳到“插件”菜单）
+          try {
+            initSpeechTranscribeFeature({
+              getStore: () => store,
+              insertAtCursor: (text: string) => { try { insertAtCursor(text) } catch {} },
+              pluginNotice: (msg: string, level?: 'ok' | 'err', ms?: number) => { try { pluginNotice(msg, level, ms) } catch {} },
+              confirmNative: (message: string, title?: string) => confirmNative(message, title || '确认'),
+            })
+          } catch {}
           await loadAndActivateEnabledPlugins()
           await ensureCoreExtensionsAfterStartup(store, APP_VERSION, activatePlugin)
           // 启动后后台检查一次扩展更新（仅提示，不自动更新）
