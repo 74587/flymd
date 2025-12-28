@@ -352,7 +352,7 @@
     {
       "homepage": "https://github.com/flyhunterl/flymd",
       "name": "AI 小说引擎",
-      "description": "beta测试中",
+      "description": "AI小说生成工具",
       "author": "flyMD",
       "id": "ai-novel",
       "featured": true,
