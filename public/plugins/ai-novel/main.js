@@ -7554,7 +7554,7 @@ async function agentRunPlan(ctx, cfg, base, ui) {
           const kind = (it.rag_kind === 'style' || it.rag_kind === 'facts') ? it.rag_kind : 'facts'
           const budget = kind === 'style' ? ragBudgetStyle : ragBudgetFacts
           const topK0 = Math.max(1, (ragCfg.topK | 0) || 6)
-          const hits = await rag_get_hits(ctx, cfg, q + '\n\n' + sliceTail(curPrev(), 1800), {
+          const hits = await rag_get_hits(ctx, cfg, q + '\n\n' + sliceTail(curPrev(), 3000), {
             // 风格片段更短更碎；事实片段允许更长
             topK: topK0,
             maxChars: budget,
