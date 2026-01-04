@@ -3609,7 +3609,7 @@ async function openSettingsDialog(ctx) {
     const ts = json && json.ts ? String(json.ts) : ''
     const when = ts ? `  ·  ${t('时间', 'Time')}: ${ts}` : ''
     const explain = t(
-      '计费范围：计费字符=输入+输出。输入包含：指令/硬约束/进度脉络/资料(圣经)/前文尾部/RAG命中/走向/待审计或待修订文本；输出包含：候选/正文/审计/摘要/修订结果。咨询与 embedding 不计费（仅记录日志）。',
+      '计费范围：计费字符=输入+输出。输入包含：指令/硬约束/进度脉络/资料(圣经)/前文尾部/RAG命中/走向/待审计或待修订文本；输出包含：候选/正文/审计/摘要/修订结果。咨询与 embedding 不计费（仅记录日志）。QQ群：343638913',
       'Billing: billed chars = input + output. Input may include instruction/constraints/progress/meta/prev/RAG hits/choice/text-to-audit-or-revise; output includes options/story/audit/summary/revision. Consult & embeddings are not billed (logs only).'
     )
     // 不用 innerHTML：后端字段一旦异常/被污染就会形成 XSS 面
