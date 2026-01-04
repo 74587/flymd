@@ -17,6 +17,8 @@ export type FileTreeOptions = {
 export type FileTreeAPI = {
   init: (container: HTMLElement, opts: FileTreeOptions) => Promise<void>
   refresh: () => Promise<void>
+  // 外部同步：展开并选中指定路径（用于多标签切换时同步侧栏高亮）
+  revealAndSelect: (path: string | null) => Promise<void>
   getSelectedDir: () => string | null
   newFileInSelected: () => Promise<void>
   newFolderInSelected: () => Promise<void>
@@ -242,6 +244,113 @@ function saveSelection(path: string, isDir: boolean, row: HTMLElement) {
   } catch {}
   row.classList.add('selected')
   state.opts?.onStateChange?.()
+}
+
+function clearDomSelection() {
+  try {
+    state.container?.querySelectorAll('.lib-node.selected').forEach(el => el.classList.remove('selected'))
+  } catch {}
+}
+
+function findNodeByPath(path: string): HTMLElement | null {
+  try {
+    const root = state.container
+    if (!root) return null
+    const nodes = Array.from(root.querySelectorAll('.lib-node')) as HTMLElement[]
+    for (const el of nodes) {
+      if ((el as any)?.dataset?.path === path) return el
+    }
+  } catch {}
+  return null
+}
+
+async function ensureDirExpanded(root: string, dirPath: string): Promise<void> {
+  const row = findNodeByPath(dirPath)
+  if (!row) return
+  const kids = row.nextElementSibling as HTMLElement | null
+  if (!kids || !kids.classList.contains('lib-children')) return
+
+  // 展开目录：与点击行为一致（写入 expanded 状态 + 构建子节点）
+  const alreadyExpanded = state.expanded.has(dirPath)
+  if (!alreadyExpanded) setExpandedState(dirPath, true)
+  try { row.classList.add('expanded') } catch {}
+  try { kids.style.display = '' } catch {}
+  if (kids.childElementCount === 0) {
+    await buildDir(root, dirPath, kids)
+  }
+}
+
+function normToSep(p: string, s: string): string {
+  return String(p || '').replace(/[\\/]+/g, s)
+}
+
+function buildDirChain(root: string, targetDir: string): string[] {
+  const s = sep(root)
+  const r = normToSep(root, s)
+  const t = normToSep(targetDir, s)
+  const baseRoot = r.endsWith(s) ? r : r + s
+  if (!t.toLowerCase().startsWith(baseRoot.toLowerCase())) return [r]
+  const rel = t.slice(baseRoot.length)
+  const parts = rel.split(s).filter(Boolean)
+  const out: string[] = [r]
+  let cur = r
+  for (const part of parts) {
+    cur = cur + s + part
+    out.push(cur)
+  }
+  return out
+}
+
+async function revealAndSelect(path: string | null): Promise<void> {
+  // 任何情况下都先清掉旧高亮，避免“假选中”
+  clearDomSelection()
+
+  const root = await state.opts?.getRoot?.()
+  if (!root || !state.container) {
+    state.selected = null
+    state.selectedIsDir = false
+    state.opts?.onStateChange?.()
+    return
+  }
+
+  const p = (typeof path === 'string' && path.trim()) ? path : null
+  if (!p) {
+    state.selected = null
+    state.selectedIsDir = false
+    state.opts?.onStateChange?.()
+    return
+  }
+
+  // 只同步库目录内的文件；外部文件不应在库侧栏里“乱指”
+  if (!isInside(root, p)) {
+    state.selected = null
+    state.selectedIsDir = false
+    state.opts?.onStateChange?.()
+    return
+  }
+
+  // 先记录选中目标（用于后续刷新/重建时恢复）
+  state.selected = p
+  state.selectedIsDir = false
+
+  // 逐级展开到目标父目录，确保目标行存在
+  try {
+    const chain = buildDirChain(root, base(p))
+    for (const dir of chain) {
+      await ensureDirExpanded(root, dir)
+    }
+  } catch {}
+
+  // 尝试命中并选中（若仍找不到，至少不会残留旧高亮）
+  const hit = findNodeByPath(p)
+  if (hit) {
+    try {
+      saveSelection(p, false, hit)
+      try { hit.scrollIntoView({ block: 'nearest' }) } catch {}
+    } catch {}
+  } else {
+    state.opts?.onStateChange?.()
+  }
 }
 
 function toMtimeMs(meta: any): number {
@@ -1110,6 +1219,7 @@ async function conflictModal(title: string, actions: string[], defaultIndex = 1)
 
 export const fileTree: FileTreeAPI = {
   init, refresh,
+  revealAndSelect,
   getSelectedDir: () => (state.selectedIsDir ? (state.selected || null) : (state.selected ? base(state.selected) : null)),
   newFileInSelected, newFolderInSelected,
   setSort: (mode) => { state.sortMode = mode },

@@ -4875,6 +4875,25 @@ try {
         console.error('[文件树] 手动刷新失败:', e)
       }
     }
+    // 多标签切换时：同步库侧栏的选中高亮到当前文档
+    ;(window as any).flymdRevealInFileTree = async (path: string | null) => {
+      try {
+        const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null
+        if (treeEl && !fileTreeReady) {
+          await fileTree.init(treeEl, {
+            getRoot: getLibraryRoot,
+            onOpenFile: async (p: string) => { await openFile2(p) },
+            onOpenNewFile: async (p: string) => { await openFile2(p); mode = 'edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} },
+            onMoved: async (src: string, dst: string) => { try { if (currentFilePath === src) { currentFilePath = dst as any; refreshTitle() } } catch {} },
+          })
+          fileTreeReady = true
+        }
+        // init 失败/未初始化时，revealAndSelect 会自行兜底，不要在这里抛异常
+        if (fileTreeReady) {
+          await fileTree.revealAndSelect(path)
+        }
+      } catch {}
+    }
     // 模式切换快捷逻辑（等价于 Ctrl+E）
     ;(window as any).flymdToggleModeShortcut = () => handleToggleModeShortcut()
     // 文件操作

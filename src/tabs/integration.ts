@@ -41,6 +41,18 @@ function getFlymd(): any {
   return (window as any)
 }
 
+function syncFileTreeSelectionToActiveTab(): void {
+  try {
+    const flymd = getFlymd()
+    const activeTab = tabManager.getActiveTab()
+    const p = activeTab?.filePath ?? null
+    const fn = flymd?.flymdRevealInFileTree
+    if (typeof fn === 'function') {
+      void fn(p)
+    }
+  } catch {}
+}
+
 /**
  * 显示三按钮关闭确认对话框
  * 返回: 'save' | 'discard' | 'cancel'
@@ -261,6 +273,8 @@ export async function initTabSystem(): Promise<void> {
       if (ed) {
         undoManager.switchTab(event.toTabId, ed)
       }
+      // 标签切换后同步库侧栏选中态（否则高亮会停留在旧文档）
+      syncFileTreeSelectionToActiveTab()
     } else if (event.type === 'tab-closed') {
       undoManager.removeTab(event.tabId)
     }
