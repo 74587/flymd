@@ -2,11 +2,15 @@
  * 统一插件菜单与下拉菜单 UI 模块
  * 从 main.ts 拆分：负责
  * - 插件下拉菜单渲染与定位
- * - 顶部菜单栏中的“插件”入口
+ * - 顶部菜单栏中的"插件"入口
  */
 
 import { t } from '../i18n'
 import { getPluginMenuVisibility } from './pluginMenuConfig'
+import { registerMenuCloser, closeAllMenus } from '../ui/menuManager'
+
+// 注册到全局菜单管理器
+registerMenuCloser('pluginDropdown', () => removePluginDropdown())
 
 // 插件菜单项描述
 type PluginMenuItem = { pluginId: string; label: string; onClick?: () => void; children?: any[] }
@@ -148,6 +152,8 @@ function positionPluginDropdown(panel: HTMLElement, anchor: HTMLElement) {
 // 显示下拉菜单
 function showPluginDropdownInternal(anchor: HTMLElement, items: any[]) {
   try {
+    // 关闭所有其他菜单，确保同时只有一个菜单显示
+    closeAllMenus('pluginDropdown')
     removePluginDropdown()
 
     const overlay = document.createElement('div')

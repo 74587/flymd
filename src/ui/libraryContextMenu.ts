@@ -7,6 +7,18 @@ import { openRenameDialog } from './linkDialogs'
 import { newFileSafe, newFolderSafe } from '../fileTree'
 import { showLibraryDeleteDialog } from '../dialog'
 import { dispatchPathDeleted } from '../core/pathEvents'
+import { registerMenuCloser, closeAllMenus } from './menuManager'
+
+// 模块级关闭函数引用
+let _closeLibraryContextMenu: (() => void) | null = null
+
+// 导出关闭函数供外部调用
+export function closeLibraryContextMenu(): void {
+  if (_closeLibraryContextMenu) _closeLibraryContextMenu()
+}
+
+// 注册到全局菜单管理器
+registerMenuCloser('libraryContextMenu', closeLibraryContextMenu)
 
 export type LibraryContextMenuDeps = {
   getCurrentFilePath(): string | null
@@ -78,6 +90,13 @@ export function initLibraryContextMenu(deps: LibraryContextMenuDeps): void {
       }
     }
     const onDoc = () => hide()
+
+    // 设置模块级关闭函数引用，供全局菜单管理器调用
+    _closeLibraryContextMenu = hide
+
+    // 关闭所有其他菜单，确保同时只有一个菜单显示
+    closeAllMenus('libraryContextMenu')
+
     menu.innerHTML = ''
 
     // 文件节点专属操作：在新实例中打开 / 生成便签

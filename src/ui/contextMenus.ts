@@ -2,6 +2,10 @@
 
 import { escapeAttrValue } from '../utils/escape'
 import { getPluginMenuVisibility } from '../extensions/pluginMenuConfig'
+import { registerMenuCloser, closeAllMenus } from './menuManager'
+
+// 注册到全局菜单管理器
+registerMenuCloser('contextMenu', () => removeContextMenu())
 
 export type ContextMenuContext = {
   selectedText: string
@@ -186,6 +190,8 @@ export async function showContextMenu(
   },
 ): Promise<void> {
   try {
+    // 关闭所有其他菜单，确保同时只有一个菜单显示
+    closeAllMenus('contextMenu')
     removeContextMenu()
 
     // 根据插件菜单可见性过滤右键菜单项

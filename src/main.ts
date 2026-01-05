@@ -147,6 +147,7 @@ import { initAboutOverlay, showAbout } from './ui/aboutOverlay'
 import { ensureUpdateOverlay, showUpdateOverlayLinux, showUpdateDownloadedOverlay, showInstallFailedOverlay, loadUpdateExtra, renderUpdateDetailsHTML } from './ui/updateOverlay'
 import { openInBrowser, upMsg } from './core/updateUtils'
 import { initLibraryContextMenu } from './ui/libraryContextMenu'
+import { registerMenuCloser, closeAllMenus } from './ui/menuManager'
 import {
   removeContextMenu,
   showContextMenu,
@@ -6089,8 +6090,24 @@ async function newFolderSafe(dir: string, name = '新建文件夹'): Promise<str
 type TopMenuItemSpec = { label: string; accel?: string; action: () => void; disabled?: boolean }
 // 顶部下拉菜单：全局文档级点击处理器引用，避免重复绑定与交叉干扰
 let _topMenuDocHandler: ((ev: MouseEvent) => void) | null = null
+
+// 顶部菜单关闭函数（供全局菜单管理器调用）
+function closeTopMenu(): void {
+  const menu = document.getElementById('top-ctx') as HTMLDivElement | null
+  if (menu) menu.style.display = 'none'
+  if (_topMenuDocHandler) {
+    try { document.removeEventListener('click', _topMenuDocHandler) } catch {}
+    _topMenuDocHandler = null
+  }
+}
+// 注册到全局菜单管理器
+registerMenuCloser('topMenu', closeTopMenu)
+
 function showTopMenu(anchor: HTMLElement, items: TopMenuItemSpec[]) {
   try {
+    // 关闭所有其他菜单，确保同时只有一个菜单显示
+    closeAllMenus('topMenu')
+
     let menu = document.getElementById('top-ctx') as HTMLDivElement | null
     if (!menu) {
       menu = document.createElement('div') as HTMLDivElement
