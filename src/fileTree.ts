@@ -490,20 +490,34 @@ async function dirHasSupportedDocRecursive(dir: string, allow: Set<string>, dept
 
 function makeTg(): HTMLElement { const s = document.createElementNS('http://www.w3.org/2000/svg','svg'); s.setAttribute('viewBox','0 0 24 24'); s.classList.add('lib-tg'); const p=document.createElementNS('http://www.w3.org/2000/svg','path'); p.setAttribute('d','M9 6l6 6-6 6'); s.appendChild(p); return s as any }
 
-// VS Code 风格 SVG 图标：文件夹
+// 实心填充文件夹图标
 function makeFolderSvg(): SVGElement {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
   svg.setAttribute('viewBox', '0 0 16 16')
   svg.setAttribute('width', '16')
   svg.setAttribute('height', '16')
   svg.classList.add('lib-ico', 'lib-ico-svg', 'lib-ico-folder')
-  // 文件夹路径：带标签页的文件夹形状
+  // 实心文件夹：简洁无重影
   const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-  path.setAttribute('d', 'M1.5 3.5h5l1 1.5h6.5v8h-13v-9.5z M1.5 5v8h13v-6.5h-6l-1-1.5h-6z')
-  path.setAttribute('fill', 'none')
-  path.setAttribute('stroke', 'currentColor')
-  path.setAttribute('stroke-width', '1')
-  path.setAttribute('stroke-linejoin', 'round')
+  path.setAttribute('d', 'M1.5 3C1.5 2.72 1.72 2.5 2 2.5h4.5l1.5 1.5H14c.28 0 .5.22.5.5v8c0 .28-.22.5-.5.5H2c-.28 0-.5-.22-.5-.5V3z')
+  path.setAttribute('fill', 'currentColor')
+  path.setAttribute('opacity', '0.85')
+  svg.appendChild(path)
+  return svg
+}
+
+// 书架/图书馆图标（用于顶级库）
+function makeLibrarySvg(): SVGElement {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  svg.setAttribute('viewBox', '0 0 16 16')
+  svg.setAttribute('width', '16')
+  svg.setAttribute('height', '16')
+  svg.classList.add('lib-ico', 'lib-ico-svg', 'lib-ico-library')
+  // 书架：三本书并排
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+  path.setAttribute('d', 'M2 2.5h2.5v11H2V2.5zm3.5 1h2.5v10H5.5v-10zm3.5-1h2.5v11H9V2.5zm3.5 0.5H14l1 10.5h-2l-0.5-10.5z')
+  path.setAttribute('fill', 'currentColor')
+  path.setAttribute('opacity', '0.85')
   svg.appendChild(path)
   return svg
 }
@@ -564,8 +578,11 @@ function makePdfSvg(): SVGElement {
   return svg
 }
 
-// 统一文件夹图标（不再支持自定义）
-function makeFolderIcon(_path?: string): HTMLElement {
+// 文件夹图标：顶级库使用书架图标，普通文件夹使用实心文件夹
+function makeFolderIcon(_path?: string, isRoot?: boolean): HTMLElement {
+  if (isRoot) {
+    return makeLibrarySvg() as unknown as HTMLElement
+  }
   return makeFolderSvg() as unknown as HTMLElement
 }
 
@@ -1021,7 +1038,7 @@ async function renderRoot(root: string) {
   const topRow = document.createElement('div')
   topRow.className = 'lib-node lib-dir'
   ;(topRow as any).dataset.path = root
-  const tg = makeTg(); const ico = makeFolderIcon(root); const label = document.createElement('span'); label.className='lib-name'; label.textContent = nameOf(root) || root
+  const tg = makeTg(); const ico = makeFolderIcon(root, true); const label = document.createElement('span'); label.className='lib-name'; label.textContent = nameOf(root) || root
   topRow.appendChild(tg); topRow.appendChild(ico); topRow.appendChild(label)
   const kids = document.createElement('div')
   kids.className = 'lib-children'
