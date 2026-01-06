@@ -277,22 +277,30 @@ export async function showContextMenu(
           const submenuRect = submenu.getBoundingClientRect()
           const viewportWidth = window.innerWidth
           const viewportHeight = window.innerHeight
+          const padding = 10 // 边界安全间距
 
           // 水平方向调整
           const wouldOverflowRight =
-            itemRect.right + submenuRect.width > viewportWidth - 10
+            itemRect.right + submenuRect.width > viewportWidth - padding
           if (wouldOverflowRight) submenu.classList.add('expand-left')
           else submenu.classList.remove('expand-left')
 
-          // 垂直方向调整
-          const wouldOverflowBottom =
-            itemRect.top + submenuRect.height > viewportHeight - 10
-          if (wouldOverflowBottom) {
-            submenu.style.top = 'auto'
-            submenu.style.bottom = '-4px'
-          } else {
+          // 计算上下可用空间
+          const availableAbove = itemRect.bottom - padding
+          const availableBelow = viewportHeight - itemRect.top - padding
+
+          // 选择空间更大的方向展开，并设置最大高度
+          if (availableBelow >= availableAbove) {
+            // 向下展开
             submenu.style.top = '-4px'
             submenu.style.bottom = 'auto'
+            // 设置最大高度，至少保留 120px（约 3-4 个菜单项）
+            submenu.style.maxHeight = `${Math.max(availableBelow, 120)}px`
+          } else {
+            // 向上展开
+            submenu.style.top = 'auto'
+            submenu.style.bottom = '-4px'
+            submenu.style.maxHeight = `${Math.max(availableAbove, 120)}px`
           }
         })
       })

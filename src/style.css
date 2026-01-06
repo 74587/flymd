@@ -595,6 +595,24 @@ body.compact-titlebar .window-btn.window-close:hover {
   max-width: 280px;
   z-index: 2147483602;
   pointer-events: auto;
+  /* 溢出自适应：支持滚动 */
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* 插件子菜单滚动条样式 */
+.plugin-menu-submenu::-webkit-scrollbar {
+  width: 6px;
+}
+.plugin-menu-submenu::-webkit-scrollbar-track {
+  background: transparent;
+}
+.plugin-menu-submenu::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+.plugin-menu-submenu::-webkit-scrollbar-thumb:hover {
+  background: var(--fg-muted, #64748b);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -6178,6 +6196,24 @@ body.dark-mode .preview hr {
   max-width: 280px;
   z-index: 10001;
   pointer-events: auto;
+  /* 溢出自适应：支持滚动 */
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* 右键子菜单滚动条样式 */
+.context-menu-submenu::-webkit-scrollbar {
+  width: 6px;
+}
+.context-menu-submenu::-webkit-scrollbar-track {
+  background: transparent;
+}
+.context-menu-submenu::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+.context-menu-submenu::-webkit-scrollbar-thumb:hover {
+  background: var(--fg-muted, #64748b);
 }
 
 /* 向左展开的子菜单 */
