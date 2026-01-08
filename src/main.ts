@@ -187,6 +187,49 @@ let katexCssLoaded = false
 let hljsLoaded = false
 let mermaidReady = false
 
+const KATEX_CRITICAL_STYLE_ID = 'flymd-katex-critical-style'
+function ensureKatexCriticalStyle() {
+  try {
+    if (document.getElementById(KATEX_CRITICAL_STYLE_ID)) return
+    const criticalStyle = document.createElement('style')
+    criticalStyle.id = KATEX_CRITICAL_STYLE_ID
+    criticalStyle.textContent = `
+      /* KaTeX critical styles：仅作为 CSS 动态加载失败时的兜底；作用域限制在预览区，避免污染所见模式 */
+      .preview-body .katex svg {
+        fill: currentColor;
+        stroke: currentColor;
+        fill-rule: nonzero;
+        fill-opacity: 1;
+        stroke-width: 1;
+        stroke-linecap: butt;
+        stroke-linejoin: miter;
+        stroke-miterlimit: 4;
+        stroke-dasharray: none;
+        stroke-dashoffset: 0;
+        stroke-opacity: 1;
+        display: block;
+        height: inherit;
+        position: absolute;
+        width: 100%;
+      }
+      .preview-body .katex svg path { stroke: none; }
+      .preview-body .katex .stretchy { display: block; overflow: hidden; position: relative; width: 100%; }
+      .preview-body .katex .hide-tail { overflow: hidden; position: relative; width: 100%; }
+      .preview-body .katex .halfarrow-left { left: 0; overflow: hidden; position: absolute; width: 50.2%; }
+      .preview-body .katex .halfarrow-right { overflow: hidden; position: absolute; right: 0; width: 50.2%; }
+      .preview-body .katex .brace-left { left: 0; overflow: hidden; position: absolute; width: 25.1%; }
+      .preview-body .katex .brace-center { left: 25%; overflow: hidden; position: absolute; width: 50%; }
+      .preview-body .katex .brace-right { overflow: hidden; position: absolute; right: 0; width: 25.1%; }
+      .preview-body .katex .x-arrow-pad { padding: 0 .5em; }
+      .preview-body .katex .cd-arrow-pad { padding: 0 .55556em 0 .27778em; }
+      .preview-body .katex .mover,
+      .preview-body .katex .munder,
+      .preview-body .katex .x-arrow { text-align: center; }
+    `
+    document.head.appendChild(criticalStyle)
+  } catch {}
+}
+
 // Mermaid 工具（已拆分到 core/mermaid.ts）
 import { isMermaidCacheDisabled, getMermaidScale, setMermaidScaleClamped, adjustExistingMermaidSvgsForScale, exportMermaidViaDialog, createMermaidToolsFor, mermaidSvgCache, mermaidSvgCacheVersion, getCachedMermaidSvg, cacheMermaidSvg, normalizeMermaidSvg, postAttachMermaidSvgAdjust, invalidateMermaidSvgCache, MERMAID_SCALE_MIN, MERMAID_SCALE_MAX, MERMAID_SCALE_STEP } from './core/mermaid'
 // 当前 PDF 预览 URL（iframe 使用），用于页内跳转
@@ -1757,18 +1800,8 @@ async function renderPreviewLight() {
           await import('katex/dist/katex.min.css')
           katexCssLoaded = true
 
-          // 手动注入关键 CSS 规则（同阅读模式）
-          const criticalStyle = document.createElement('style')
-          criticalStyle.textContent = `
-            /* KaTeX critical styles for production build */
-            .katex { font-size: 1em; text-indent: 0; text-rendering: auto; }
-            .katex svg { display: inline-block; position: relative; width: 100%; height: 100%; }
-            .katex svg path { fill: currentColor; }
-            .katex .hide-tail { overflow: hidden; }
-            .md-math-inline .katex { display: inline-block; }
-            .md-math-block .katex { display: block; text-align: center; }
-          `
-          document.head.appendChild(criticalStyle)
+          // 手动注入“只影响预览区”的关键 CSS 兜底，避免全局覆盖导致所见模式错乱
+          ensureKatexCriticalStyle()
         }
 
         // 渲染每个数学节点
@@ -2967,37 +3000,8 @@ async function renderPreview() {
           await import('katex/dist/katex.min.css')
           katexCssLoaded = true
 
-          // 手动注入关键 CSS 规则以确保根号等符号正确显示
-          // 这是必需的，因为在 Tauri 生产构建中动态 CSS 可能无法完全应用
-          const criticalStyle = document.createElement('style')
-          criticalStyle.textContent = `
-            /* KaTeX critical styles for production build */
-            .katex {
-              font-size: 1em;
-              text-indent: 0;
-              text-rendering: auto;
-            }
-            .katex svg {
-              display: inline-block;
-              position: relative;
-              width: 100%;
-              height: 100%;
-            }
-            .katex svg path {
-              fill: currentColor;
-            }
-            .katex .hide-tail {
-              overflow: hidden;
-            }
-            .md-math-inline .katex {
-              display: inline-block;
-            }
-            .md-math-block .katex {
-              display: block;
-              text-align: center;
-            }
-          `
-          document.head.appendChild(criticalStyle)
+          // 手动注入关键 CSS 兜底：限定在预览区，避免污染所见模式
+          ensureKatexCriticalStyle()
         }
 
         // 渲染每个数学节点
