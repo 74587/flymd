@@ -925,6 +925,12 @@ async function buildBuiltinContextMenuItems(ctx: ContextMenuContext): Promise<Co
     },
   })
   items.push({
+    label: '打印',
+    icon: '🖨️',
+    tooltip: '以阅读模式渲染并打印当前文档（不包含 UI/通知）',
+    onClick: async () => { await printCurrentDoc() },
+  })
+  items.push({
     label: t('sync.now') || '立即同步',
     icon: '🔁',
     tooltip: syncTooltip || undefined,
@@ -2838,8 +2844,13 @@ async function ensureRenderer() {
   }
 }
 
+type RenderPreviewOptions = {
+  // 打印：不要插入所见模式的模拟光标等交互性标记
+  forPrint?: boolean
+}
+
 // 渲染预览（带安全消毒）
-async function renderPreview() {
+async function renderPreview(opts?: RenderPreviewOptions) {
   console.log('=== 开始渲染预览 ===')
   // 首次预览开始打点
   try { if (!(renderPreview as any)._firstLogged) { (renderPreview as any)._firstLogged = true; logInfo('打点:首次预览开始') } } catch {}
@@ -2850,7 +2861,7 @@ async function renderPreview() {
   let raw = editor.value
   // 所见模式：用一个“.”标记插入点，优先不破坏 Markdown 结构
   try {
-    if (wysiwyg && mode !== 'preview') {
+    if (wysiwyg && mode !== 'preview' && !opts?.forPrint) {
       const st = editor.selectionStart >>> 0
       const before = raw.slice(0, st)
       const after = raw.slice(st)
@@ -4229,6 +4240,33 @@ async function exportCurrentDocToPdf(target: string): Promise<void> {
   await writeFile(out as any, bytes as any)
   status.textContent = '已导出'
   setTimeout(() => refreshStatus(), 2000)
+}
+
+// 打印：始终按阅读模式渲染（不打印 UI/通知）
+async function printCurrentDoc(): Promise<void> {
+  try {
+    status.textContent = '正在准备打印...'
+  } catch {}
+  try {
+    await renderPreview({ forPrint: true })
+    const el = preview.querySelector('.preview-body') as HTMLElement | null
+    if (!el) throw new Error('未找到预览内容容器')
+    const { printElement } = await import('./core/print')
+    const title = (() => {
+      try {
+        const p = String(currentFilePath || '').trim()
+        if (!p) return document.title || '打印'
+        return p.split(/[\\/]+/).pop() || p
+      } catch {
+        return document.title || '打印'
+      }
+    })()
+    await printElement(el, { title })
+    try { status.textContent = '已打开打印' } catch {}
+    setTimeout(() => refreshStatus(), 2000)
+  } catch (e) {
+    showError('打印失败', e)
+  }
 }
 
 // 另存为
@@ -8027,6 +8065,14 @@ function bindEvents() {
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'p') {
       e.preventDefault()
       await openCommandPalette()
+      return
+    }
+    // Ctrl/Cmd+P：打印（始终按阅读模式渲染）
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'p') {
+      e.preventDefault()
+      try { e.stopPropagation(); /* 防止编辑器内部再次处理 */ } catch {}
+      try { (e as any).stopImmediatePropagation && (e as any).stopImmediatePropagation() } catch {}
+      await printCurrentDoc()
       return
     }
     // 记录最近一次 Ctrl/Cmd(+Shift)+V 组合键（仅在编辑器/所见模式聚焦时生效，用于区分普通粘贴与纯文本粘贴）

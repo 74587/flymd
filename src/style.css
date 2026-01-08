@@ -4971,10 +4971,15 @@ body::-webkit-scrollbar:horizontal,
 /* === 打印样式 - 确保打印整个文档而不仅是可视范围 === */
 @media print {
   /* 隐藏所有UI元素 */
+  .ribbon,
+  .tabbar-row,
   .titlebar,
   .statusbar,
   .library,
   .recent-panel,
+  .notification-container,
+  .zoom-bubble,
+  .flymd-context-menu,
   .wysiwyg-status,
   .wysiwyg-line,
   .wysiwyg-caret,
