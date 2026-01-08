@@ -7189,29 +7189,6 @@ function _ainAutoWriteMakeChoice(instruction) {
   }
 }
 
-async function _ainAutoWriteAppendToFile(ctx, absPath, text) {
-  const p = safeText(absPath).trim()
-  const add = safeText(text).trim()
-  if (!p || !add) return false
-
-  let cur = ''
-  try { cur = safeText(await readTextAny(ctx, p)) } catch { cur = '' }
-  const base = safeText(cur).trimEnd()
-  const sep = base ? '\n\n' : ''
-  const next = (base + sep + add).trimEnd() + '\n'
-
-  await writeTextAny(ctx, p, next)
-
-  try {
-    if (ctx && typeof ctx.getCurrentFilePath === 'function' && typeof ctx.setEditorValue === 'function') {
-      const curPath = await ctx.getCurrentFilePath()
-      if (normFsPath(curPath) === normFsPath(p)) ctx.setEditorValue(next)
-    }
-  } catch {}
-
-  return true
-}
-
 async function _ainAutoWriteUpdateMetaFromChapter(ctx, cfg, chapPath, chapText, reason) {
   const p = safeText(chapPath).trim()
   const txt0 = safeText(chapText).trim()
@@ -7356,16 +7333,13 @@ async function openAutoWriteDialog(ctx) {
       try { inpN.inp.value = String(chapters) } catch {}
       try { cfg = await saveCfg(ctx, { autoWrite: { chapters } }) } catch {}
 
-      const ok = await openConfirmDialog(ctx, {
-        title: t('确认全自动续写', 'Confirm auto-write'),
-        message:
-          t('将自动创建并直接写入章节文件。\n章数：', 'This will create chapter files and write prose directly.\nChapters: ') +
-          String(chapters) +
-          '\n\n' +
-          t('继续？', 'Continue?'),
-        okText: t('开始', 'Start'),
-        cancelText: t('取消', 'Cancel')
-      })
+      // 注意：不能用 openConfirmDialog（它会 createDialogShell -> closeDialog，把当前窗口关掉）
+      const ok = await _ainConfirm(
+        t('将自动创建并直接写入章节文件。\n章数：', 'This will create chapter files and write prose directly.\nChapters: ') +
+        String(chapters) +
+        '\n\n' +
+        t('继续？', 'Continue?')
+      )
       if (!ok) {
         setStatus(t('已取消', 'Cancelled'))
         return
@@ -7398,11 +7372,10 @@ async function openAutoWriteDialog(ctx) {
         if (!cfg || !cfg.token) throw new Error(t('未登录后端', 'Not logged in'))
         if (!cfg.upstream || !cfg.upstream.baseUrl || !cfg.upstream.model) throw new Error(t('上游未配置', 'Upstream not configured'))
 
-        setStatus(t('创建第 ', 'Creating chapter ') + String(i + 1) + '/' + String(chapters))
-        const inf = await novel_create_next_chapter_impl(ctx, cfg, { confirm: false, updateMeta: false, showNotices: false })
-        if (!inf || !inf.chapPath) throw new Error(t('创建章节失败', 'Failed to create chapter'))
-
-        pushLog(t('已创建：', 'Created: ') + String(fsBaseName(inf.chapPath)))
+        setStatus(t('准备第 ', 'Preparing chapter ') + String(i + 1) + '/' + String(chapters))
+        const inf = await computeNextChapterPath(ctx, cfg)
+        if (!inf || !inf.chapPath) throw new Error(t('无法计算下一章路径', 'Failed to compute next chapter path'))
+        pushLog(t('目标：', 'Target: ') + String(fsBaseName(inf.chapPath)))
 
         const baseIns = goal || t(
           '请基于【进度脉络】【资料/圣经】【前文尾部】自动决定本章走向并续写正文。只输出正文，不要标题，不要分析，不要列候选。',
@@ -7459,7 +7432,15 @@ async function openAutoWriteDialog(ctx) {
         text0 = _ainMaybeTypesetWebNovel(cfg, text0)
 
         setStatus(t('写入文件…', 'Writing file...'))
-        await _ainAutoWriteAppendToFile(ctx, inf.chapPath, text0)
+        if (await fileExists(ctx, inf.chapPath)) {
+          throw new Error(t('目标章节文件已存在：', 'Target chapter file already exists: ') + String(fsBaseName(inf.chapPath)))
+        }
+        const title = `# 第${inf.chapZh}章`
+        const full = (title + '\n\n' + safeText(text0).trim()).trimEnd() + '\n'
+        await writeTextAny(ctx, inf.chapPath, full)
+        try {
+          if (typeof ctx.openFileByPath === 'function') await ctx.openFileByPath(inf.chapPath)
+        } catch {}
         pushLog(t('已写入：', 'Written: ') + String(fsBaseName(inf.chapPath)) + ` (${text0.length} chars)`)
 
         lastPath = inf.chapPath
