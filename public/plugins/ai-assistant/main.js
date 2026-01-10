@@ -98,6 +98,254 @@ let __AI_DOCK_PANEL__ = null // 布局句柄（宿主统一管理推挤间距）
 let __AI_LAYOUT_UNSUB__ = null // 布局变更回调注销函数
 let __AI_DOCK_SYNC_CLEANUP__ = null // 自动同步 dock 布局的注销函数
 let __AI_DOCK_SYNC_SCHEDULED__ = false // 防止 resize 时重复触发同步
+let __AI_ONE_SHOT_DOC_CTX__ = null // 一次性上下文覆盖：用于“咨询”等入口（发送一次后自动清空）
+let __AI_LAST_POINTER__ = { x: 0, y: 0, ts: 0 } // 记录最近一次指针位置（用于“咨询”输入框定位）
+let __AI_POINTER_TRACKER_BOUND__ = false // 避免重复绑定指针监听
+
+function setOneShotDocContext(text, label) {
+  const t = String(text || '').trim()
+  if (!t) { __AI_ONE_SHOT_DOC_CTX__ = null; return }
+  __AI_ONE_SHOT_DOC_CTX__ = { text: t, label: String(label || '').trim() }
+}
+
+function consumeOneShotDocContext() {
+  const v = __AI_ONE_SHOT_DOC_CTX__
+  __AI_ONE_SHOT_DOC_CTX__ = null
+  return v && v.text ? v : null
+}
+
+async function resolveConsultContext(context, ctx) {
+  try {
+    const snap = String(snapshotSelectedTextFromCtx(ctx) || '').trim()
+    if (snap) return { text: snap, label: aiText('选中内容', 'Selected text') }
+  } catch {}
+  try {
+    const sel = await context.getSelection?.()
+    const t = String(sel?.text || '').trim()
+    if (t) return { text: t, label: aiText('选中内容', 'Selected text') }
+  } catch {}
+  try {
+    const doc = String(context.getEditorValue() || '').trim()
+    if (doc) return { text: doc, label: aiText('文档内容', 'Document') }
+  } catch {}
+  return null
+}
+
+function bindPointerTrackerOnce() {
+  if (__AI_POINTER_TRACKER_BOUND__) return
+  __AI_POINTER_TRACKER_BOUND__ = true
+  try {
+    const win = WIN()
+    const handler = (e) => {
+      try {
+        const evt = e || {}
+        const x = Number(evt.clientX)
+        const y = Number(evt.clientY)
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return
+        __AI_LAST_POINTER__ = { x, y, ts: Date.now() }
+      } catch {}
+    }
+    // 右键菜单触发前的坐标最靠谱
+    win.addEventListener('contextmenu', handler, true)
+    // 兜底：某些宿主会拦截 contextmenu
+    win.addEventListener('mousedown', handler, true)
+  } catch {}
+}
+
+function getSelectionAnchorRect() {
+  try {
+    const win = WIN()
+    const sel = win && win.getSelection ? win.getSelection() : null
+    if (!sel || sel.rangeCount <= 0) return null
+    const r = sel.getRangeAt(0)
+    if (!r) return null
+    const rects = r.getClientRects ? r.getClientRects() : null
+    const rect = rects && rects.length ? rects[0] : (r.getBoundingClientRect ? r.getBoundingClientRect() : null)
+    if (!rect) return null
+    const w = Number(rect.width || 0)
+    const h = Number(rect.height || 0)
+    const left = Number(rect.left)
+    const top = Number(rect.top)
+    if (!Number.isFinite(left) || !Number.isFinite(top)) return null
+    // 没有可见矩形（比如选区为空/不可见）
+    if (w <= 0 && h <= 0) return null
+    return rect
+  } catch {}
+  return null
+}
+
+function clampNumber(v, min, max) {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return min
+  return Math.max(min, Math.min(max, n))
+}
+
+function openConsultInputOverlay(context, ctx) {
+  bindPointerTrackerOnce()
+  try {
+    const existed = DOC().getElementById('ai-consult-overlay')
+    if (existed) existed.remove()
+  } catch {}
+
+  const overlay = DOC().createElement('div')
+  overlay.id = 'ai-consult-overlay'
+  overlay.setAttribute('role', 'dialog')
+  overlay.setAttribute('aria-label', aiText('咨询输入框', 'Consult input'))
+
+  const isDark = (() => {
+    try {
+      const body = WIN().document.body
+      return !!(body && body.classList && body.classList.contains('dark-mode'))
+    } catch {}
+    return false
+  })()
+
+  try {
+    overlay.style.position = 'fixed'
+    overlay.style.zIndex = '100000'
+    overlay.style.background = 'transparent'
+    overlay.style.padding = '0'
+  } catch {}
+
+  const input = DOC().createElement('input')
+  input.id = 'ai-consult-input'
+  input.type = 'text'
+  input.autocomplete = 'off'
+  input.placeholder = '咨询AI'
+  try {
+    input.style.width = '100%'
+    input.style.boxSizing = 'border-box'
+    input.style.border = isDark ? '1px solid rgba(148,163,184,.55)' : '1px solid rgba(15,23,42,.18)'
+    input.style.background = isDark ? '#0f172a' : '#ffffff'
+    input.style.color = isDark ? '#e5e7eb' : '#0f172a'
+    input.style.borderRadius = '12px'
+    input.style.height = '46px'
+    input.style.padding = '0 14px'
+    input.style.fontSize = '14px'
+    input.style.outline = 'none'
+    input.style.boxShadow = isDark ? '0 10px 26px rgba(0,0,0,.45)' : '0 10px 26px rgba(0,0,0,.10)'
+  } catch {}
+
+  overlay.appendChild(input)
+  DOC().body.appendChild(overlay)
+
+  // 定位：优先贴近选区高度；否则贴近指针高度；再否则居中靠上
+  try {
+    const win = WIN()
+    const vw = Number(win.innerWidth || 0) || 1280
+    const vh = Number(win.innerHeight || 0) || 720
+    const pad = 12
+    const w = Math.min(560, Math.max(260, vw - pad * 2))
+    const boxH = 56
+
+    let anchorX = vw / 2
+    let anchorY = 24
+
+    const selRect = getSelectionAnchorRect()
+    if (selRect) {
+      anchorX = Number(selRect.left + (selRect.width || 0) / 2)
+      anchorY = Number(selRect.bottom)
+    } else if (__AI_LAST_POINTER__ && __AI_LAST_POINTER__.ts && (Date.now() - __AI_LAST_POINTER__.ts) < 3000) {
+      anchorX = Number(__AI_LAST_POINTER__.x)
+      anchorY = Number(__AI_LAST_POINTER__.y)
+    }
+
+    const left = clampNumber(anchorX - w / 2, pad, vw - w - pad)
+    let top = anchorY + 10
+    if (top + boxH > vh - pad) top = Math.max(pad, anchorY - boxH - 10)
+
+    overlay.style.left = left + 'px'
+    overlay.style.top = clampNumber(top, pad, vh - boxH - pad) + 'px'
+    overlay.style.width = w + 'px'
+  } catch {}
+
+  let closed = false
+  const close = () => {
+    if (closed) return
+    closed = true
+    try { WIN().removeEventListener('mousedown', onMouseDown, true) } catch {}
+    try { WIN().removeEventListener('keydown', onGlobalKeyDown, true) } catch {}
+    try { overlay.remove() } catch {}
+  }
+
+  const onMouseDown = (e) => {
+    try {
+      if (!overlay.contains(e.target)) close()
+    } catch {}
+  }
+
+  const onGlobalKeyDown = (e) => {
+    try {
+      if (e.key === 'Escape') { e.preventDefault(); close() }
+    } catch {}
+  }
+
+  WIN().addEventListener('mousedown', onMouseDown, true)
+  WIN().addEventListener('keydown', onGlobalKeyDown, true)
+
+  input.addEventListener('keydown', async (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      e.stopPropagation()
+      const q = String(input.value || '').trim()
+      if (!q) return
+      close()
+      try { await sendConsultMessage(context, ctx, q) } catch {}
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      e.stopPropagation()
+      close()
+    }
+  })
+
+  try { setTimeout(() => { try { input.focus() } catch {} }, 0) } catch {}
+}
+
+async function sendConsultMessage(context, ctx, question) {
+  if (__AI_SENDING__) {
+    try { context.ui.notice(aiText('请等待当前 AI 响应完成', 'Please wait for the current response'), 'warn', 1800) } catch {}
+    return
+  }
+
+  const q = String(question || '').trim()
+  if (!q) return
+
+  let ctxInfo = null
+  try { ctxInfo = await resolveConsultContext(context, ctx) } catch {}
+
+  try {
+    await ensureWindow(context)
+    try {
+      const w = el('ai-assist-win')
+      if (w) w.style.display = 'block'
+    } catch {}
+    try { setDockPush(true) } catch {}
+
+    if (ctxInfo && ctxInfo.text) {
+      setOneShotDocContext(ctxInfo.text, ctxInfo.label || '文档上下文')
+    }
+
+    try {
+      const actionSelect = el('ai-quick-action')
+      if (actionSelect) actionSelect.value = ''
+    } catch {}
+
+    try {
+      const ta = el('ai-text')
+      if (ta) {
+        ta.value = q
+        try { ta.focus() } catch {}
+      }
+    } catch {}
+
+    await sendFromInput(context)
+  } catch (e) {
+    // 避免一次性上下文在异常情况下“泄漏”到下一次发送
+    try { consumeOneShotDocContext() } catch {}
+    throw e
+  }
+}
 
 function computeWorkspaceBounds() {
   try {
@@ -5165,7 +5413,8 @@ async function sendFromInputWithAction(context){
     __AI_SENDING__ = true
     try {
       await ensureSessionForDoc(context)
-      const doc = String(context.getEditorValue() || '')
+      const oneShotCtx = consumeOneShotDocContext()
+      const doc = String((oneShotCtx && oneShotCtx.text != null) ? oneShotCtx.text : (context.getEditorValue() || ''))
       const kbCfg = normalizeKbCfgForAi(cfg)
       const baseLimit = Number(cfg.limits?.maxCtxChars || DEFAULT_MAX_CTX_CHARS)
       // RAG 开启时给“知识库引用”留出空间，避免把上下文窗口撑爆
@@ -5212,7 +5461,10 @@ async function sendFromInputWithAction(context){
         }
       }
       if (!userMsg) {
-        userMsg = { role: 'user', content: '文档上下文：\n\n' + docCtx }
+        const label = (oneShotCtx && oneShotCtx.label)
+          ? String(oneShotCtx.label || '').trim()
+          : '文档上下文'
+        userMsg = { role: 'user', content: (label || '文档上下文') + '：\n\n' + docCtx }
       }
 
       let finalMsgs = [{ role: 'system', content: system }, userMsg]
@@ -5618,7 +5870,21 @@ export async function activate(context) {
   // 右键菜单：AI 助手快捷操作
   if (context.addContextMenuItem) {
     try {
-      __AI_CTX_MENU_DISPOSER__ = context.addContextMenuItem({
+      const disposers = []
+
+      // 一级菜单：咨询（尽量排在最前）
+      try {
+        const d0 = context.addContextMenuItem({
+          label: aiText('咨询', 'Consult'),
+          icon: '💡',
+          onClick: async (ctx) => {
+            try { openConsultInputOverlay(context, ctx) } catch {}
+          }
+        })
+        if (typeof d0 === 'function') disposers.push(d0)
+      } catch {}
+
+      const d1 = context.addContextMenuItem({
         label: aiText('AI 助手', 'AI Assistant'),
         icon: '🤖',
         children: [
@@ -5751,6 +6017,10 @@ export async function activate(context) {
           }
         ]
       })
+      if (typeof d1 === 'function') disposers.push(d1)
+      __AI_CTX_MENU_DISPOSER__ = () => {
+        disposers.forEach(fn => { try { if (typeof fn === 'function') fn() } catch {} })
+      }
     } catch (e) {
       console.error('AI 助手右键菜单注册失败：', e)
     }
