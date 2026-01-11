@@ -2,6 +2,14 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v1.0.4
+- Added: “Update now” button in extension update notifications, one-click updates with progress display
+- Improved: Preserve extension install options when updating (e.g. “Show in menu bar”) to avoid behavior changes after update
+- Improved: Rounded-corner window shadow for clearer borders; compact titlebar is now always enabled and the toggle is hidden
+- Improved: Built-in “flymd-RAG” plugin upgraded to v0.1.4 — plugin menu now opens Knowledge base settings directly
+- Fixed: Built-in “AI Novel Engine” plugin upgraded to v0.6.5 — more conservative “dead” status detection to reduce false positives
+- Changed: Updated extension marketplace `index.json` description for “AI Novel Engine” (new users get 500k characters)
+
 ## Update v1.0.3
 - Added: Library sidebar search upgrade — filename/path filter; `:keyword` + Enter for full-text search (fast scan + optional deep search); `::keyword` + Enter for knowledge-base semantic search (requires flymd-RAG index)
 - Improved: New UI layout — unified library sidebar width/margins; adjusted content position and default width
