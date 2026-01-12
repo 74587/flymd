@@ -5458,6 +5458,22 @@ async function persistLibraryVisible() {
       menu.style.boxShadow = '0 8px 24px rgba(15,23,42,0.2)'
       menu.style.minWidth = '140px'
       menu.style.fontSize = '12px'
+
+      // 菜单标题：提示用户这是“大纲布局”菜单
+      try {
+        const title = document.createElement('div')
+        title.textContent = t('outline.layout') || '大纲布局'
+        title.style.padding = '6px 12px'
+        title.style.fontSize = '12px'
+        title.style.fontWeight = '600'
+        title.style.color = 'var(--fg)'
+        title.style.opacity = '0.85'
+        title.style.cursor = 'default'
+        title.style.userSelect = 'none'
+        title.style.borderBottom = '1px solid var(--border)'
+        title.style.marginBottom = '4px'
+        menu.appendChild(title)
+      } catch {}
       const makeItem = (label: string, mode: OutlineLayout) => {
         const item = document.createElement('div')
         item.textContent = label
