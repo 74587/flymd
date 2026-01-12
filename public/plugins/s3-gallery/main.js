@@ -33,6 +33,124 @@ let _loadingEl = null
 let _ctx = null
 let _records = []
 
+// 悬浮预览层：鼠标悬浮缩略图时展示大图，避免改动现有布局
+let _previewRoot = null
+let _previewImg = null
+let _previewCaption = null
+let _previewUrl = ''
+let _previewRaf = 0
+let _previewX = 0
+let _previewY = 0
+
+function s3gEnsurePreviewLayer() {
+  if (_previewRoot && document.body.contains(_previewRoot)) return _previewRoot
+
+  const root = document.createElement('div')
+  root.id = 'flymd-s3-gallery-preview'
+  root.style.position = 'fixed'
+  root.style.left = '0'
+  root.style.top = '0'
+  root.style.zIndex = '10000'
+  root.style.display = 'none'
+  root.style.pointerEvents = 'none'
+  root.style.background = 'rgba(0,0,0,0.78)'
+  root.style.border = '1px solid rgba(255,255,255,0.10)'
+  root.style.borderRadius = '10px'
+  root.style.padding = '8px'
+  root.style.boxShadow = '0 10px 28px rgba(0,0,0,0.45)'
+  root.style.maxWidth = '70vw'
+  root.style.maxHeight = '70vh'
+
+  const img = document.createElement('img')
+  img.style.display = 'block'
+  img.style.maxWidth = '70vw'
+  img.style.maxHeight = '65vh'
+  img.style.objectFit = 'contain'
+  img.style.borderRadius = '6px'
+
+  const cap = document.createElement('div')
+  cap.style.marginTop = '6px'
+  cap.style.fontSize = '11px'
+  cap.style.opacity = '0.85'
+  cap.style.maxWidth = '70vw'
+  cap.style.whiteSpace = 'nowrap'
+  cap.style.overflow = 'hidden'
+  cap.style.textOverflow = 'ellipsis'
+
+  root.appendChild(img)
+  root.appendChild(cap)
+  document.body.appendChild(root)
+
+  _previewRoot = root
+  _previewImg = img
+  _previewCaption = cap
+  return root
+}
+
+function s3gHidePreview() {
+  if (_previewRoot) _previewRoot.style.display = 'none'
+}
+
+function s3gSchedulePreviewPos() {
+  if (!_previewRoot || _previewRoot.style.display === 'none') return
+  if (_previewRaf) return
+  const raf =
+    typeof requestAnimationFrame === 'function'
+      ? requestAnimationFrame
+      : (fn) => setTimeout(fn, 16)
+  _previewRaf = raf(() => {
+    _previewRaf = 0
+    s3gPositionPreview(_previewX, _previewY)
+  })
+}
+
+function s3gPositionPreview(x, y) {
+  if (!_previewRoot) return
+  const root = _previewRoot
+  const offset = 14
+  const pad = 8
+  const rect = root.getBoundingClientRect()
+
+  let left = x + offset
+  let top = y + offset
+
+  const maxLeft = window.innerWidth - rect.width - pad
+  const maxTop = window.innerHeight - rect.height - pad
+  if (left > maxLeft) left = x - rect.width - offset
+  if (top > maxTop) top = y - rect.height - offset
+  if (left < pad) left = pad
+  if (top < pad) top = pad
+
+  root.style.left = `${Math.round(left)}px`
+  root.style.top = `${Math.round(top)}px`
+}
+
+function s3gShowPreview(url, caption) {
+  if (!url) return
+  s3gEnsurePreviewLayer()
+  if (!_previewRoot || !_previewImg || !_previewCaption) return
+
+  _previewRoot.style.display = 'block'
+  _previewRoot.style.visibility = 'hidden'
+
+  if (_previewUrl !== url) {
+    _previewImg.src = url
+    _previewUrl = url
+  }
+  _previewImg.alt = caption || ''
+  _previewCaption.textContent = caption || ''
+
+  const raf =
+    typeof requestAnimationFrame === 'function'
+      ? requestAnimationFrame
+      : (fn) => setTimeout(fn, 16)
+  raf(() => {
+    if (!_previewRoot || _previewRoot.style.display === 'none') return
+    _previewRoot.style.visibility = 'visible'
+    s3gPositionPreview(_previewX, _previewY)
+  })
+}
+
 function ensurePanel(context) {
   _ctx = context
   if (_panel && document.body.contains(_panel)) return _panel
@@ -99,6 +217,7 @@ function ensurePanel(context) {
   closeBtn.onmouseenter = () => { closeBtn.style.background = 'rgba(255,255,255,0.1)' }
   closeBtn.onmouseleave = () => { closeBtn.style.background = 'transparent' }
   closeBtn.onclick = () => {
+    s3gHidePreview()
     panel.style.display = 'none'
   }
 
@@ -193,6 +312,22 @@ function renderList(records) {
       img.style.maxHeight = '100%'
       img.style.objectFit = 'contain'
       thumbBox.appendChild(img)
+
+      // 悬浮预览：大图展示，不改动现有卡片布局
+      thumbBox.style.cursor = 'zoom-in'
+      thumbBox.onmouseenter = (ev) => {
+        _previewX = ev && typeof ev.clientX === 'number' ? ev.clientX : 0
+        _previewY = ev && typeof ev.clientY === 'number' ? ev.clientY : 0
+        s3gShowPreview(url, img.alt || '')
+      }
+      thumbBox.onmousemove = (ev) => {
+        _previewX = ev && typeof ev.clientX === 'number' ? ev.clientX : _previewX
+        _previewY = ev && typeof ev.clientY === 'number' ? ev.clientY : _previewY
+        s3gSchedulePreviewPos()
+      }
+      thumbBox.onmouseleave = () => {
+        s3gHidePreview()
+      }
     } else {
       const span = document.createElement('span')
       span.textContent = '无预览'
@@ -476,8 +611,18 @@ export function deactivate() {
       _panel.parentElement.removeChild(_panel)
     }
   } catch {}
+  try {
+    if (_previewRoot && _previewRoot.parentElement) {
+      _previewRoot.parentElement.removeChild(_previewRoot)
+    }
+  } catch {}
   _panel = null
   _listRoot = null
   _loadingEl = null
   _records = []
+  _previewRoot = null
+  _previewImg = null
+  _previewCaption = null
+  _previewUrl = ''
+  _previewRaf = 0
 }
