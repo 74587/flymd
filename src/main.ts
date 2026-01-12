@@ -2713,9 +2713,14 @@ wysiwygCaretEl.id = 'wysiwyg-caret'
 
           <div class="upl-group" data-upl-provider="imgla">
             <div class="upl-section-title" id="upl-sec-imgla">${t('upl.imgla.section')}</div>
-            <label>${t('upl.imgla.home')}</label>
+            <label id="upl-imgla-home-label">${t('upl.imgla.home')}</label>
             <div class="upl-field">
               <a id="upl-imgla-open" href="https://www.imgla.net/" target="_blank" rel="noopener noreferrer">https://www.imgla.net/</a>
+            </div>
+            <label for="upl-imgla-baseurl">${t('upl.imgla.baseUrl')}</label>
+            <div class="upl-field">
+              <input id="upl-imgla-baseurl" type="url" placeholder="${t('upl.imgla.baseUrl.ph')}" />
+              <div class="upl-hint" id="upl-hint-imgla-baseurl">${t('upl.imgla.baseUrl.hint')}</div>
             </div>
             <label for="upl-imgla-token">${t('upl.imgla.token')}</label>
             <div class="upl-field">
@@ -6893,6 +6898,7 @@ function applyI18nUi() {
         setLabel('upl-template', t('upl.template'))
         setLabel('upl-pathstyle', t('upl.pathstyle'))
         setLabel('upl-acl', t('upl.acl'))
+        setLabel('upl-imgla-baseurl', t('upl.imgla.baseUrl'))
         setLabel('upl-imgla-token', t('upl.imgla.token'))
         setLabel('upl-imgla-strategy', t('upl.imgla.strategy'))
         setLabel('upl-imgla-album', t('upl.imgla.album'))
@@ -6908,6 +6914,7 @@ function applyI18nUi() {
         setPh('upl-region', t('upl.region.ph'))
         setPh('upl-domain', t('upl.domain.ph'))
         setPh('upl-template', t('upl.template.ph'))
+        setPh('upl-imgla-baseurl', t('upl.imgla.baseUrl.ph'))
         setPh('upl-imgla-token', t('upl.imgla.token.ph'))
         setPh('upl-imgla-strategy', t('upl.imgla.strategy.ph'))
 
@@ -6923,6 +6930,8 @@ function applyI18nUi() {
         setText('upl-hint-domain', t('upl.domain.hint'))
         setText('upl-hint-template', t('upl.template.hint'))
         setText('upl-webp-quality-hint', t('upl.webp.quality.hint'))
+        setText('upl-imgla-home-label', t('upl.imgla.home'))
+        setText('upl-hint-imgla-baseurl', t('upl.imgla.baseUrl.hint'))
         setText('upl-hint-imgla-token', t('upl.imgla.token.hint'))
         setText('upl-hint-imgla-strategy', t('upl.imgla.strategy.hint'))
         setText('upl-hint-imgla-album', t('upl.imgla.album.hint'))

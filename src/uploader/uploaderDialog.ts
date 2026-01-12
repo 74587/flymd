@@ -67,6 +67,7 @@ export async function openUploaderDialog(deps: UploaderDialogDeps): Promise<void
   const inputTpl = overlay.querySelector('#upl-template') as HTMLInputElement
   const inputPathStyle = overlay.querySelector('#upl-pathstyle') as HTMLInputElement
   const inputAcl = overlay.querySelector('#upl-acl') as HTMLInputElement
+  const inputImglaBaseUrl = overlay.querySelector('#upl-imgla-baseurl') as HTMLInputElement
   const inputImglaToken = overlay.querySelector('#upl-imgla-token') as HTMLInputElement
   const inputImglaStrategy = overlay.querySelector('#upl-imgla-strategy') as HTMLInputElement
   const selectImglaAlbum = overlay.querySelector('#upl-imgla-album') as HTMLSelectElement
@@ -130,7 +131,8 @@ export async function openUploaderDialog(deps: UploaderDialogDeps): Promise<void
         return
       }
       fillSelect(selectImglaAlbum, [{ value: '', label: '加载中...' }], '')
-      const list: any = await invoke('flymd_imgla_list_albums', { req: { baseUrl: IMGLA_BASE_URL, token } } as any)
+      const baseUrl = String(inputImglaBaseUrl?.value || '').trim().replace(/\/+$/, '') || IMGLA_BASE_URL
+      const list: any = await invoke('flymd_imgla_list_albums', { req: { baseUrl, token } } as any)
       const albums = Array.isArray(list) ? list : []
       const opts: Array<{ value: string; label: string }> = [{ value: '', label: '全部相册' }]
       for (const a of albums) {
@@ -164,6 +166,7 @@ export async function openUploaderDialog(deps: UploaderDialogDeps): Promise<void
       inputTpl.value = up?.keyTemplate || '{year}/{month}{fileName}{md5}.{extName}'
       inputPathStyle.checked = up?.forcePathStyle !== false
       inputAcl.checked = up?.aclPublicRead !== false
+      inputImglaBaseUrl.value = (up?.imglaBaseUrl || up?.baseUrl || IMGLA_BASE_URL)
       inputImglaToken.value = up?.imglaToken || up?.token || ''
       inputImglaStrategy.value = String(
         (typeof up?.imglaStrategyId === 'number' ? up.imglaStrategyId : parseIntOr(String(up?.imglaStrategyId || ''), 1)) ||
@@ -215,6 +218,7 @@ export async function openUploaderDialog(deps: UploaderDialogDeps): Promise<void
           keyTemplate: inputTpl.value.trim() || '{year}/{month}{fileName}{md5}.{extName}',
           forcePathStyle: !!inputPathStyle.checked,
           aclPublicRead: !!inputAcl.checked,
+          imglaBaseUrl: inputImglaBaseUrl.value.trim() || '',
           imglaToken: inputImglaToken.value.trim() || '',
           imglaStrategyId: parseIntOr(inputImglaStrategy.value, 1),
           imglaAlbumId: (() => {
@@ -341,7 +345,7 @@ export async function openUploaderDialog(deps: UploaderDialogDeps): Promise<void
       if (!testRes) return
       const ep =
         getProvider() === 'imgla'
-          ? IMGLA_BASE_URL
+          ? (String(inputImglaBaseUrl?.value || '').trim().replace(/\/+$/, '') || IMGLA_BASE_URL)
           : (inputEndpoint?.value || '').trim()
       testRes.textContent = '测试中...'
       ;(testRes as any).className = ''

@@ -49,8 +49,8 @@ export function parseUploaderConfigForManagement(
   const saveLocalAsWebp = !!raw.saveLocalAsWebp
 
   if (provider === 'imgla') {
-    // 地址内置：不让用户填，避免配置项膨胀与误填
-    const baseUrl = IMGLA_BASE_URL
+    // Lsky Pro+ 兼容：允许用户覆写 baseUrl（默认 ImgLa）
+    const baseUrl = normUrl(raw.imglaBaseUrl ?? raw.baseUrl) || IMGLA_BASE_URL
     const token = normStr(raw.imglaToken ?? raw.token)
     const strategyId = normNum(raw.imglaStrategyId ?? raw.strategyId) ?? 1
     const albumId = normNum(raw.imglaAlbumId ?? raw.albumId) ?? undefined
