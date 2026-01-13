@@ -5725,6 +5725,25 @@ function initWindowResize() {
   })
   document.body.appendChild(container)
 
+  // 最大化时禁用自定义 resize handles：顶部 5px 会抢事件，导致“下拉还原”变成“改窗口高度”。
+  // 只影响最大化状态，恢复后自动还原，不碰其它交互。
+  const setMaximizedClass = (isMax: boolean) => {
+    if (isMax) document.body.classList.add('window-maximized')
+    else document.body.classList.remove('window-maximized')
+  }
+  ;(async () => {
+    if (!isTauriRuntime()) return
+    try {
+      const win = getCurrentWindow()
+      try { setMaximizedClass(await win.isMaximized()) } catch {}
+      try {
+        await win.listen('flymd://window-maximized-changed', (ev: any) => {
+          try { setMaximizedClass(!!(ev && typeof ev === 'object' ? (ev as any).payload : ev)) } catch {}
+        })
+      } catch {}
+    } catch {}
+  })()
+
   // resize 状态
   let resizing = false
   let ready = false

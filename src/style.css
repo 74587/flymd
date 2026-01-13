@@ -7825,6 +7825,11 @@ body.no-native-decorations .window-resize-handles {
   display: block;
 }
 
+/* 最大化时禁用 resize handles，避免顶部/边缘误触触发自定义改大小 */
+body.no-native-decorations.window-maximized .window-resize-handle {
+  pointer-events: none;
+}
+
 /* 通用 resize handle 样式 */
 .window-resize-handle {
   position: absolute;

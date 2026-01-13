@@ -22,6 +22,50 @@ fn init_linux_render_env() {
   }
 }
 
+// Windows：最大化状态同步到前端。
+// 用途：最大化时禁用前端自定义 resize handles，避免“按住顶部下拉还原窗口”被误判成改高度。
+// 注意：这里不去动 resizable（会影响 Windows 的“拖拽标题栏下拉还原”行为）。
+#[cfg(target_os = "windows")]
+fn install_windows_maximized_resizable_workaround(win: &tauri::WebviewWindow) {
+  use std::sync::{Arc, Mutex};
+
+  fn sync_state(win: &tauri::WebviewWindow, last_maximized: &mut Option<bool>) {
+    let Ok(is_maximized) = win.is_maximized() else { return; };
+
+    // 首次同步：只建立基线；后续仅在状态变化时通知前端，避免刷事件。
+    if last_maximized.is_none() {
+      *last_maximized = Some(is_maximized);
+      let _ = win.emit("flymd://window-maximized-changed", is_maximized);
+      return;
+    }
+
+    if *last_maximized == Some(is_maximized) {
+      return;
+    }
+    *last_maximized = Some(is_maximized);
+    let _ = win.emit("flymd://window-maximized-changed", is_maximized);
+  }
+
+  let last_maximized = Arc::new(Mutex::new(None::<bool>));
+
+  // 先同步一次，处理“启动即最大化”但事件还没到的情况。
+  {
+    let mut guard = last_maximized.lock().unwrap_or_else(|p| p.into_inner());
+    sync_state(win, &mut guard);
+  }
+
+  // 注意：不能把用于注册回调的 `win` 同时 move 进闭包（Rust 借用规则会报 E0505）。
+  // 这里保留用 `win`（&self）注册监听，另拷贝一份句柄给闭包里用。
+  let win_for_cb = win.clone();
+  let last_maximized_for_cb = last_maximized.clone();
+  win.on_window_event(move |_event| {
+    let mut guard = last_maximized_for_cb
+      .lock()
+      .unwrap_or_else(|p| p.into_inner());
+    sync_state(&win_for_cb, &mut guard);
+  });
+}
+
 // 启动诊断日志：发布版也能落盘，便于定位“黑屏/卡初始化”等问题
 static STARTUP_LOG_PATH: OnceLock<std::path::PathBuf> = OnceLock::new();
 static PANIC_HOOK_INSTALLED: OnceLock<()> = OnceLock::new();
@@ -1642,6 +1686,8 @@ fn main() {
       if let Some(win) = app.get_webview_window("main") {
         #[cfg(target_os = "windows")]
         {
+          install_windows_maximized_resizable_workaround(&win);
+
           // Windows：仅负责延迟显示和聚焦，窗口装饰交由 Tauri 管理
           let win_clone = win.clone();
           std::thread::spawn(move || {
