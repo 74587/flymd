@@ -2,6 +2,12 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v1.1.5
+- Fixed: Incorrect table insertion position in WYSIWYG mode
+- Fixed: Built-in “Image Gallery” plugin couldn’t delete images on Lsky (Lsky Pro+)
+- Improved: Lsky (Lsky Pro+) storage location is now a dropdown selection
+- Improved: Fallback to local on upload failure (instead of base64)
+
 ## Update v1.1.4
 - Added: Shortcut `Ctrl+Shift+Z` to toggle the Library sidebar
 - Improved: About dialog now includes a clearer keyboard shortcuts list
