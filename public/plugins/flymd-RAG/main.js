@@ -4,7 +4,7 @@
 // - embedding 连接默认复用 ai-assistant 的 baseUrl/apiKey（模型单独配置；也可切换为自定义）
 // - 第一版仅支持 md/markdown/txt
 // - 排除规则：目录前缀（遍历阶段跳过）
-// - 索引落盘：默认 AppLocalData/flymd/plugin-data/<pluginId>/<libraryKey>/（可在设置里改索引存储目录）
+// - 索引落盘：优先写到库内 `.flymd/rag-index/<libraryId>/`；若库根不可写（移动端常见），自动回退到 AppLocalData 插件数据目录
 
 const CFG_KEY = 'flysmart.byLibrary'
 // 库ID 回退映射：当库根目录不可写（移动端常见）时，用 ctx.storage 记住 root->id，避免每次启动都“换库”导致配置失效
@@ -16,6 +16,8 @@ const INDEX_LOG_FILE = 'flymd-rag-index.log'
 // 统一的库内元数据与索引目录（相对于库根目录）
 const LIBRARY_META_DIR = '.flymd'
 const RAG_INDEX_DIR = '.flymd/rag-index'
+// 应用私有目录回退：落在 getPluginDataDir() 目录下的子目录
+const APP_INDEX_SUBDIR = 'rag-index'
 
 // 避免固定字符串被滥用：与 AI 助手保持一致，用于生成 X-Flymd-Token
 const FLYMD_TOKEN_SECRET = 'flymd-rolling-secret-v1'
@@ -865,15 +867,37 @@ async function getIndexDataDir(ctx, cfg, libraryRoot, opt) {
   if (!root) throw new Error('库根目录为空')
   const cfgKey =
     cfg && cfg.libraryKey ? String(cfg.libraryKey) : (await getStableLibraryId(ctx, root))
+
+  // 优先：库内目录（跨设备可同步，但可能在移动端/SAF 下不可写）
   const base = normalizeDirPath(root + '/' + RAG_INDEX_DIR)
   const sep = base.includes('\\') ? '\\' : '/'
   const target = base + sep + cfgKey
   if (opt && opt.ensure === false) return target
+
+  let okLib = false
   if (typeof ctx.ensureDir === 'function') {
-    const ok = await ctx.ensureDir(target)
-    if (!ok) throw new Error('创建索引目录失败：' + target)
+    okLib = await ctx.ensureDir(target)
   }
-  return target
+  if (okLib) return target
+
+  // 回退：应用私有目录（稳定可写，适合移动端）
+  let appDir = ''
+  try {
+    if (ctx && typeof ctx.getPluginDataDir === 'function') {
+      const base2 = normalizeDirPath(await ctx.getPluginDataDir())
+      if (base2) {
+        const sep2 = base2.includes('\\') ? '\\' : '/'
+        appDir = base2 + sep2 + APP_INDEX_SUBDIR
+        if (typeof ctx.ensureDir === 'function') {
+          const ok2 = await ctx.ensureDir(appDir)
+          if (ok2) return appDir
+        }
+      }
+    }
+  } catch {}
+
+  const extra = appDir ? `；应用私有目录也失败：${appDir}` : '；且宿主不支持 getPluginDataDir'
+  throw new Error('创建索引目录失败：' + target + extra)
 }
 
 async function migrateIndexDirIfNeeded(ctx, oldCfg, newCfg) {
@@ -2879,15 +2903,22 @@ async function openSettingsDialog(settingsCtx) {
 
   const refreshIndexDirTip = async () => {
     try {
-      const eff = await getIndexDataDir(runtime, cfg, rootForUi, { ensure: false })
+      const eff = await getIndexDataDir(runtime, cfg, rootForUi, { ensure: true })
       inputIndexDir.value = eff
-      const zh = `索引统一保存在库内：${eff}`
-      const en = `Index is stored inside library: ${eff}`
+      const libPrefix = normalizePathForKey(rootForUi + '/' + RAG_INDEX_DIR)
+      const effKey = normalizePathForKey(eff)
+      const inLib = !!libPrefix && !!effKey && effKey.startsWith(libPrefix)
+      const zh = inLib
+        ? `索引目录（库内）：${eff}`
+        : `索引目录（应用私有目录）：${eff}（库内不可写时自动回退）`
+      const en = inLib
+        ? `Index directory (inside library): ${eff}`
+        : `Index directory (app private): ${eff} (auto fallback when library is not writable)`
       indexDirTip.textContent = ragText(zh, en)
     } catch {
       indexDirTip.textContent = ragText(
-        '索引统一保存在当前库内 .flymd/rag-index 中',
-        'Index is stored under .flymd/rag-index inside the library.',
+        '索引优先保存在当前库内 `.flymd/rag-index`；若库内不可写（移动端常见），会自动回退到应用私有目录。',
+        'Index is stored under `.flymd/rag-index` inside the library; if the library is not writable (common on mobile), it falls back to the app private directory.',
       )
     }
   }
