@@ -916,7 +916,7 @@ async function listMarkdownFilesAny(ctx, rootAbs) {
 }
 
 async function listDirAny(ctx, absDir) {
-  // 依赖宿主命令枚举目录一层（用于备份快照兼容：latest.json 丢失时自愈）
+  // 依赖宿主命令枚举目录一层（用于快照备份列表）
   if (ctx && typeof ctx.invoke === 'function') {
     try {
       const arr = await ctx.invoke('list_dir_any', { path: absDir })
@@ -2964,7 +2964,6 @@ async function ain_backup_get_paths(ctx, cfg, inf) {
 
   const backupRootAbs = joinFsPath(libRoot, ain_backup_rel_prefix())
   const projectBackupRootAbs = joinFsPath(backupRootAbs, projKey)
-  const latestPath = joinFsPath(projectBackupRootAbs, 'latest.json')
 
   const ragPaths = await rag_get_index_paths(ctx, cfg, projectAbs)
   return {
@@ -2974,7 +2973,6 @@ async function ain_backup_get_paths(ctx, cfg, inf) {
     projKey,
     backupRootAbs,
     projectBackupRootAbs,
-    latestPath,
     ragPaths,
   }
 }
@@ -3082,93 +3080,75 @@ async function ain_backup_write_snapshot(ctx, cfg, inf) {
     await writeTextAny(ctx, snapshotMetaAbs, JSON.stringify(snapshot, null, 2))
   } catch {}
 
-  // 更新 latest 指针：用于新设备“无需列目录即可恢复”
-  await writeTextAny(ctx, p.latestPath, JSON.stringify({ version: 1, snapId, created_at: snapshot.created_at }, null, 2))
-
   return {
     snapId,
     snapDirAbs,
-    latestPath: p.latestPath,
     totalFiles: added.length,
   }
 }
 
-async function ain_backup_infer_latest_from_snapshots(ctx, p) {
-  // 兼容：早期/手工同步可能漏掉 latest.json，但快照目录还在
-  // 规则：优先读 snapshot.json.created_at；读不到则用目录名（时间戳字符串）做兜底
+function ain_backup_parse_ts_from_snap_id(snapId) {
+  // snapId 默认是 safeFileName(_fmtLocalTs())，形如：2026-01-14 20_19_39
+  // 兼容手工创建：也支持 : 分隔
+  const s = String(snapId || '').trim()
+  if (!s) return 0
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2})[:_](\d{2})[:_](\d{2})/u)
+  if (!m) return 0
+  const y = Number(m[1])
+  const mo = Number(m[2]) - 1
+  const d = Number(m[3])
+  const hh = Number(m[4])
+  const mm = Number(m[5])
+  const ss = Number(m[6])
+  const dt = new Date(y, mo, d, hh, mm, ss)
+  const ts = dt.getTime()
+  return Number.isFinite(ts) && ts > 0 ? ts : 0
+}
+
+function ain_backup_fmt_ts(ts) {
+  const x = Number(ts || 0)
+  if (!Number.isFinite(x) || x <= 0) return ''
+  const d = new Date(x)
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
+async function ain_backup_list_snapshots(ctx, cfg, inf) {
+  const p = await ain_backup_get_paths(ctx, cfg, inf)
   const ents = await listDirAny(ctx, p.projectBackupRootAbs)
-  let bestId = ''
-  let bestTs = 0
-  let bestLex = ''
+  const list = []
   for (let i = 0; i < ents.length; i++) {
     const it = ents[i] || {}
     const isDir = !!(it.is_dir || it.isDir)
     if (!isDir) continue
-    const name = safeFileName(String(it.name || ''), '')
-    if (!name) continue
-    const metaAbs = joinFsPath(p.projectBackupRootAbs, name, 'snapshot.json')
-    let ts = 0
+    const snapId = safeFileName(String(it.name || ''), '')
+    if (!snapId) continue
+    const metaAbs = joinFsPath(p.projectBackupRootAbs, snapId, 'snapshot.json')
+    let hasMeta = false
+    let createdAt = 0
+    let filesCount = 0
     try {
       const rr = await ain_try_read_text(ctx, metaAbs)
       if (rr.ok) {
+        hasMeta = true
         const j = JSON.parse(rr.text || '{}')
         const x = j && j.created_at ? Number(j.created_at) : 0
-        if (Number.isFinite(x) && x > 0) ts = x
+        if (Number.isFinite(x) && x > 0) createdAt = x
+        const f = j && Array.isArray(j.files) ? j.files.length : 0
+        if (Number.isFinite(f) && f > 0) filesCount = f
       }
     } catch {}
-    if (ts > 0) {
-      if (ts > bestTs) {
-        bestTs = ts
-        bestId = name
-      }
-      continue
-    }
-    // 没有可用 created_at：退化为目录名字典序（snapId 是本地时间戳字符串，通常可比较）
-    if (!bestTs && name > bestLex) {
-      bestLex = name
-      bestId = name
-    }
+    if (!createdAt) createdAt = ain_backup_parse_ts_from_snap_id(snapId)
+    list.push({ snapId, hasMeta, createdAt, createdAtText: ain_backup_fmt_ts(createdAt), filesCount })
   }
-  return bestId
-}
-
-async function ain_backup_load_latest(ctx, cfg, inf) {
-  const p = await ain_backup_get_paths(ctx, cfg, inf)
-  let raw = ''
-  let snapId = ''
-  try {
-    raw = safeText(await readTextAny(ctx, p.latestPath))
-  } catch {
-    // 兼容：latest.json 可能没被同步下来（或被手工遗漏），尝试从快照目录推断
-    snapId = await ain_backup_infer_latest_from_snapshots(ctx, p)
-    if (!snapId) throw new Error(t('未找到 latest.json：请先在任一设备创建备份，并确保 WebDAV 同步完成', 'latest.json not found; create a backup on any device and run WebDAV sync'))
-  }
-  if (!snapId) {
-    try {
-      const json = JSON.parse(raw || '{}')
-      snapId = json && json.snapId ? String(json.snapId) : ''
-    } catch {}
-  }
-  if (!snapId) {
-    snapId = await ain_backup_infer_latest_from_snapshots(ctx, p)
-    if (!snapId) throw new Error(t('未找到 latest.json：请先在任一设备创建备份，并确保 WebDAV 同步完成', 'latest.json not found; create a backup on any device and run WebDAV sync'))
-    // 尝试自愈：补写 latest.json，避免之后每次都列目录
-    try {
-      await writeTextAny(ctx, p.latestPath, JSON.stringify({ version: 1, snapId, created_at: Date.now(), inferred: true }, null, 2))
-    } catch {}
-  }
-  const snapDirAbs = joinFsPath(p.projectBackupRootAbs, safeFileName(snapId, 'snap'))
-  const snapshotMetaAbs = joinFsPath(snapDirAbs, 'snapshot.json')
-  return { ...p, snapId, snapDirAbs, snapshotMetaAbs }
+  list.sort((a, b) => (Number(b.createdAt || 0) - Number(a.createdAt || 0)) || String(b.snapId || '').localeCompare(String(a.snapId || '')))
+  return { ...p, snapshots: list }
 }
 
 async function ain_backup_restore_from_snapshot(ctx, cfg, inf, snapIdOpt) {
   const p = await ain_backup_get_paths(ctx, cfg, inf)
   let snapId = safeFileName(String(snapIdOpt || '').trim(), 'snap')
-  if (!snapId) {
-    const latest = await ain_backup_load_latest(ctx, cfg, inf)
-    snapId = latest.snapId
-  }
+  if (!snapId) throw new Error(t('请先选择要恢复的备份', 'Please select a snapshot to restore'))
   const snapDirAbs = joinFsPath(p.projectBackupRootAbs, snapId)
 
   // 目标路径
@@ -4360,28 +4340,80 @@ async function openSettingsDialog(ctx) {
   idxBkOut.textContent = t('状态：未加载', 'Status: not loaded')
   secIdxBk.appendChild(idxBkOut)
 
+  const idxBkListOut = document.createElement('div')
+  idxBkListOut.className = 'ain-out'
+  idxBkListOut.style.marginTop = '8px'
+  idxBkListOut.textContent = t('备份列表：未加载', 'Backup list: not loaded')
+  secIdxBk.appendChild(idxBkListOut)
+
+  const selIdxBkSnap = document.createElement('select')
+  selIdxBkSnap.style.width = '100%'
+  selIdxBkSnap.style.marginTop = '8px'
+  secIdxBk.appendChild(selIdxBkSnap)
+
+  function getPickedSnapshotId() {
+    const v = safeFileName(String(selIdxBkSnap.value || '').trim(), '')
+    return v || ''
+  }
+
   async function refreshIdxBackupStatus() {
     try {
       cfg = await loadCfg(ctx)
       const inf = await inferProjectDir(ctx, cfg)
       if (!inf) {
         idxBkOut.textContent = t('状态：未选择当前项目（请先在“小说→选择当前项目”里选择）', 'Status: no current project selected')
+        idxBkListOut.textContent = t('备份列表：无（未选择项目）', 'Backup list: none (no project selected)')
+        selIdxBkSnap.innerHTML = ''
         return
       }
-      const p = await ain_backup_get_paths(ctx, cfg, inf)
-      let latest = ''
-      try {
-        const raw = safeText(await readTextAny(ctx, p.latestPath))
-        const j = JSON.parse(raw || '{}')
-        latest = j && j.snapId ? String(j.snapId) : ''
-      } catch {}
+      const rr = await ain_backup_list_snapshots(ctx, cfg, inf)
+      const snaps = Array.isArray(rr.snapshots) ? rr.snapshots : []
+      const latest = snaps[0] ? String(snaps[0].snapId || '') : ''
+
+      // 列表：按时间倒序（snapId 默认就是时间戳字符串）
+      const prevPick = getPickedSnapshotId()
+      selIdxBkSnap.innerHTML = ''
+      if (!snaps.length) {
+        const opt = document.createElement('option')
+        opt.value = ''
+        opt.textContent = t('（无备份）', '(no backups)')
+        selIdxBkSnap.appendChild(opt)
+      } else {
+        for (let i = 0; i < snaps.length; i++) {
+          const it = snaps[i] || {}
+          const sid = String(it.snapId || '')
+          if (!sid) continue
+          const opt = document.createElement('option')
+          opt.value = sid
+          const cnt = it.filesCount ? (' · ' + t('文件', 'files') + ': ' + String(it.filesCount)) : ''
+          opt.textContent = sid + cnt
+          selIdxBkSnap.appendChild(opt)
+        }
+        // 尽量保持之前的选择；否则默认选最新
+        const tryPick = prevPick && snaps.some((x) => String(x && x.snapId) === prevPick) ? prevPick : latest
+        if (tryPick) selIdxBkSnap.value = tryPick
+      }
+
+      idxBkListOut.textContent = snaps.length
+        ? ([t('备份列表（按时间倒序）：', 'Backups (newest first):')]
+          .concat(snaps.map((it) => {
+            const sid = String((it && it.snapId) || '')
+            const ts = it && it.createdAtText ? String(it.createdAtText) : ''
+            const cnt = it && it.filesCount ? String(it.filesCount) : ''
+            const extra = (ts && ts !== sid ? (' @ ' + ts) : '') + (cnt ? (' · ' + t('文件', 'files') + ': ' + cnt) : '')
+            return '- ' + sid + extra
+          })).join('\n'))
+        : t('备份列表：无（尚未创建备份或尚未同步）', 'Backup list: none (no backups yet or not synced)')
+
       idxBkOut.textContent =
         t('当前项目：', 'Project: ') + inf.projectRel +
         '\n' + t('备份目录：', 'Backup dir: ') + joinFsPath(inf.libRoot, ain_backup_rel_prefix()) +
-        '\n' + t('latest：', 'latest: ') + (latest || t('无（尚未创建备份）', 'none (no backup yet)')) +
+        '\n' + t('备份数量：', 'Snapshots: ') + String(snaps.length) +
+        '\n' + t('最新备份：', 'Latest: ') + (latest || t('无（尚未创建备份）', 'none (no backup yet)')) +
         '\n' + t('提示：创建备份后，请到宿主 WebDAV 同步面板点一次“同步现在”（或等待自动同步）把备份上传到远端。', 'Tip: after creating a backup, run WebDAV sync in host to upload it.')
     } catch (e) {
       idxBkOut.textContent = t('状态：读取失败：', 'Status: failed: ') + (e && e.message ? e.message : String(e))
+      idxBkListOut.textContent = t('备份列表：读取失败', 'Backup list: failed')
     }
   }
 
@@ -4444,9 +4476,26 @@ async function openSettingsDialog(ctx) {
   }
   rowIdxBk.appendChild(btnIdxBkMake)
 
+  secIdxBk.appendChild(rowIdxBk)
+
+  const rowIdxBkPick = mkBtnRow()
+
+  const btnIdxBkRefresh = document.createElement('button')
+  btnIdxBkRefresh.className = 'ain-btn gray'
+  btnIdxBkRefresh.textContent = t('刷新备份列表', 'Refresh backups')
+  btnIdxBkRefresh.onclick = async () => {
+    try {
+      setBusy(btnIdxBkRefresh, true)
+      await refreshIdxBackupStatus()
+    } finally {
+      setBusy(btnIdxBkRefresh, false)
+    }
+  }
+  rowIdxBkPick.appendChild(btnIdxBkRefresh)
+
   const btnIdxBkRestore = document.createElement('button')
   btnIdxBkRestore.className = 'ain-btn red'
-  btnIdxBkRestore.textContent = t('从备份恢复（最新）', 'Restore (latest)')
+  btnIdxBkRestore.textContent = t('从备份恢复（选中）', 'Restore (selected)')
   btnIdxBkRestore.onclick = async () => {
     try {
       setBusy(btnIdxBkRestore, true)
@@ -4454,8 +4503,8 @@ async function openSettingsDialog(ctx) {
       const inf = await inferProjectDir(ctx, cfg)
       if (!inf) throw new Error(t('未选择当前项目', 'No project selected'))
 
-      const latest = await ain_backup_load_latest(ctx, cfg, inf)
-      const snapId = latest.snapId
+      const snapId = getPickedSnapshotId()
+      if (!snapId) throw new Error(t('未选择要恢复的备份', 'No snapshot selected'))
 
       const msg1 = [
         t('将从以下快照恢复索引：', 'Restore from snapshot: '),
@@ -4506,9 +4555,50 @@ async function openSettingsDialog(ctx) {
       try { await refreshIdxBackupStatus() } catch {}
     }
   }
-  rowIdxBk.appendChild(btnIdxBkRestore)
+  rowIdxBkPick.appendChild(btnIdxBkRestore)
 
-  secIdxBk.appendChild(rowIdxBk)
+  const btnIdxBkDelete = document.createElement('button')
+  btnIdxBkDelete.className = 'ain-btn gray'
+  btnIdxBkDelete.textContent = t('删除选中备份', 'Delete selected')
+  btnIdxBkDelete.onclick = async () => {
+    try {
+      setBusy(btnIdxBkDelete, true)
+      cfg = await loadCfg(ctx)
+      const inf = await inferProjectDir(ctx, cfg)
+      if (!inf) throw new Error(t('未选择当前项目', 'No project selected'))
+
+      const snapId = getPickedSnapshotId()
+      if (!snapId) throw new Error(t('未选择要删除的备份', 'No snapshot selected'))
+
+      // 需要原生确认框：避免宿主自定义对话框吞掉焦点/误点
+      const msg = t('确定删除以下备份？此操作不可恢复：', 'Delete this backup? This cannot be undone:') + '\n' + snapId
+      if (!(typeof window !== 'undefined' && typeof window.confirm === 'function')) {
+        throw new Error(t('当前环境不支持原生确认框（已拒绝删除）', 'Native confirm is not available (refusing to delete)'))
+      }
+      const ok = await _ainConfirm(msg)
+      if (!ok) return
+
+      if (!ctx || typeof ctx.invoke !== 'function') {
+        throw new Error(t('当前环境不支持删除目录', 'Delete is not supported in this environment'))
+      }
+
+      const p = await ain_backup_get_paths(ctx, cfg, inf)
+      const dirAbs = joinFsPath(p.projectBackupRootAbs, snapId)
+      idxBkOut.textContent = t('删除中…', 'Deleting...')
+      await ctx.invoke('force_remove_path', { path: dirAbs })
+      ctx.ui.notice(t('已删除备份：', 'Deleted: ') + snapId, 'ok', 1800)
+      await refreshIdxBackupStatus()
+    } catch (e) {
+      const msg = t('删除失败：', 'Delete failed: ') + (e && e.message ? e.message : String(e))
+      idxBkOut.textContent = msg
+      ctx.ui.notice(msg, 'err', 2600)
+    } finally {
+      setBusy(btnIdxBkDelete, false)
+    }
+  }
+  rowIdxBkPick.appendChild(btnIdxBkDelete)
+
+  secIdxBk.appendChild(rowIdxBkPick)
 
   const secSave = document.createElement('div')
   secSave.className = 'ain-card'
