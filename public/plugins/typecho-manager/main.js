@@ -818,13 +818,29 @@ function buildManagerDialog() {
           sessionState.settings.defaultDownloadDir = defaultDirInput.value.trim()
           await saveSettings(ctx, sessionState.settings)
         }
-        return
+        if (dir) return
+      }
+      // Android 兜底：直接走 SAF 选文件夹（避免“只能选到指定文件 / 选目录不可用”）
+      try {
+        const safDir = await safPickFolderForPlugin(ctx)
+        if (safDir) {
+          defaultDirInput.value = String(safDir || '')
+          sessionState.settings.defaultDownloadDir = defaultDirInput.value.trim()
+          await saveSettings(ctx, sessionState.settings)
+          return
+        }
+      } catch (e) {
+        // 继续走后续兜底（桌面/旧宿主）
       }
       if (ctx.pickDocFiles && typeof ctx.pickDocFiles === 'function') {
         const files = await ctx.pickDocFiles({ multiple: false })
         const first = Array.isArray(files) ? (files[0] || '') : (files || '')
         const p = String(first || '').trim()
         if (!p) return
+        if (isContentUriPath(p)) {
+          ctx.ui.notice(tmText('Android 外置库请使用“浏览...”选择文件夹（SAF），不要选文件。', 'On Android, please pick a folder (SAF) instead of a file.'), 'err', 2600)
+          return
+        }
         const dir = p.replace(/[\\/][^\\/]*$/, '')
         defaultDirInput.value = dir
         sessionState.settings.defaultDownloadDir = defaultDirInput.value.trim()
@@ -2759,6 +2775,113 @@ async function renderPostTable() {
 
 // ---- 下载到本地 & 文件工具 ----
 
+function isContentUriPath(p) {
+  return typeof p === 'string' && p.startsWith('content://')
+}
+
+// Android SAF：把 content:// URI 变成更可读的名字（仅用于提示，不做逻辑判断）
+function safPrettyName(uri) {
+  try {
+    const raw = String(uri || '').trim()
+    if (!raw) return ''
+    const last = (raw.split('/').pop() || raw).trim()
+    if (!last) return raw
+    const decoded = decodeURIComponent(last)
+    const afterSlash = decoded.split('/').pop() || decoded
+    const afterColon = afterSlash.includes(':') ? (afterSlash.split(':').pop() || afterSlash) : afterSlash
+    return afterColon || raw
+  } catch {
+    return String(uri || '')
+  }
+}
+
+async function isAndroidPlatform(context) {
+  try {
+    if (context?.invoke) {
+      const p = await context.invoke('get_platform')
+      if (typeof p === 'string' && p) return p === 'android'
+    }
+  } catch {}
+  try {
+    const ua = String(navigator?.userAgent || '')
+    return /Android/i.test(ua)
+  } catch {
+    return false
+  }
+}
+
+// Android：兜底的 SAF 文件夹选择（兼容旧宿主没有 pickDirectory/或移动端不支持目录选择的情况）
+async function safPickFolderForPlugin(context) {
+  try {
+    if (!context?.invoke) return ''
+    const isAndroid = await isAndroidPlatform(context)
+    if (!isAndroid) return ''
+    const uri = await context.invoke('android_saf_pick_folder', { timeoutMs: 60_000 })
+    return uri ? String(uri) : ''
+  } catch (e) {
+    const msg = String(e?.message || e || '')
+    if (/cancel/i.test(msg) || /canceled/i.test(msg) || /cancellation/i.test(msg)) return ''
+    throw e
+  }
+}
+
+async function persistSafUriPermissionForPlugin(context, uri) {
+  try {
+    if (!context?.invoke) return
+    if (!isContentUriPath(uri)) return
+    await context.invoke('android_persist_uri_permission', { uri })
+  } catch {}
+}
+
+async function safListDirForPlugin(context, uri) {
+  if (!context?.invoke) throw new Error('ctx.invoke 不可用，无法列举目录')
+  return await context.invoke('android_saf_list_dir', { uri })
+}
+
+async function safCreateFileForPlugin(context, parentUri, name, mimeType) {
+  if (!context?.invoke) throw new Error('ctx.invoke 不可用，无法创建文件')
+  // 注意：Tauri 2.0 会把 Rust 的 snake_case 参数名映射为 JS 的 camelCase
+  return await context.invoke('android_saf_create_file', { parentUri, name, mimeType })
+}
+
+async function resolveSafFileUriForWrite(context, parentUri, filename) {
+  await persistSafUriPermissionForPlugin(context, parentUri)
+
+  // 先列目录判断是否存在同名文件，以便复用/覆盖，而不是对“文件夹 URI”瞎写导致 openOutputStream 失败
+  let existingUri = ''
+  try {
+    const ents = await safListDirForPlugin(context, parentUri)
+    if (Array.isArray(ents)) {
+      for (const it of ents) {
+        const name = String(it?.name || '').trim()
+        const path = String(it?.path || '').trim()
+        const isDir = !!it?.isDir
+        if (!name || !path || isDir) continue
+        if (name === filename) {
+          existingUri = path
+          break
+        }
+      }
+    }
+  } catch (e) {
+    // 目录列举失败时仍尝试 createDocument；失败再把错误抛给上层提示
+    existingUri = ''
+  }
+
+  if (existingUri) {
+    const display = `${safPrettyName(parentUri) || '(SAF)'}${'/' + filename}`
+    const decision = await resolveConflictForPath(context, display)
+    if (decision === 'skip') return null
+    if (decision !== 'overwrite') return null
+    return existingUri
+  }
+
+  const created = await safCreateFileForPlugin(context, parentUri, filename, 'text/markdown')
+  const out = String(created || '').trim()
+  if (!out) throw new Error('创建文件失败：返回 URI 为空')
+  return out
+}
+
 function joinPath(dir, name) {
   const a = String(dir || '')
   const b = String(name || '')
@@ -2773,6 +2896,8 @@ async function getCurrentBaseDir(context) {
     if (fn && typeof fn === 'function') {
       const cur = fn()
       if (cur && typeof cur === 'string') {
+        // SAF(content://) 不能用字符串截断推导父目录：这会制造伪路径，后续写入必炸
+        if (isContentUriPath(cur)) return null
         return cur.replace(/[\\/][^\\/]*$/, '')
       }
     }
@@ -2791,7 +2916,8 @@ async function getCurrentBaseDir(context) {
       const sel = await context.pickDocFiles({ multiple: false })
       const first = Array.isArray(sel) ? (sel[0] || '') : (sel || '')
       const p = String(first || '').trim()
-      if (p) return p.replace(/[\\/][^\\/]*$/, '')
+      // SAF(content://) 无法从文件 URI 推导父目录：要求用户显式选择默认下载目录（文件夹）
+      if (p && !isContentUriPath(p)) return p.replace(/[\\/][^\\/]*$/, '')
     }
   } catch {}
   return null
@@ -2894,16 +3020,21 @@ async function downloadSinglePost(context, post) {
 
     const cfgDirRaw = String(sessionState.settings.defaultDownloadDir || '').trim()
     const useDefaultDir = sessionState.settings.alwaysUseDefaultDir && !!cfgDirRaw
+    const useSafFolder = useDefaultDir && isContentUriPath(cfgDirRaw)
     const isAbsCfg = !!cfgDirRaw && (/^[a-zA-Z]:[\\/]/.test(cfgDirRaw) || /^\\\\/.test(cfgDirRaw) || /^\//.test(cfgDirRaw))
 
     let baseDir = ''
-    if (useDefaultDir && isAbsCfg) {
+    let safFolderUri = ''
+    if (useSafFolder) {
+      // Android 外置库：defaultDownloadDir 是 SAF 文件夹 URI（content://...），不能当“路径字符串”拼接
+      safFolderUri = cfgDirRaw
+    } else if (useDefaultDir && isAbsCfg) {
       // 绝对路径：直接作为最终下载目录，不依赖当前文档
       baseDir = cfgDirRaw
     } else {
       const base = await getCurrentBaseDir(context)
       if (!base) {
-        context.ui.notice('无法确定下载目录：请先打开一个本地文档，或在设置中配置默认粘贴目录后重试。', 'err', 3000)
+        context.ui.notice('无法确定下载目录：请先打开一个本地文档，或在“连接 / 下载设置”中配置默认下载目录后重试。', 'err', 3000)
         return
       }
       baseDir = base
@@ -2911,7 +3042,10 @@ async function downloadSinglePost(context, post) {
         baseDir = joinPath(base, cfgDirRaw)
       }
     }
-    const fullPath = joinPath(baseDir, filename)
+
+    // SAF(content://) 下载：目标是“文件夹 URI”，不能当成普通路径拼接
+    if (!safFolderUri && isContentUriPath(baseDir)) safFolderUri = baseDir
+    const fullPath = safFolderUri ? '' : joinPath(baseDir, filename)
 
     const categories = Array.isArray(cats)
       ? cats.map((x) => String(x || '').trim()).filter(Boolean)
@@ -2962,6 +3096,23 @@ async function downloadSinglePost(context, post) {
 
     const yaml = buildYamlFromMeta(fm)
     const finalDoc = `---\n${yaml}\n---\n\n${mdBody || ''}`
+
+    if (safFolderUri) {
+      const fileUri = await resolveSafFileUriForWrite(context, safFolderUri, filename)
+      if (!fileUri) return
+      await writeTextFileAny(context, fileUri, finalDoc)
+      context.ui.notice(tmText('已保存到外置库：', 'Saved to SAF folder: ') + filename, 'ok', 2400)
+      // 刷新文件树
+      try {
+        const refreshFn = typeof window !== 'undefined' ? window.flymdRefreshFileTree : null
+        if (refreshFn && typeof refreshFn === 'function') {
+          await refreshFn()
+        }
+      } catch (e) {
+        console.log('[Typecho Manager] 刷新文件树失败，但不影响下载:', e)
+      }
+      return
+    }
 
     const exists = await checkFileExists(context, fullPath)
     if (exists) {
@@ -3768,13 +3919,27 @@ async function openSettingsDialog(context) {
         if (context.pickDirectory && typeof context.pickDirectory === 'function') {
           const dir = await context.pickDirectory({ defaultPath: inputDefaultDir.value || undefined })
           if (dir) inputDefaultDir.value = String(dir || '')
-          return
+          if (dir) return
+        }
+        // Android 兜底：直接走 SAF 选文件夹（避免移动端目录选择缺失导致只能选文件）
+        try {
+          const safDir = await safPickFolderForPlugin(context)
+          if (safDir) {
+            inputDefaultDir.value = String(safDir || '')
+            return
+          }
+        } catch (e) {
+          // 继续走后续兜底
         }
         if (context.pickDocFiles && typeof context.pickDocFiles === 'function') {
           const files = await context.pickDocFiles({ multiple: false })
           const first = Array.isArray(files) ? (files[0] || '') : (files || '')
           const p = String(first || '').trim()
           if (!p) return
+          if (isContentUriPath(p)) {
+            context.ui.notice(tmText('Android 外置库请使用“浏览...”选择文件夹（SAF），不要选文件。', 'On Android, please pick a folder (SAF) instead of a file.'), 'err', 2600)
+            return
+          }
           const dir = p.replace(/[\\/][^\\/]*$/, '')
           inputDefaultDir.value = dir
           return
