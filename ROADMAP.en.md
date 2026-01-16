@@ -2,6 +2,11 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v1.1.9
+- Added: WebDAV encryption salt now syncs to a remote file; new devices automatically align the salt, preventing cross-device decryption failures
+- Improved: WebDAV sync conflict resolution now offers an "Apply to all files" option
+- Improved: After cross-device sync, local image paths are automatically remapped to "current document's images/", making images visible on new devices (without modifying document content)
+
 ## Update v1.1.8
 - Added: Online announcements (fetches announcement JSON in background; shows bottom-right notifications with link action)
 - Added: Reading mode context menu “Copy as rich text (embed images)” to copy images as content instead of markup
