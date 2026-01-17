@@ -2,6 +2,12 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v1.2.0
+- Added: In PDF preview, `Ctrl+Shift+P` opens Command Palette (desktop native shortcut capture + forward)
+- Improved: Library sidebar items show full filename/path on hover (including extension), avoiding ellipsis ambiguity
+- Updated: PDF2Doc plugin v0.1.8 (multi-token config & rotation; total remaining pages + balance entry; pre-parse quota risk warning; large-text parsing grouped by speaker; copy tweaks)
+- Improved: New plugin API `getPdfPageCount` (for PDF page-count estimation and quota prompts)
+
 ## Update v1.1.9
 - Added: WebDAV encryption salt now syncs to a remote file; new devices automatically align the salt, preventing cross-device decryption failures
 - Improved: WebDAV sync conflict resolution now offers an "Apply to all files" option
