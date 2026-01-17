@@ -250,15 +250,21 @@ function showQuotaRiskDialog(context, pdfPages, remainPages) {
           ? pdf2docText('剩余解析页数为 0（不足以开始解析）', 'Remaining pages: 0 (not enough to start)')
           : pdf2docText('剩余解析页数不足以覆盖 PDF 页数，解析可能中断', 'Remaining pages are lower than PDF pages; parsing may stop early'))
       : ''
+    const cacheHint = pdf2docText(
+      '解析为 Markdown 支持缓存失败续传/24小时内同一内容不会重复扣费',
+      'Markdown parsing supports resume with cache; same content within 24 hours will not be billed again.'
+    )
     const docxHint = pdf2docText(
-      '多页数 PDF 建议先转换成 MD 再另存为 Docx，直接转换 Docx 的失败率较高。',
-      'For multi-page PDFs, convert to Markdown first and then export to DOCX; direct DOCX conversion has a higher failure rate.'
+      '多页数 PDF 建议先转换成 MD 再另存为 Docx，直接转换 Docx 的失败也会扣费。',
+      'For multi-page PDFs, convert to Markdown first and then export to DOCX; failed DOCX conversion is still billed.'
     )
     msg.innerHTML = pdf2docText(
       `当前 PDF 页数：<strong>${pdfText}</strong> 页<br>剩余解析页数：<strong>${remainText}</strong> 页` +
+        `<br><span style="color:#16a34a;font-weight:600;">${cacheHint}</span>` +
         `<br><span style="color:#dc2626;font-weight:600;">${docxHint}</span>` +
         (warnText ? `<br><span style="color:#dc2626;font-weight:600;">${warnText}</span>` : ''),
       `PDF pages: <strong>${pdfText}</strong><br>Remaining parse pages: <strong>${remainText}</strong>` +
+        `<br><span style="color:#16a34a;font-weight:600;">${cacheHint}</span>` +
         `<br><span style="color:#dc2626;font-weight:600;">${docxHint}</span>` +
         (warnText ? `<br><span style="color:#dc2626;font-weight:600;">${warnText}</span>` : '')
     )
