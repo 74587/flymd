@@ -907,7 +907,7 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
     quotaRow.style.cssText =
       'margin-top:4px;margin-bottom:4px;font-size:13px;color:var(--muted,#4b5563);'
     const quotaLabel = document.createElement('span')
-    quotaLabel.textContent = pdf2docText('当前剩余可用解析页数：', 'Remaining parse pages: ')
+    quotaLabel.textContent = pdf2docText('当前合计剩余可用解析页数：', 'Total remaining parse pages: ')
     const quotaValue = document.createElement('span')
     quotaValue.textContent = pdf2docText('正在查询...', 'Querying...')
     quotaRow.appendChild(quotaLabel)
@@ -976,11 +976,18 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
         apiUrl += '/'
       }
       try {
+        const enabledTokens = getEnabledApiTokens(cfg).map(it => it.token).filter(Boolean)
+        const primaryToken = getPrimaryApiToken(cfg)
+        const headers = {
+          Authorization: 'Bearer ' + (primaryToken || '')
+        }
+        if (enabledTokens.length > 1) {
+          headers['X-Api-Tokens'] = JSON.stringify(enabledTokens)
+        }
+
         const res = await context.http.fetch(apiUrl, {
           method: 'GET',
-          headers: {
-            Authorization: 'Bearer ' + (cfg.apiToken || '')
-          }
+          headers
         })
 
         const text = await res.text()
@@ -1567,11 +1574,18 @@ export async function activate(context) {
         apiUrl += '/'
       }
 
+      const enabledTokens = getEnabledApiTokens(cfg).map(it => it.token).filter(Boolean)
+      const primaryToken = getPrimaryApiToken(cfg)
+      const headers = {
+        Authorization: 'Bearer ' + (primaryToken || '')
+      }
+      if (enabledTokens.length > 1) {
+        headers['X-Api-Tokens'] = JSON.stringify(enabledTokens)
+      }
+
       const res = await context.http.fetch(apiUrl, {
         method: 'GET',
-        headers: {
-          Authorization: 'Bearer ' + cfg.apiToken
-        }
+        headers
       })
 
       const text = await res.text()
@@ -1584,8 +1598,8 @@ export async function activate(context) {
 
         context.ui.notice(
           pdf2docText(
-            'PDF2Doc 剩余页数：' + remain + ' 页（总 ' + total + ' 页）',
-            'PDF2Doc remaining pages: ' + remain + ' (total ' + total + ')'
+            'PDF2Doc 合计剩余页数：' + remain + ' 页（总 ' + total + ' 页）',
+            'PDF2Doc total remaining pages: ' + remain + ' (total ' + total + ')'
           ),
           'ok',
           5000
