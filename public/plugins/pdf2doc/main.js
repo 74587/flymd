@@ -251,8 +251,8 @@ function showQuotaRiskDialog(context, pdfPages, remainPages) {
           : pdf2docText('剩余解析页数不足以覆盖 PDF 页数，解析可能中断', 'Remaining pages are lower than PDF pages; parsing may stop early'))
       : ''
     const cacheHint = pdf2docText(
-      '解析为 Markdown 支持缓存失败续传/24小时内同一内容不会重复扣费',
-      'Markdown parsing supports resume with cache; same content within 24 hours will not be billed again.'
+      '解析为 Markdown 支持缓存',
+      'Markdown parsing supports resume with cache;'
     )
     const docxHint = pdf2docText(
       '多页数 PDF 建议先转换成 MD 再另存为 Docx，直接转换 Docx 的失败也会扣费。',
