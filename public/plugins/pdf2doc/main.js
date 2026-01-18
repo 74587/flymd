@@ -6,6 +6,7 @@ const DEFAULT_API_BASE = 'https://flymd.llingfei.com/pdf/'
 const PDF2DOC_COMPAT_VERSION = '1.2.0'
 const PDF2DOC_STYLE_ID = 'pdf2doc-settings-style'
 const PDF2DOC_PROGRESS_Z_INDEX = 90020
+const PDF2DOC_SPLIT_THRESHOLD_PAGES = 300
 
 // 轻量多语言：跟随宿主（flymd.locale），默认用系统语言
 const PDF2DOC_LOCALE_LS_KEY = 'flymd.locale'
@@ -129,6 +130,47 @@ function isPdf2DocCancelledError(err) {
   return !!(err && typeof err === 'object' && err._pdf2docCancelled === true)
 }
 
+function isPdf2DocNetworkError(err) {
+  const msg = err && err.message ? String(err.message) : String(err || '')
+  const lower = msg.toLowerCase()
+  return msg.startsWith('网络请求失败') || lower.startsWith('network request failed')
+}
+
+function pdf2docSleep(ms) {
+  const t = typeof ms === 'number' && Number.isFinite(ms) ? ms : 0
+  return new Promise(resolve => setTimeout(resolve, Math.max(0, t)))
+}
+
+async function retryOnPdf2DocNetworkError(task, opt) {
+  const maxAttemptsRaw = opt && typeof opt.maxAttempts === 'number' ? opt.maxAttempts : 3
+  const maxAttempts = Math.max(1, Math.min(5, Math.floor(maxAttemptsRaw)))
+  const baseDelayMsRaw = opt && typeof opt.baseDelayMs === 'number' ? opt.baseDelayMs : 800
+  const baseDelayMs = Math.max(200, Math.min(5000, Math.floor(baseDelayMsRaw)))
+  const onRetry = opt && typeof opt.onRetry === 'function' ? opt.onRetry : null
+  const cancelSource = opt && opt.cancelSource ? opt.cancelSource : null
+
+  let lastErr = null
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      if (cancelSource && cancelSource.cancelled) throw createPdf2DocCancelledError()
+      // eslint-disable-next-line no-await-in-loop
+      return await task(attempt)
+    } catch (e) {
+      lastErr = e
+      if (isPdf2DocCancelledError(e)) throw e
+      if (!isPdf2DocNetworkError(e)) throw e
+      if (attempt >= maxAttempts) throw e
+      if (onRetry) {
+        try { onRetry(attempt, maxAttempts, e) } catch {}
+      }
+      const delay = baseDelayMs * Math.pow(2, attempt - 1)
+      // eslint-disable-next-line no-await-in-loop
+      await pdf2docSleep(delay)
+    }
+  }
+  throw lastErr || new Error(pdf2docText('网络请求失败', 'Network request failed'))
+}
+
 function createPdf2DocCancelSource() {
   let cancelled = false
   let resolveCancel = null
@@ -217,6 +259,8 @@ function showQuotaRiskDialog(context, pdfPages, remainPages, opt) {
 
     const requireLibrary = !!(opt && opt.requireLibrary)
     const canMoveToLibrary = !!(opt && opt.canMoveToLibrary)
+    const requireSplit = !!(opt && opt.requireSplit)
+    const canSplit = !!(opt && opt.canSplit)
 
     const overlay = document.createElement('div')
     overlay.style.cssText =
@@ -273,7 +317,15 @@ function showQuotaRiskDialog(context, pdfPages, remainPages, opt) {
     )
     body.appendChild(msg)
 
-    if (requireLibrary) {
+    if (requireSplit) {
+      const tip = document.createElement('div')
+      tip.style.cssText = 'margin-top:10px;padding:10px 12px;border-radius:10px;border:1px solid #f59e0b;background:rgba(245,158,11,.08);color:var(--fg,#333);font-size:12px;line-height:1.6;'
+      tip.innerHTML = pdf2docText(
+        '当前 PDF 过大，需分割。分割文档会新建文件名文件夹，可通过“解析该文件夹内所有PDF”进行解析，解析完成后可通过“合并分割片段”进行合并。',
+        'This PDF is too large and must be split. A folder will be created; use “Parse all PDFs in this folder”, then use “Merge split parts”.'
+      )
+      body.appendChild(tip)
+    } else if (requireLibrary) {
       const tip = document.createElement('div')
       tip.style.cssText = 'margin-top:10px;padding:10px 12px;border-radius:10px;border:1px solid #f59e0b;background:rgba(245,158,11,.08);color:var(--fg,#333);font-size:12px;line-height:1.6;'
       tip.innerHTML = pdf2docText(
@@ -311,6 +363,12 @@ function showQuotaRiskDialog(context, pdfPages, remainPages, opt) {
       'padding:6px 12px;border-radius:8px;border:1px solid #16a34a;background:#fff;color:#16a34a;cursor:pointer;font-size:12px;'
     btnMove.textContent = pdf2docText('复制到库内并打开', 'Copy into library and open')
 
+    const btnSplit = document.createElement('button')
+    btnSplit.type = 'button'
+    btnSplit.style.cssText =
+      'padding:6px 12px;border-radius:8px;border:1px solid #f59e0b;background:#fff;color:#b45309;cursor:pointer;font-size:12px;'
+    btnSplit.textContent = pdf2docText('分割并打开文件夹', 'Split and open folder')
+
     const done = (action) => {
       try {
         document.body.removeChild(overlay)
@@ -322,6 +380,7 @@ function showQuotaRiskDialog(context, pdfPages, remainPages, opt) {
     btnRecharge.onclick = () => done('recharge')
     btnOk.onclick = () => done('continue')
     btnMove.onclick = () => done('move')
+    btnSplit.onclick = () => done('split')
     overlay.onclick = (e) => {
       if (e.target === overlay) done('cancel')
     }
@@ -329,10 +388,13 @@ function showQuotaRiskDialog(context, pdfPages, remainPages, opt) {
 
     footer.appendChild(btnCancel)
     footer.appendChild(btnRecharge)
+    if (requireSplit && canSplit) {
+      footer.appendChild(btnSplit)
+    }
     if (requireLibrary && canMoveToLibrary) {
       footer.appendChild(btnMove)
     }
-    if (requireLibrary) {
+    if (requireLibrary || requireSplit) {
       btnOk.disabled = true
       btnOk.style.opacity = '0.55'
       btnOk.style.cursor = 'not-allowed'
@@ -361,6 +423,241 @@ function getBaseNameFromPath(p) {
   const s = String(p || '').replace(/\\/g, '/')
   const parts = s.split('/').filter(Boolean)
   return parts.length ? parts[parts.length - 1] : ''
+}
+
+function isAbsolutePath(p) {
+  const s = String(p || '')
+  if (!s) return false
+  if (/^[A-Za-z]:[\\/]/.test(s)) return true
+  if (s.startsWith('\\\\')) return true
+  if (s.startsWith('/')) return true
+  return false
+}
+
+function getSafeBaseNameForFile(name, fallback) {
+  const base = String(name || fallback || 'document')
+    .replace(/[\\/:*?"<>|]+/g, '_')
+    .trim()
+  return base || String(fallback || 'document')
+}
+
+function joinPath(dir, name) {
+  const d = String(dir || '')
+  const n = String(name || '')
+  if (!d) return n
+  const sep = d.includes('\\') ? '\\' : '/'
+  const dd = d.replace(/[\\/]+$/, '')
+  return dd + sep + n
+}
+
+function hasParsedMdInDir(existingNamesLower, safeBaseName) {
+  const base = ('解析' + String(safeBaseName || '') + '.md').toLowerCase()
+  if (existingNamesLower && typeof existingNamesLower.has === 'function') {
+    if (existingNamesLower.has(base)) return true
+    for (let i = 1; i <= 50; i += 1) {
+      const alt = ('解析' + String(safeBaseName || '') + '-' + i + '.md').toLowerCase()
+      if (existingNamesLower.has(alt)) return true
+    }
+  }
+  return false
+}
+
+function pad3(n) {
+  const x = typeof n === 'number' ? n : parseInt(String(n || '0'), 10) || 0
+  return String(Math.max(0, x)).padStart(3, '0')
+}
+
+async function requestSplitPdf(context, cfg, pdfBytes, fileName) {
+  if (!context || !context.http || typeof context.http.fetch !== 'function') {
+    throw new Error(pdf2docText('当前环境不支持网络请求', 'HTTP requests are not supported in this environment'))
+  }
+
+  let apiUrl = (cfg.apiBaseUrl || DEFAULT_API_BASE).trim()
+  if (apiUrl.endsWith('/pdf')) {
+    apiUrl += '/'
+  }
+  const splitUrl = apiUrl.replace(/\/+$/, '/') + 'split.php'
+
+  const candidates = getEnabledApiTokens(cfg).map(it => it.token).filter(Boolean)
+  const legacy = String(cfg.apiToken || '').trim()
+  if (candidates.length === 0 && legacy) candidates.push(legacy)
+  if (candidates.length === 0) {
+    throw new Error(pdf2docText('未配置密钥', 'Token is not configured'))
+  }
+
+  const token = candidates[0]
+  const xApiTokens = candidates.length > 1 ? JSON.stringify(candidates) : ''
+
+  const arr = pdfBytes instanceof Uint8Array
+    ? pdfBytes
+    : (pdfBytes instanceof ArrayBuffer
+      ? new Uint8Array(pdfBytes)
+      : new Uint8Array(pdfBytes || []))
+
+  const blob = new Blob([arr], { type: 'application/pdf' })
+  const safeName = (String(fileName || '').trim() || 'document.pdf').replace(/[\\/:*?"<>|]+/g, '_')
+  const finalName = /\.pdf$/i.test(safeName) ? safeName : (safeName + '.pdf')
+  const file = new File([blob], finalName, { type: 'application/pdf' })
+
+  const form = new FormData()
+  form.append('file', file, file.name)
+  // 分割片段页数由后端 .env 控制：前端不覆盖，避免本地改动导致线上配置失效
+
+  const headers = {
+    Authorization: 'Bearer ' + token,
+    'X-PDF2DOC-Version': PDF2DOC_COMPAT_VERSION
+  }
+  if (xApiTokens) headers['X-Api-Tokens'] = xApiTokens
+
+  let res
+  try {
+    res = await context.http.fetch(splitUrl, {
+      method: 'POST',
+      headers,
+      body: form
+    })
+  } catch (e) {
+    throw new Error(pdf2docText('网络请求失败：' + (e && e.message ? e.message : String(e)), 'Network request failed: ' + (e && e.message ? e.message : String(e))))
+  }
+
+  let data = null
+  try {
+    data = await res.json()
+  } catch (e) {
+    throw new Error(pdf2docText('响应格式错误', 'Invalid response format'))
+  }
+
+  if (!data || typeof data !== 'object') {
+    throw new Error(pdf2docText('响应格式错误', 'Invalid response format'))
+  }
+
+  if (!res || res.status < 200 || res.status >= 300) {
+    const msg = data && (data.message || data.error) ? String(data.message || data.error) : ''
+    if (msg) throw new Error(msg)
+    throw new Error(pdf2docText('请求失败（HTTP ' + (res ? res.status : '?') + '）', 'Request failed (HTTP ' + (res ? res.status : '?') + ')'))
+  }
+  if (!data.ok) {
+    const msg = data.message || data.error || pdf2docText('分割失败', 'Split failed')
+    throw new Error(String(msg))
+  }
+
+  return data
+}
+
+async function writeTextFileRenameAuto(context, absPath, content) {
+  if (!context || typeof context.writeTextFile !== 'function') {
+    throw new Error(pdf2docText('当前版本不支持写入文件', 'Writing files is not supported in this version'))
+  }
+  if (typeof context.exists !== 'function') {
+    await context.writeTextFile(absPath, content)
+    return absPath
+  }
+
+  const tryPath = async (p) => {
+    const ok = await context.exists(p)
+    if (!ok) {
+      await context.writeTextFile(p, content)
+      return p
+    }
+    return ''
+  }
+
+  const base = String(absPath || '')
+  if (!base) {
+    throw new Error(pdf2docText('路径错误', 'Invalid path'))
+  }
+
+  const dot = base.lastIndexOf('.')
+  const prefix = dot > 0 ? base.slice(0, dot) : base
+  const ext = dot > 0 ? base.slice(dot) : ''
+
+  const first = await tryPath(base)
+  if (first) return first
+
+  for (let i = 1; i <= 50; i += 1) {
+    const p = prefix + '-' + i + ext
+    const saved = await tryPath(p)
+    if (saved) return saved
+  }
+
+  throw new Error(pdf2docText('文件名冲突过多', 'Too many file name conflicts'))
+}
+
+async function splitPdfIntoLibraryFolder(context, cfg, pdfBytes, sourcePathOrName, opt) {
+  if (!context || typeof context.saveBinaryToCurrentFolder !== 'function') {
+    throw new Error(pdf2docText('当前版本不支持保存文件', 'Saving files is not supported in this version'))
+  }
+  if (!pdfBytes) {
+    throw new Error(pdf2docText('无法读取 PDF 内容', 'Failed to read PDF content'))
+  }
+
+  const name = getBaseNameFromPath(sourcePathOrName) || String(sourcePathOrName || '') || 'document.pdf'
+  const baseName = getSafeBaseNameForFile(name.replace(/\.pdf$/i, ''), 'PDF-分割')
+
+  const resp = await requestSplitPdf(context, cfg, pdfBytes, name)
+  const folderName = getSafeBaseNameForFile(resp.folder_name || baseName, baseName)
+  const segments = Array.isArray(resp.segments) ? resp.segments : []
+  if (segments.length === 0) {
+    throw new Error(pdf2docText('分割结果为空', 'Split result is empty'))
+  }
+
+  const onProgress = opt && typeof opt.onProgress === 'function' ? opt.onProgress : null
+  const report = (d, t) => {
+    if (!onProgress) return
+    try { onProgress(d, t) } catch {}
+  }
+
+  let firstSavedPath = ''
+  const total = segments.length
+  let done = 0
+  report(0, total)
+  for (const seg of segments) {
+    const idx = typeof seg.index === 'number' ? seg.index : parseInt(String(seg.index || '0'), 10) || 0
+    const url = seg && seg.url ? String(seg.url) : ''
+    if (!url) continue
+
+    const r = await context.http.fetch(url, { method: 'GET' })
+    if (!r || r.status < 200 || r.status >= 300) {
+      throw new Error(pdf2docText('下载分割片段失败（HTTP ' + (r ? r.status : '?') + '）', 'Failed to download split part (HTTP ' + (r ? r.status : '?') + ')'))
+    }
+    const buf = await r.arrayBuffer()
+    const bytes = new Uint8Array(buf)
+    const fileName = '分割片段' + pad3(idx) + '-' + baseName + '.pdf'
+
+    const saved = await context.saveBinaryToCurrentFolder({
+      fileName,
+      data: bytes,
+      subDir: folderName,
+      onConflict: 'renameAuto'
+    })
+    const savedPath = saved && saved.fullPath ? String(saved.fullPath) : ''
+    if (!firstSavedPath && savedPath) {
+      firstSavedPath = savedPath
+    }
+
+    done += 1
+    report(done, total)
+  }
+
+  if (!firstSavedPath) {
+    throw new Error(pdf2docText('保存分割片段失败', 'Failed to save split parts'))
+  }
+
+  if (typeof context.openFileByPath === 'function') {
+    try {
+      await context.openFileByPath(firstSavedPath)
+    } catch {}
+  }
+
+  if (context && context.ui && typeof context.ui.notice === 'function') {
+    context.ui.notice(
+      pdf2docText('分割完成，已保存到库内并打开第一个片段。请按需解析/合并。', 'Split finished. The first part is opened. You can parse/merge when ready.'),
+      'ok',
+      4000
+    )
+  }
+
+  return firstSavedPath
 }
 
 async function copyPdfIntoLibraryAndOpen(context, pdfBytes, sourcePath) {
@@ -455,28 +752,50 @@ async function confirmQuotaRiskBeforeParse(context, cfg, pdfBytes, pdfPagesHint,
 
     let requireLibrary = false
     let canMoveToLibrary = false
+    let requireSplit = false
+    let canSplit = false
     if (pdfPath && context) {
       try {
         const root = typeof context.getLibraryRoot === 'function' ? await context.getLibraryRoot() : null
-        const inLib = root ? isPathInDir(pdfPath, root) : false
-        requireLibrary = !inLib || !hasPdfPages
+        const shouldCheckLibrary = !!root && isAbsolutePath(pdfPath)
+        const inLib = shouldCheckLibrary && root ? isPathInDir(pdfPath, root) : true
+        requireLibrary = shouldCheckLibrary && (!inLib || !hasPdfPages)
         canMoveToLibrary =
+          shouldCheckLibrary &&
           !!root &&
           typeof context.saveBinaryToCurrentFolder === 'function' &&
           typeof context.openFileByPath === 'function' &&
           !!pdfBytes
+
+        // 对于“选择文件”这类拿不到绝对路径的场景：如果连页数都拿不到，就要求用户先复制到库内再解析。
+        if (!shouldCheckLibrary && !!root && !hasPdfPages) {
+          requireLibrary = true
+          canMoveToLibrary =
+            typeof context.saveBinaryToCurrentFolder === 'function' &&
+            typeof context.openFileByPath === 'function' &&
+            !!pdfBytes
+        }
       } catch {
-        requireLibrary = !hasPdfPages
-        canMoveToLibrary =
-          typeof context.saveBinaryToCurrentFolder === 'function' &&
-          typeof context.openFileByPath === 'function' &&
-          !!pdfBytes
+        requireLibrary = false
+        canMoveToLibrary = false
       }
+    }
+
+    if (hasPdfPages && pdfPages > PDF2DOC_SPLIT_THRESHOLD_PAGES) {
+      requireSplit = true
+      canSplit =
+        !!pdfBytes &&
+        context &&
+        context.http &&
+        typeof context.http.fetch === 'function' &&
+        typeof context.saveBinaryToCurrentFolder === 'function'
     }
 
     const ret = await showQuotaRiskDialog(context, pdfPages, remain, {
       requireLibrary,
-      canMoveToLibrary
+      canMoveToLibrary,
+      requireSplit,
+      canSplit
     })
     const action = ret && ret.action ? ret.action : 'cancel'
     if (action === 'recharge') {
@@ -500,6 +819,44 @@ async function confirmQuotaRiskBeforeParse(context, cfg, pdfBytes, pdfPagesHint,
             pdf2docText('复制失败：' + msg, 'Copy failed: ' + msg),
             'err',
             4000
+          )
+        }
+      }
+      return false
+    }
+    if (action === 'split') {
+      let overlay = null
+      try {
+        overlay = openPdf2DocProgressOverlay({ output: 'markdown' })
+        if (overlay && typeof overlay.setStage === 'function') {
+          overlay.setStage('splitting')
+        }
+      } catch {}
+      try {
+        await splitPdfIntoLibraryFolder(context, cfg, pdfBytes, pdfPath, {
+          onProgress: (done, total) => {
+            if (overlay && typeof overlay.setSplitProgress === 'function') {
+              overlay.setSplitProgress(done, total)
+            }
+          }
+        })
+        if (overlay && typeof overlay.close === 'function') {
+          overlay.close()
+          overlay = null
+        }
+      } catch (e) {
+        const msg = e && e.message ? String(e.message) : String(e || '')
+        if (overlay && typeof overlay.fail === 'function') {
+          overlay.fail(
+            pdf2docText('分割失败：' + msg, 'Split failed: ' + msg),
+            pdf2docText('分割失败', 'Split failed')
+          )
+          overlay = null
+        } else if (context && context.ui && typeof context.ui.notice === 'function') {
+          context.ui.notice(
+            pdf2docText('分割失败：' + msg, 'Split failed: ' + msg),
+            'err',
+            5000
           )
         }
       }
@@ -1675,6 +2032,11 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
       cancelRequested: false,
       postDone: 0,
       postTotal: 0,
+      splitDone: 0,
+      splitTotal: 0,
+      batchDone: 0,
+      batchTotal: 0,
+      batchName: '',
       timer: null,
       onKeyDown: null
     }
@@ -1704,6 +2066,36 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
         sub.textContent = pdf2docText(
           `正在上传文件（已用时 ${fmtElapsed()}）`,
           `Uploading file (elapsed ${fmtElapsed()})`
+        )
+        return
+      }
+      if (st === 'splitting') {
+        title.textContent = pdf2docText('分割中', 'Splitting')
+        const total = state.splitTotal || 0
+        const done = state.splitDone || 0
+        if (total > 0) {
+          sub.textContent = pdf2docText(
+            `正在保存分割片段 ${Math.min(done, total)}/${total}（已用时 ${fmtElapsed()}）`,
+            `Saving split parts ${Math.min(done, total)}/${total} (elapsed ${fmtElapsed()})`
+          )
+        } else {
+          sub.textContent = pdf2docText(
+            `正在分割 PDF（已用时 ${fmtElapsed()}）`,
+            `Splitting PDF (elapsed ${fmtElapsed()})`
+          )
+        }
+        return
+      }
+      if (st === 'batch') {
+        title.textContent = pdf2docText('批量解析中', 'Batch parsing')
+        const total = state.batchTotal || 0
+        const done = state.batchDone || 0
+        const name = String(state.batchName || '')
+        const countText = total > 0 ? `${Math.min(done, total)}/${total}` : pdf2docText('处理中', 'processing')
+        const nameText = name ? ('：' + name) : ''
+        sub.textContent = pdf2docText(
+          `正在批量解析 ${countText}${nameText}（已用时 ${fmtElapsed()}）`,
+          `Batch parsing ${countText}${nameText} (elapsed ${fmtElapsed()})`
         )
         return
       }
@@ -1843,9 +2235,30 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
           render()
         }
       },
-      fail(message) {
+      setSplitProgress(done, total) {
         if (state.closed) return
-        title.textContent = pdf2docText('解析失败', 'Parse failed')
+        const d = typeof done === 'number' && Number.isFinite(done) ? done : parseInt(done || '0', 10) || 0
+        const t = typeof total === 'number' && Number.isFinite(total) ? total : parseInt(total || '0', 10) || 0
+        state.splitDone = Math.max(0, d)
+        state.splitTotal = Math.max(0, t)
+        if (String(state.stage || '') === 'splitting') {
+          render()
+        }
+      },
+      setBatchProgress(done, total, name) {
+        if (state.closed) return
+        const d = typeof done === 'number' && Number.isFinite(done) ? done : parseInt(done || '0', 10) || 0
+        const t = typeof total === 'number' && Number.isFinite(total) ? total : parseInt(total || '0', 10) || 0
+        state.batchDone = Math.max(0, d)
+        state.batchTotal = Math.max(0, t)
+        state.batchName = String(name || '')
+        if (String(state.stage || '') === 'batch') {
+          render()
+        }
+      },
+      fail(message, titleOverride) {
+        if (state.closed) return
+        title.textContent = titleOverride ? String(titleOverride) : pdf2docText('解析失败', 'Parse failed')
         sub.textContent = pdf2docText(
           `已用时 ${fmtElapsed()}`,
           `Elapsed ${fmtElapsed()}`
@@ -2424,222 +2837,6 @@ export async function activate(context) {
           }
         },
         {
-          label: pdf2docText('选择文件', 'Choose file'),
-         onClick: async () => {
-           let loadingId = null
-           let parseOverlay = null
-           let cancelSource = null
-           try {
-             const cfg = await loadConfig(context)
-             if (!hasAnyApiToken(cfg)) {
-               context.ui.notice(
-                 pdf2docText('请先在插件设置中配置密钥', 'Please configure the PDF2Doc token in plugin settings first'),
-                'err'
-              )
-              return
-            }
-
-            const file = await pickPdfFile()
-
-             // 解析前额度风险提示：每次解析前都提示一次（用户要求）。
-             try {
-               const buf = await file.arrayBuffer()
-               const ok = await confirmQuotaRiskBeforeParse(context, cfg, buf)
-               if (!ok) return
-             } catch {
-               const ok = await confirmQuotaRiskBeforeParse(context, cfg, null)
-               if (!ok) return
-             }
-
-             cancelSource = createPdf2DocCancelSource()
-             parseOverlay = openPdf2DocProgressOverlay({
-               output: cfg.defaultOutput,
-               onCancel: () => {
-                 try { if (cancelSource) cancelSource.cancel() } catch {}
-               }
-             })
-             if (!parseOverlay) {
-               if (context.ui.showNotification) {
-                 loadingId = context.ui.showNotification(
-                   pdf2docText('正在解析 PDF，请稍候...', 'Parsing PDF, please wait...'),
-                  {
-                    type: 'info',
-                    duration: 0
-                  }
-                )
-              } else {
-                context.ui.notice(
-                  pdf2docText('正在解析 PDF，请稍候...', 'Parsing PDF, please wait...'),
-                  'ok',
-                  3000
-                )
-               }
-             }
-
-             const result = await uploadAndParsePdfFile(context, cfg, file, cfg.defaultOutput, cancelSource)
-
-             if (parseOverlay) parseOverlay.setStage('post')
-             if (loadingId && context.ui.hideNotification) {
-               context.ui.hideNotification(loadingId)
-             }
-
-            if (result.format === 'markdown' && result.markdown) {
-              const baseName = file && file.name ? file.name.replace(/\.pdf$/i, '') : 'document'
-              const safeBaseName = String(baseName || '')
-                .replace(/[\\/:*?"<>|]+/g, '_')
-                .trim() || 'document'
-              const localized = await localizeMarkdownImages(context, result.markdown, {
-                baseName: safeBaseName,
-                onProgress: (done, total) => {
-                  if (parseOverlay && typeof parseOverlay.setPostProgress === 'function') {
-                    parseOverlay.setPostProgress(done, total)
-                  }
-                }
-              })
-
-              // 解析 PDF（通过文件选择）时，同时：
-              // 1. 在当前文档中插入解析结果
-              // 2. 在当前库/当前文档目录下保存一份独立的 Markdown 文件，便于长期保存与同步
-              let savedPath = ''
-              if (typeof context.saveMarkdownToCurrentFolder === 'function') {
-                try {
-                  const mdFileName = '解析' + safeBaseName + '.md'
-                  savedPath = await context.saveMarkdownToCurrentFolder({
-                    fileName: mdFileName,
-                    content: localized,
-                    onConflict: 'renameAuto'
-                  })
-                } catch {}
-              }
-
-              const current = context.getEditorValue()
-              const merged = current ? current + '\n\n' + localized : localized
-              context.setEditorValue(merged)
-
-              if (parseOverlay) {
-                parseOverlay.close()
-                parseOverlay = null
-              }
-
-              const pagesInfo = result.pages
-                ? pdf2docText('（' + result.pages + ' 页）', ' (' + result.pages + ' pages)')
-                : ''
-              if (savedPath) {
-                context.ui.notice(
-                  pdf2docText(
-                    'PDF 解析完成，已插入并保存为 Markdown 文件' + pagesInfo,
-                    'PDF parsed and inserted; Markdown file saved' + pagesInfo
-                  ),
-                  'ok'
-                )
-              } else {
-                context.ui.notice(
-                  pdf2docText(
-                    'PDF 解析完成，已插入 Markdown' + pagesInfo,
-                    'PDF parsed and inserted as Markdown' + pagesInfo
-                  ),
-                  'ok'
-                )
-              }
-            } else if (result.format === 'docx' && result.docx_url) {
-              if (parseOverlay) parseOverlay.setStage('finalizing')
-              let docxFileName = 'document.docx'
-              if (file && file.name) {
-                docxFileName = file.name.replace(/\.pdf$/i, '') + '.docx'
-              }
-
-              let downloadSuccess = false
-              try {
-                const downloadLink = document.createElement('a')
-                downloadLink.href = result.docx_url
-                downloadLink.target = '_blank'
-                downloadLink.download = docxFileName
-                downloadLink.style.display = 'none'
-                document.body.appendChild(downloadLink)
-                downloadLink.click()
-                setTimeout(() => {
-                  try {
-                    document.body.removeChild(downloadLink)
-                  } catch {}
-                }, 100)
-                downloadSuccess = true
-
-                if (parseOverlay) {
-                  parseOverlay.close()
-                  parseOverlay = null
-                }
-
-                context.ui.notice(
-                  pdf2docText(
-                    'docx 文件已开始下载，请查看浏览器下载栏（' + (result.pages || '?') + ' 页）',
-                    'DOCX download started; check your browser downloads (' +
-                      (result.pages || '?') +
-                      ' pages).'
-                  ),
-                  'ok',
-                  5000
-                )
-              } catch (e) {
-                downloadSuccess = false
-              }
-
-              if (!downloadSuccess) {
-                if (parseOverlay) {
-                  parseOverlay.close()
-                  parseOverlay = null
-                }
-                showDocxDownloadDialog(result.docx_url, result.pages || 0)
-              }
-            } else {
-              if (parseOverlay) {
-                parseOverlay.close()
-                parseOverlay = null
-              }
-              context.ui.notice(
-                pdf2docText('解析成功，但返回格式未知', 'Parse succeeded but returned unknown format'),
-                'err'
-              )
-            }
-          } catch (err) {
-            if (isPdf2DocCancelledError(err)) {
-              if (parseOverlay && typeof parseOverlay.cancelled === 'function') {
-                parseOverlay.cancelled()
-              }
-              if (loadingId && context.ui.hideNotification) {
-                try {
-                  context.ui.hideNotification(loadingId)
-                } catch {}
-              }
-              context.ui.notice(
-                pdf2docText('已终止解析（已解析的内容会正常扣除页数）', 'Parsing cancelled (parsed content will still be billed)'),
-                'info'
-              )
-              return
-            }
-            if (parseOverlay) {
-              parseOverlay.fail(
-                pdf2docText(
-                  'PDF 解析失败：' + (err && err.message ? err.message : String(err)),
-                  'PDF parse failed: ' + (err && err.message ? err.message : String(err))
-                )
-              )
-            }
-            if (loadingId && context.ui.hideNotification) {
-              try {
-                context.ui.hideNotification(loadingId)
-              } catch {}
-            }
-            context.ui.notice(
-              pdf2docText(
-                'PDF 解析失败：' + (err && err.message ? err.message : String(err)),
-                'PDF parse failed: ' + (err && err.message ? err.message : String(err))
-              ),
-              'err'
-            )
-          }
-        }
-      },
-        {
           label: pdf2docText('选择图片 (To MD)', 'Choose image (To MD)'),
           onClick: async () => {
             let loadingId = null
@@ -2891,6 +3088,387 @@ export async function activate(context) {
                 'PDF parse failed: ' + (err && err.message ? err.message : String(err))
               ),
               'err'
+            )
+          }
+        }
+      },
+      {
+        label: pdf2docText('解析该文件夹内所有PDF', 'Parse all PDFs in this folder'),
+        onClick: async () => {
+          let loadingId = null
+          let parseOverlay = null
+          let cancelSource = null
+          try {
+            const cfg = await loadConfig(context)
+            if (!hasAnyApiToken(cfg)) {
+              context.ui.notice(
+                pdf2docText('请先在插件设置中配置密钥', 'Please configure the token in plugin settings first'),
+                'err'
+              )
+              return
+            }
+            if (
+              typeof context.getCurrentFilePath !== 'function' ||
+              typeof context.getLibraryRoot !== 'function' ||
+              typeof context.listLibraryFiles !== 'function' ||
+              typeof context.readFileBinary !== 'function'
+            ) {
+              context.ui.notice(
+                pdf2docText('当前版本不支持批量解析', 'This version does not support batch parsing'),
+                'err'
+              )
+              return
+            }
+
+            const currentPath = context.getCurrentFilePath()
+            if (!currentPath || !/\.pdf$/i.test(String(currentPath))) {
+              context.ui.notice(
+                pdf2docText('请先打开目标文件夹内的任意 PDF', 'Open any PDF in the target folder first'),
+                'err'
+              )
+              return
+            }
+
+            const root = await context.getLibraryRoot()
+            if (!root || !isPathInDir(currentPath, root)) {
+              context.ui.notice(
+                pdf2docText('当前文件不在库内', 'The current file is not in the library'),
+                'err'
+              )
+              return
+            }
+
+            const fileDirAbs = String(currentPath).replace(/[\\/][^\\/]+$/, '')
+            const rootNorm = String(root).replace(/\\/g, '/').replace(/\/+$/, '') + '/'
+            const fileNorm = String(currentPath).replace(/\\/g, '/')
+            const rel = fileNorm.toLowerCase().startsWith(rootNorm.toLowerCase())
+              ? fileNorm.slice(rootNorm.length)
+              : ''
+            const relDir = rel.split('/').slice(0, -1).join('/')
+            if (!relDir) {
+              context.ui.notice(
+                pdf2docText('无法确定分割文件夹', 'Failed to determine the folder'),
+                'err'
+              )
+              return
+            }
+
+            const files = await context.listLibraryFiles({
+              extensions: ['pdf'],
+              maxDepth: 12,
+              includeDirs: [relDir.endsWith('/') ? relDir : (relDir + '/')]
+            })
+
+            const parts = (Array.isArray(files) ? files : [])
+              .filter(it => it && typeof it.relative === 'string' && typeof it.path === 'string')
+              .filter(it => {
+                const rr = String(it.relative || '')
+                const dir = rr.split('/').slice(0, -1).join('/')
+                if (dir !== relDir) return false
+                const name = rr.split('/').pop() || ''
+                return /\.pdf$/i.test(name)
+              })
+              .map(it => {
+                const name = String(it.relative || '').split('/').pop() || ''
+                return { path: String(it.path), name }
+              })
+              .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
+
+            if (!parts.length) {
+              context.ui.notice(
+                pdf2docText('当前文件夹未找到 PDF 文件', 'No PDF files found in this folder'),
+                'err'
+              )
+              return
+            }
+
+            // 续跑：如果已存在“解析xxx.md”，就直接跳过该 PDF，避免失败后从头开始、重复请求/扣费。
+            const existingMdNamesLower = new Set()
+            try {
+              const mdFiles = await context.listLibraryFiles({
+                extensions: ['md'],
+                maxDepth: 12,
+                includeDirs: [relDir.endsWith('/') ? relDir : (relDir + '/')]
+              })
+              ;(Array.isArray(mdFiles) ? mdFiles : [])
+                .filter(it => it && typeof it.relative === 'string')
+                .forEach(it => {
+                  const rr = String(it.relative || '')
+                  const dir = rr.split('/').slice(0, -1).join('/')
+                  if (dir !== relDir) return
+                  const name = rr.split('/').pop() || ''
+                  if (!/\.md$/i.test(name)) return
+                  existingMdNamesLower.add(name.toLowerCase())
+                })
+            } catch {}
+
+            // 解析前额度风险提示：只提示一次，避免批量弹窗
+            try {
+              const firstBytes = await context.readFileBinary(parts[0].path)
+              const ok = await confirmQuotaRiskBeforeParse(context, cfg, firstBytes, null, parts[0].path)
+              if (!ok) return
+            } catch {}
+
+            cancelSource = createPdf2DocCancelSource()
+            parseOverlay = openPdf2DocProgressOverlay({
+              output: 'markdown',
+              onCancel: () => {
+                try { if (cancelSource) cancelSource.cancel() } catch {}
+              }
+            })
+            if (parseOverlay) {
+              parseOverlay.setStage('batch')
+              if (typeof parseOverlay.setBatchProgress === 'function') {
+                parseOverlay.setBatchProgress(0, parts.length, '')
+              }
+            }
+
+            if (context.ui.showNotification) {
+              loadingId = context.ui.showNotification(
+                pdf2docText('正在批量解析 PDF，请稍候...', 'Batch parsing PDFs...'),
+                { type: 'info', duration: 0 }
+              )
+            }
+
+            for (let i = 0; i < parts.length; i += 1) {
+              const p = parts[i]
+              if (parseOverlay && typeof parseOverlay.setBatchProgress === 'function') {
+                parseOverlay.setBatchProgress(i, parts.length, p.name)
+              }
+              const baseName = p.name.replace(/\.pdf$/i, '')
+              const safeBaseName = getSafeBaseNameForFile(baseName, 'document')
+              if (hasParsedMdInDir(existingMdNamesLower, safeBaseName)) {
+                if (parseOverlay && typeof parseOverlay.setBatchProgress === 'function') {
+                  const skipName = pdf2docText(
+                    `${p.name}（已存在，跳过）`,
+                    `${p.name} (exists; skipped)`
+                  )
+                  parseOverlay.setBatchProgress(i + 1, parts.length, skipName)
+                }
+                continue
+              }
+
+              const bytes = await context.readFileBinary(p.path)
+              const result = await retryOnPdf2DocNetworkError(
+                async (attempt) => {
+                  if (cancelSource && cancelSource.cancelled) throw createPdf2DocCancelledError()
+                  if (attempt > 1) {
+                    const retryName = pdf2docText(
+                      `${p.name}（网络异常，重试 ${attempt - 1}/${2}）`,
+                      `${p.name} (network issue, retry ${attempt - 1}/${2})`
+                    )
+                    if (parseOverlay && typeof parseOverlay.setBatchProgress === 'function') {
+                      parseOverlay.setBatchProgress(i, parts.length, retryName)
+                    }
+                  }
+                  return await parsePdfBytes(context, cfg, bytes, p.name, 'markdown', cancelSource)
+                },
+                { maxAttempts: 3, baseDelayMs: 800, cancelSource }
+              )
+              if (!result || result.format !== 'markdown' || !result.markdown) {
+                throw new Error(pdf2docText('解析成功但未获取到文本内容', 'Parsed but no text content was obtained'))
+              }
+
+              const localized = await localizeMarkdownImages(context, result.markdown, {
+                baseName: safeBaseName
+              })
+
+              const mdName = '解析' + safeBaseName + '.md'
+              const mdAbs = joinPath(fileDirAbs, mdName)
+              const savedAbs = await writeTextFileRenameAuto(context, mdAbs, localized)
+              try {
+                const savedName = String(savedAbs || '').split(/[\\/]+/).pop() || ''
+                if (savedName) existingMdNamesLower.add(savedName.toLowerCase())
+              } catch {}
+
+              if (context && context.ui && typeof context.ui.notice === 'function') {
+                context.ui.notice(
+                  pdf2docText(
+                    '已完成：' + safeBaseName + '（' + (i + 1) + '/' + parts.length + '）',
+                    'Done: ' + safeBaseName + ' (' + (i + 1) + '/' + parts.length + ')'
+                  ),
+                  'ok',
+                  1600
+                )
+              }
+            }
+
+            if (parseOverlay && typeof parseOverlay.setBatchProgress === 'function') {
+              parseOverlay.setBatchProgress(parts.length, parts.length, '')
+            }
+
+            if (loadingId && context.ui.hideNotification) {
+              try { context.ui.hideNotification(loadingId) } catch {}
+            }
+            if (parseOverlay) {
+              parseOverlay.close()
+              parseOverlay = null
+            }
+            context.ui.notice(
+              pdf2docText('批量解析完成，可通过菜单“合并分割片段”生成合并结果', 'Batch parsing finished. Use “Merge split parts”.'),
+              'ok',
+              4000
+            )
+          } catch (e) {
+            if (isPdf2DocCancelledError(e)) {
+              if (parseOverlay && typeof parseOverlay.cancelled === 'function') {
+                parseOverlay.cancelled()
+              }
+              if (loadingId && context.ui.hideNotification) {
+                try { context.ui.hideNotification(loadingId) } catch {}
+              }
+              context.ui.notice(
+                pdf2docText('已终止解析（已解析的内容会正常扣除页数）', 'Parsing cancelled (parsed content will still be billed)'),
+                'info',
+                3500
+              )
+              return
+            }
+            if (loadingId && context.ui.hideNotification) {
+              try { context.ui.hideNotification(loadingId) } catch {}
+            }
+            const msg = e && e.message ? String(e.message) : String(e || '')
+            if (parseOverlay && typeof parseOverlay.fail === 'function') {
+              parseOverlay.fail(
+                pdf2docText('批量解析失败：' + msg, 'Batch parsing failed: ' + msg),
+                pdf2docText('批量解析失败', 'Batch parsing failed')
+              )
+              parseOverlay = null
+              return
+            }
+            context.ui.notice(
+              pdf2docText('批量解析失败：' + msg, 'Batch parsing failed: ' + msg),
+              'err',
+              5000
+            )
+          }
+        }
+      },
+      {
+        label: pdf2docText('合并分割片段', 'Merge split parts'),
+        onClick: async () => {
+          let loadingId = null
+          try {
+            if (
+              typeof context.getCurrentFilePath !== 'function' ||
+              typeof context.getLibraryRoot !== 'function' ||
+              typeof context.listLibraryFiles !== 'function' ||
+              typeof context.readFileBinary !== 'function' ||
+              typeof context.writeTextFile !== 'function'
+            ) {
+              context.ui.notice(
+                pdf2docText('当前版本不支持合并', 'This version does not support merging'),
+                'err'
+              )
+              return
+            }
+
+            const currentPath = context.getCurrentFilePath()
+            if (!currentPath) {
+              context.ui.notice(
+                pdf2docText('请先打开分割文件夹内的任意文件', 'Open any file in the split folder first'),
+                'err'
+              )
+              return
+            }
+
+            const root = await context.getLibraryRoot()
+            if (!root || !isPathInDir(currentPath, root)) {
+              context.ui.notice(
+                pdf2docText('当前文件不在库内', 'The current file is not in the library'),
+                'err'
+              )
+              return
+            }
+
+            const fileDirAbs = String(currentPath).replace(/[\\/][^\\/]+$/, '')
+            const rootNorm = String(root).replace(/\\/g, '/').replace(/\/+$/, '') + '/'
+            const fileNorm = String(currentPath).replace(/\\/g, '/')
+            const rel = fileNorm.toLowerCase().startsWith(rootNorm.toLowerCase())
+              ? fileNorm.slice(rootNorm.length)
+              : ''
+            const relDir = rel.split('/').slice(0, -1).join('/')
+            if (!relDir) {
+              context.ui.notice(
+                pdf2docText('无法确定分割文件夹', 'Failed to determine the folder'),
+                'err'
+              )
+              return
+            }
+
+            const files = await context.listLibraryFiles({
+              extensions: ['md', 'markdown'],
+              maxDepth: 12,
+              includeDirs: [relDir.endsWith('/') ? relDir : (relDir + '/')]
+            })
+
+            const parts = (Array.isArray(files) ? files : [])
+              .filter(it => it && typeof it.relative === 'string' && typeof it.path === 'string')
+              .filter(it => {
+                const rr = String(it.relative || '')
+                const dir = rr.split('/').slice(0, -1).join('/')
+                if (dir !== relDir) return false
+                const name = rr.split('/').pop() || ''
+                return /^(?:解析)?分割片段\d{3,4}-.*\.(md|markdown)$/i.test(name)
+              })
+              .map(it => {
+                const name = String(it.relative || '').split('/').pop() || ''
+                const m = name.match(/^(?:解析)?分割片段(\d{3,4})-/i)
+                const idx = m ? parseInt(m[1], 10) || 0 : 0
+                return { idx, path: String(it.path), name }
+              })
+              .sort((a, b) => a.idx - b.idx)
+
+            if (!parts.length) {
+              context.ui.notice(
+                pdf2docText('当前文件夹未找到分割片段的解析结果（.md）', 'No parsed markdown files found'),
+                'err'
+              )
+              return
+            }
+
+            if (context.ui.showNotification) {
+              loadingId = context.ui.showNotification(
+                pdf2docText('正在合并分割片段...', 'Merging split parts...'),
+                { type: 'info', duration: 0 }
+              )
+            }
+
+            const decoder = typeof TextDecoder !== 'undefined' ? new TextDecoder('utf-8') : null
+            const mergedChunks = []
+            for (const p of parts) {
+              const bytes = await context.readFileBinary(p.path)
+              const text = decoder ? decoder.decode(bytes) : String(bytes || '')
+              mergedChunks.push(text)
+            }
+
+            const merged = mergedChunks.join('\n\n---\n\n')
+            const folderName = fileDirAbs.replace(/\\/g, '/').split('/').filter(Boolean).pop() || '合并结果'
+            const outName = '合并-' + getSafeBaseNameForFile(folderName, '合并结果') + '.md'
+            const outAbs = joinPath(fileDirAbs, outName)
+            const savedPath = await writeTextFileRenameAuto(context, outAbs, merged)
+
+            if (loadingId && context.ui.hideNotification) {
+              try { context.ui.hideNotification(loadingId) } catch {}
+            }
+
+            if (savedPath && typeof context.openFileByPath === 'function') {
+              try { await context.openFileByPath(savedPath) } catch {}
+            }
+            context.ui.notice(
+              pdf2docText('合并完成', 'Merge completed'),
+              'ok',
+              3000
+            )
+          } catch (e) {
+            if (loadingId && context.ui.hideNotification) {
+              try { context.ui.hideNotification(loadingId) } catch {}
+            }
+            const msg = e && e.message ? String(e.message) : String(e || '')
+            context.ui.notice(
+              pdf2docText('合并失败：' + msg, 'Merge failed: ' + msg),
+              'err',
+              5000
             )
           }
         }
@@ -3215,7 +3793,7 @@ export async function activate(context) {
               }
             }
 
-            if (!markdown) {
+              if (!markdown) {
               const file = await pickPdfFile()
               fileName = file && file.name
 
@@ -3238,10 +3816,10 @@ export async function activate(context) {
                // 解析前额度风险提示：每次解析前都提示一次（用户要求）。
                try {
                  const buf = await file.arrayBuffer()
-                 const ok = await confirmQuotaRiskBeforeParse(context, cfg, buf)
+                 const ok = await confirmQuotaRiskBeforeParse(context, cfg, buf, null, file && file.name ? file.name : null)
                  if (!ok) return
                } catch {
-                 const ok = await confirmQuotaRiskBeforeParse(context, cfg, null)
+                 const ok = await confirmQuotaRiskBeforeParse(context, cfg, null, null, file && file.name ? file.name : null)
                  if (!ok) return
                }
 
