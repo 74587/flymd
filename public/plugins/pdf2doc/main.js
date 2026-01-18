@@ -203,7 +203,7 @@ async function fetchTotalRemainPages(context, cfg) {
   }
 }
 
-function showQuotaRiskDialog(context, pdfPages, remainPages) {
+function showQuotaRiskDialog(context, pdfPages, remainPages, opt) {
   return new Promise(resolve => {
     if (typeof document === 'undefined') {
       resolve({ action: 'continue' })
@@ -214,6 +214,9 @@ function showQuotaRiskDialog(context, pdfPages, remainPages) {
       typeof pdfPages === 'number' &&
       Number.isFinite(pdfPages) &&
       pdfPages > 0
+
+    const requireLibrary = !!(opt && opt.requireLibrary)
+    const canMoveToLibrary = !!(opt && opt.canMoveToLibrary)
 
     const overlay = document.createElement('div')
     overlay.style.cssText =
@@ -270,6 +273,16 @@ function showQuotaRiskDialog(context, pdfPages, remainPages) {
     )
     body.appendChild(msg)
 
+    if (requireLibrary) {
+      const tip = document.createElement('div')
+      tip.style.cssText = 'margin-top:10px;padding:10px 12px;border-radius:10px;border:1px solid #f59e0b;background:rgba(245,158,11,.08);color:var(--fg,#333);font-size:12px;line-height:1.6;'
+      tip.innerHTML = pdf2docText(
+        '检测到当前 PDF 不在库内，或无法获取页数。为保证解析稳定，请先使用复制到库内并打开。',
+        'The current PDF is outside the library, or its page count is unavailable. Please use “Copy into library and open” first.'
+      )
+      body.appendChild(tip)
+    }
+
     const footer = document.createElement('div')
     footer.style.cssText =
       'padding:10px 16px;border-top:1px solid var(--border,#e5e7eb);display:flex;justify-content:flex-end;gap:8px;background:rgba(127,127,127,.03);'
@@ -292,6 +305,12 @@ function showQuotaRiskDialog(context, pdfPages, remainPages) {
       'padding:6px 14px;border-radius:8px;border:1px solid #2563eb;background:#2563eb;color:#fff;cursor:pointer;font-size:12px;font-weight:500;'
     btnOk.textContent = pdf2docText('确定继续解析', 'Continue')
 
+    const btnMove = document.createElement('button')
+    btnMove.type = 'button'
+    btnMove.style.cssText =
+      'padding:6px 12px;border-radius:8px;border:1px solid #16a34a;background:#fff;color:#16a34a;cursor:pointer;font-size:12px;'
+    btnMove.textContent = pdf2docText('复制到库内并打开', 'Copy into library and open')
+
     const done = (action) => {
       try {
         document.body.removeChild(overlay)
@@ -302,6 +321,7 @@ function showQuotaRiskDialog(context, pdfPages, remainPages) {
     btnCancel.onclick = () => done('cancel')
     btnRecharge.onclick = () => done('recharge')
     btnOk.onclick = () => done('continue')
+    btnMove.onclick = () => done('move')
     overlay.onclick = (e) => {
       if (e.target === overlay) done('cancel')
     }
@@ -309,6 +329,14 @@ function showQuotaRiskDialog(context, pdfPages, remainPages) {
 
     footer.appendChild(btnCancel)
     footer.appendChild(btnRecharge)
+    if (requireLibrary && canMoveToLibrary) {
+      footer.appendChild(btnMove)
+    }
+    if (requireLibrary) {
+      btnOk.disabled = true
+      btnOk.style.opacity = '0.55'
+      btnOk.style.cursor = 'not-allowed'
+    }
     footer.appendChild(btnOk)
 
     dialog.appendChild(header)
@@ -319,7 +347,62 @@ function showQuotaRiskDialog(context, pdfPages, remainPages) {
   })
 }
 
-async function confirmQuotaRiskBeforeParse(context, cfg, pdfBytes, pdfPagesHint) {
+function isPathInDir(filePath, dirPath) {
+  const fp = String(filePath || '').replace(/\\/g, '/')
+  const dp = String(dirPath || '').replace(/\\/g, '/')
+  if (!fp || !dp) return false
+  const f = fp.toLowerCase()
+  let d = dp.toLowerCase()
+  if (!d.endsWith('/')) d += '/'
+  return f.startsWith(d)
+}
+
+function getBaseNameFromPath(p) {
+  const s = String(p || '').replace(/\\/g, '/')
+  const parts = s.split('/').filter(Boolean)
+  return parts.length ? parts[parts.length - 1] : ''
+}
+
+async function copyPdfIntoLibraryAndOpen(context, pdfBytes, sourcePath) {
+  if (!context || typeof context.saveBinaryToCurrentFolder !== 'function') {
+    throw new Error(pdf2docText('当前版本不支持保存文件', 'Saving files is not supported in this version'))
+  }
+  if (typeof context.openFileByPath !== 'function') {
+    throw new Error(pdf2docText('当前版本不支持打开文件', 'Opening files is not supported in this version'))
+  }
+  if (!pdfBytes) {
+    throw new Error(pdf2docText('无法读取 PDF 内容', 'Failed to read PDF content'))
+  }
+
+  let bytes = pdfBytes
+  try {
+    if (pdfBytes instanceof ArrayBuffer) {
+      bytes = pdfBytes.slice(0)
+    } else if (pdfBytes instanceof Uint8Array) {
+      bytes = pdfBytes.slice(0)
+    }
+  } catch {
+    bytes = pdfBytes
+  }
+
+  let name = getBaseNameFromPath(sourcePath) || 'document.pdf'
+  if (!/\.pdf$/i.test(name)) name = name + '.pdf'
+  name = String(name).replace(/[\\/:*?"<>|]+/g, '_').trim() || 'document.pdf'
+
+  const saved = await context.saveBinaryToCurrentFolder({
+    fileName: name,
+    data: bytes,
+    onConflict: 'renameAuto'
+  })
+  const fullPath = saved && saved.fullPath ? String(saved.fullPath) : ''
+  if (!fullPath) {
+    throw new Error(pdf2docText('保存失败', 'Save failed'))
+  }
+  await context.openFileByPath(fullPath)
+  return fullPath
+}
+
+async function confirmQuotaRiskBeforeParse(context, cfg, pdfBytes, pdfPagesHint, pdfPath) {
   // 这是“用户明确要求每次都弹一次”的确认框：即使查询失败也要尽量弹（弹不出来才放行）。
   const canShow = typeof document !== 'undefined'
   if (!canShow) return true
@@ -365,10 +448,61 @@ async function confirmQuotaRiskBeforeParse(context, cfg, pdfBytes, pdfPagesHint)
   }
 
   try {
-    const ret = await showQuotaRiskDialog(context, pdfPages, remain)
+    const hasPdfPages =
+      typeof pdfPages === 'number' &&
+      Number.isFinite(pdfPages) &&
+      pdfPages > 0
+
+    let requireLibrary = false
+    let canMoveToLibrary = false
+    if (pdfPath && context) {
+      try {
+        const root = typeof context.getLibraryRoot === 'function' ? await context.getLibraryRoot() : null
+        const inLib = root ? isPathInDir(pdfPath, root) : false
+        requireLibrary = !inLib || !hasPdfPages
+        canMoveToLibrary =
+          !!root &&
+          typeof context.saveBinaryToCurrentFolder === 'function' &&
+          typeof context.openFileByPath === 'function' &&
+          !!pdfBytes
+      } catch {
+        requireLibrary = !hasPdfPages
+        canMoveToLibrary =
+          typeof context.saveBinaryToCurrentFolder === 'function' &&
+          typeof context.openFileByPath === 'function' &&
+          !!pdfBytes
+      }
+    }
+
+    const ret = await showQuotaRiskDialog(context, pdfPages, remain, {
+      requireLibrary,
+      canMoveToLibrary
+    })
     const action = ret && ret.action ? ret.action : 'cancel'
     if (action === 'recharge') {
       try { await openSettings(context) } catch {}
+      return false
+    }
+    if (action === 'move') {
+      try {
+        await copyPdfIntoLibraryAndOpen(context, pdfBytes, pdfPath)
+        if (context && context.ui && typeof context.ui.notice === 'function') {
+          context.ui.notice(
+            pdf2docText('已复制到库内并打开，请重新解析。', 'Copied into library and opened. Please parse again.'),
+            'ok',
+            3000
+          )
+        }
+      } catch (e) {
+        const msg = e && e.message ? String(e.message) : String(e || '')
+        if (context && context.ui && typeof context.ui.notice === 'function') {
+          context.ui.notice(
+            pdf2docText('复制失败：' + msg, 'Copy failed: ' + msg),
+            'err',
+            4000
+          )
+        }
+      }
       return false
     }
     if (action === 'cancel') return false
@@ -2615,7 +2749,7 @@ export async function activate(context) {
             const fileName = path.split(/[\\/]+/).pop() || 'document.pdf'
 
             // 解析前额度风险提示：每次解析前都提示一次（用户要求）。
-            const ok = await confirmQuotaRiskBeforeParse(context, cfg, bytes)
+            const ok = await confirmQuotaRiskBeforeParse(context, cfg, bytes, null, path)
             if (!ok) return
 
             cancelSource = createPdf2DocCancelSource()
@@ -2796,7 +2930,7 @@ export async function activate(context) {
             const fileName = path.split(/[\\/]+/).pop() || 'document.pdf'
 
             // 解析前额度风险提示：每次解析前都提示一次（用户要求）。
-            const ok = await confirmQuotaRiskBeforeParse(context, cfg, bytes)
+            const ok = await confirmQuotaRiskBeforeParse(context, cfg, bytes, null, path)
             if (!ok) return
 
             cancelSource = createPdf2DocCancelSource()
@@ -3019,7 +3153,7 @@ export async function activate(context) {
                 const bytes = await context.readFileBinary(path)
 
                 // 解析前额度风险提示：每次解析前都提示一次（用户要求）。
-                const ok = await confirmQuotaRiskBeforeParse(context, cfg, bytes)
+                const ok = await confirmQuotaRiskBeforeParse(context, cfg, bytes, null, path)
                 if (!ok) return
 
                 cancelSource = createPdf2DocCancelSource()
