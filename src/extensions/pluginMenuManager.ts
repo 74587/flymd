@@ -7,10 +7,16 @@ import { t } from '../i18n'
 import {
   getPluginMenuVisibility,
   setPluginMenuVisibility,
+  getPluginRibbonPosition,
+  setPluginRibbonPosition,
+  getPluginRibbonOrder,
+  setPluginRibbonOrder,
 } from './pluginMenuConfig'
 import {
   getRegisteredRibbonPlugins,
   refreshAllRibbonButtonVisibility,
+  refreshAllRibbonButtonPlacement,
+  refreshAllRibbonButtonOrder,
 } from './pluginRibbonManager'
 
 export interface PluginMenuManagerHost {
@@ -197,7 +203,50 @@ export async function openPluginMenuManager(host: PluginMenuManagerHost): Promis
       return
     }
 
+    const ribbonRows = rows.filter((r) => r.hasRibbonMenu)
+
+    const topRibbonIds = ribbonRows
+      .filter((r) => getPluginRibbonPosition(r.pluginId) === 'top')
+      .map((r) => r.pluginId)
+    const bottomRibbonIds = ribbonRows
+      .filter((r) => getPluginRibbonPosition(r.pluginId) === 'bottom')
+      .map((r) => r.pluginId)
+
+    const buildActiveOrder = (pos: 'top' | 'bottom', ids: string[]): string[] => {
+      const set = new Set(ids)
+      const cfg = getPluginRibbonOrder(pos)
+      const out: string[] = []
+      for (const id of cfg) {
+        if (set.has(id)) out.push(id)
+      }
+      for (const id of ids) {
+        if (!out.includes(id)) out.push(id)
+      }
+      return out
+    }
+
+    const activeTopOrder = buildActiveOrder('top', topRibbonIds)
+    const activeBottomOrder = buildActiveOrder('bottom', bottomRibbonIds)
+    const topIndex = new Map(activeTopOrder.map((id, i) => [id, i]))
+    const bottomIndex = new Map(activeBottomOrder.map((id, i) => [id, i]))
+
     rows.sort((a, b) => {
+      const aIsRibbon = a.hasRibbonMenu ? 0 : 1
+      const bIsRibbon = b.hasRibbonMenu ? 0 : 1
+      if (aIsRibbon !== bIsRibbon) return aIsRibbon - bIsRibbon
+
+      if (aIsRibbon === 0 && bIsRibbon === 0) {
+        const ap = getPluginRibbonPosition(a.pluginId)
+        const bp = getPluginRibbonPosition(b.pluginId)
+        const apKey = ap === 'bottom' ? 1 : 0
+        const bpKey = bp === 'bottom' ? 1 : 0
+        if (apKey !== bpKey) return apKey - bpKey
+
+        const ai = ap === 'bottom' ? (bottomIndex.get(a.pluginId) ?? 1e9) : (topIndex.get(a.pluginId) ?? 1e9)
+        const bi = bp === 'bottom' ? (bottomIndex.get(b.pluginId) ?? 1e9) : (topIndex.get(b.pluginId) ?? 1e9)
+        if (ai !== bi) return ai - bi
+      }
+
       const na = (a.name || a.pluginId || '').toLowerCase()
       const nb = (b.name || b.pluginId || '').toLowerCase()
       if (na < nb) return -1
@@ -209,7 +258,13 @@ export async function openPluginMenuManager(host: PluginMenuManagerHost): Promis
     const headerCtx = t('plugins.menuManager.col.context') || '右键菜单'
     const headerDropdown = t('plugins.menuManager.col.dropdown') || '下拉菜单'
     const headerRibbon = t('plugins.menuManager.col.ribbon') || '垂直菜单栏'
+    const headerRibbonPos = t('plugins.menuManager.col.ribbonPos') || '位置'
+    const headerRibbonOrder = t('plugins.menuManager.col.ribbonOrder') || '顺序'
     const tip = t('plugins.menuManager.tip') || '勾选表示显示，取消勾选后对应菜单将被隐藏。'
+    const optTop = t('plugins.menuManager.ribbonPos.top') || '顶部'
+    const optBottom = t('plugins.menuManager.ribbonPos.bottom') || '底部'
+    const tipUp = t('plugins.menuManager.ribbonOrder.up') || '上移'
+    const tipDown = t('plugins.menuManager.ribbonOrder.down') || '下移'
 
     let html = ''
     html += `<div style="font-size:12px;color:var(--muted);margin-bottom:8px;">${tip}</div>`
@@ -220,6 +275,8 @@ export async function openPluginMenuManager(host: PluginMenuManagerHost): Promis
     html += `<th style="text-align:center;padding:6px 8px;border-bottom:1px solid var(--border);">${headerCtx}</th>`
     html += `<th style="text-align:center;padding:6px 8px;border-bottom:1px solid var(--border);">${headerDropdown}</th>`
     html += `<th style="text-align:center;padding:6px 8px;border-bottom:1px solid var(--border);">${headerRibbon}</th>`
+    html += `<th style="text-align:center;padding:6px 8px;border-bottom:1px solid var(--border);">${headerRibbonPos}</th>`
+    html += `<th style="text-align:center;padding:6px 8px;border-bottom:1px solid var(--border);">${headerRibbonOrder}</th>`
     html += `</tr></thead><tbody>`
 
     for (const row of rows) {
@@ -227,6 +284,11 @@ export async function openPluginMenuManager(host: PluginMenuManagerHost): Promis
       const ctxDisabled = !row.hasContextMenu
       const ddDisabled = !row.hasDropdownMenu
       const ribbonDisabled = !row.hasRibbonMenu
+      const ribbonPos = getPluginRibbonPosition(row.pluginId)
+      const ribbonOrder = ribbonPos === 'bottom' ? activeBottomOrder : activeTopOrder
+      const ribbonIdx = ribbonOrder.indexOf(row.pluginId)
+      const canUp = !ribbonDisabled && ribbonIdx > 0
+      const canDown = !ribbonDisabled && ribbonIdx >= 0 && ribbonIdx < ribbonOrder.length - 1
 
       const ctxChecked = vis.contextMenu !== false && row.hasContextMenu
       const ddChecked = vis.dropdownMenu !== false && row.hasDropdownMenu
@@ -246,6 +308,16 @@ export async function openPluginMenuManager(host: PluginMenuManagerHost): Promis
       html += `</td>`
       html += `<td style="padding:4px 8px;text-align:center;border-bottom:1px solid var(--border);">`
       html += `<input type="checkbox" class="plugin-menu-manager-ribbon" data-plugin-id="${row.pluginId}"${ribbonChecked ? ' checked' : ''}${ribbonAttrDisabled}>`
+      html += `</td>`
+      html += `<td style="padding:4px 8px;text-align:center;border-bottom:1px solid var(--border);">`
+      html += `<select class="plugin-menu-manager-ribbon-pos" data-plugin-id="${row.pluginId}" style="font-size:12px;"${ribbonAttrDisabled}>`
+      html += `<option value="top"${ribbonPos === 'top' ? ' selected' : ''}>${optTop}</option>`
+      html += `<option value="bottom"${ribbonPos === 'bottom' ? ' selected' : ''}>${optBottom}</option>`
+      html += `</select>`
+      html += `</td>`
+      html += `<td style="padding:4px 8px;text-align:center;border-bottom:1px solid var(--border);white-space:nowrap;">`
+      html += `<button class="plugin-menu-manager-ribbon-up" data-plugin-id="${row.pluginId}" title="${tipUp}" style="font-size:12px;padding:0 6px;height:22px;"${canUp ? '' : ' disabled'}>↑</button>`
+      html += `<button class="plugin-menu-manager-ribbon-down" data-plugin-id="${row.pluginId}" title="${tipDown}" style="font-size:12px;padding:0 6px;height:22px;margin-left:4px;"${canDown ? '' : ' disabled'}>↓</button>`
       html += `</td>`
       html += `</tr>`
     }
@@ -288,9 +360,55 @@ export async function openPluginMenuManager(host: PluginMenuManagerHost): Promis
       })
     })
 
+    // 绑定事件：Ribbon 位置选择（顶部/底部）
+    body.querySelectorAll<HTMLSelectElement>('select.plugin-menu-manager-ribbon-pos').forEach((el) => {
+      el.addEventListener('change', () => {
+        const id = el.getAttribute('data-plugin-id') || ''
+        if (!id) return
+        try {
+          const v = (el.value === 'bottom' ? 'bottom' : 'top') as const
+          setPluginRibbonPosition(id, v)
+          refreshAllRibbonButtonPlacement()
+          refreshAllRibbonButtonOrder()
+          // 位置和顺序都可能变化，简单粗暴地重绘一次
+          try { openPluginMenuManager(host) } catch {}
+        } catch {}
+      })
+    })
+
+    const moveRibbon = (pluginId: string, dir: 'up' | 'down') => {
+      try {
+        const pos = getPluginRibbonPosition(pluginId)
+        const order = (pos === 'bottom' ? activeBottomOrder : activeTopOrder).slice()
+        const idx = order.indexOf(pluginId)
+        if (idx < 0) return
+        const next = dir === 'up' ? idx - 1 : idx + 1
+        if (next < 0 || next >= order.length) return
+        ;[order[idx], order[next]] = [order[next], order[idx]]
+        setPluginRibbonOrder(pos, order)
+        refreshAllRibbonButtonOrder()
+        try { openPluginMenuManager(host) } catch {}
+      } catch {}
+    }
+
+    body.querySelectorAll<HTMLButtonElement>('button.plugin-menu-manager-ribbon-up').forEach((el) => {
+      el.addEventListener('click', () => {
+        const id = el.getAttribute('data-plugin-id') || ''
+        if (!id) return
+        moveRibbon(id, 'up')
+      })
+    })
+
+    body.querySelectorAll<HTMLButtonElement>('button.plugin-menu-manager-ribbon-down').forEach((el) => {
+      el.addEventListener('click', () => {
+        const id = el.getAttribute('data-plugin-id') || ''
+        if (!id) return
+        moveRibbon(id, 'down')
+      })
+    })
+
     ov.classList.remove('hidden')
   } catch (e) {
     console.error('打开插件菜单管理窗口失败:', e)
   }
 }
-

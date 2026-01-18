@@ -482,6 +482,67 @@ context.addMenuItem({
 - 支持 ESC 键关闭下拉菜单
 - 点击外部区域可关闭下拉菜单
 
+### context.addRibbonButton（新增）
+
+在左侧垂直菜单栏（Ribbon）注册一个快捷按钮。
+
+**重要说明：**
+- 用户可以在“插件 → 菜单管理”里单独控制你的 Ribbon 按钮：显示/隐藏，以及放在顶部/底部
+- 用户也可以在“插件 → 菜单管理”里调整你的 Ribbon 按钮上下顺序
+- 你的 Ribbon 按钮可能被用户隐藏；因此建议同时提供 `context.addMenuItem` 作为兜底入口
+
+```javascript
+// 注册一个 Ribbon 按钮（文字图标）
+const dispose = context.addRibbonButton({
+  icon: 'PDF',
+  iconType: 'text', // 'text' | 'svg'，默认 'svg'
+  title: 'PDF 高精度解析',
+  onClick: () => {
+    context.ui.notice('点击了 Ribbon 按钮', 'ok');
+  }
+});
+
+// 可选：卸载（宿主通常会在插件停用时自动清理，但你也可以自行保存并主动释放）
+// dispose();
+```
+
+**参数：**
+- `icon`：图标内容。`iconType: 'svg'` 时传 SVG 字符串；`iconType: 'text'` 时传纯文字（建议 2~4 个字符）
+- `iconType`：`'svg' | 'text'`，默认 `'svg'`
+- `title`：鼠标悬停提示
+- `onClick(ev)`：点击回调（可用 `ev.currentTarget` 作为锚点配合 `context.showDropdownMenu`）
+
+### context.showDropdownMenu（新增）
+
+在指定元素旁弹出一个下拉菜单（样式与行为与 flyMD 内置“插件”下拉菜单一致）。
+
+```javascript
+const items = [
+  { label: '选项 1', onClick: () => context.ui.notice('选项 1', 'ok') },
+  { type: 'divider' },
+  { label: '禁用项', disabled: true, note: '不可用' },
+];
+
+// 典型用法：Ribbon 按钮点击后弹出菜单
+context.addRibbonButton({
+  icon: '工具',
+  iconType: 'text',
+  title: '我的工具',
+  onClick: (ev) => {
+    const anchor = ev.currentTarget || ev.target;
+    context.showDropdownMenu(anchor, items);
+  }
+});
+```
+
+**参数：**
+- `anchor`：用于定位菜单的 DOM 元素（通常传 `ev.currentTarget`）
+- `items`：菜单项数组，结构与 `context.addMenuItem` 的 `children` 一致，支持：
+  - 普通项：`{ label, onClick, disabled?, note? }`
+  - 分隔线：`{ type: 'divider' }`
+  - 分组标题：`{ type: 'group', label }`
+  - 子菜单：`{ label, children: [...] }`
+
 ### context.addContextMenuItem
 
 在编辑器中注册右键菜单项，支持上下文感知和条件显示。
