@@ -3,8 +3,10 @@
 export type PluginMenuVisibility = {
   // 是否在右键菜单中显示
   contextMenu: boolean
-  // 是否在“插件”下拉菜单中显示
+  // 是否在"插件"下拉菜单中显示
   dropdownMenu: boolean
+  // 是否在垂直菜单栏（Ribbon）中显示
+  ribbonMenu: boolean
 }
 
 type PluginMenuVisibilityMap = Record<string, PluginMenuVisibility>
@@ -32,16 +34,17 @@ function saveRawMap(map: PluginMenuVisibilityMap): void {
   }
 }
 
-// 读取单个插件的菜单可见性；缺省值一律视为“显示”
+// 读取单个插件的菜单可见性；缺省值一律视为"显示"
 export function getPluginMenuVisibility(pluginId: string): PluginMenuVisibility {
   const map = loadRawMap()
   const rec = map[pluginId]
   if (!rec || typeof rec !== 'object') {
-    return { contextMenu: true, dropdownMenu: true }
+    return { contextMenu: true, dropdownMenu: true, ribbonMenu: true }
   }
   return {
     contextMenu: rec.contextMenu !== false,
     dropdownMenu: rec.dropdownMenu !== false,
+    ribbonMenu: rec.ribbonMenu !== false,
   }
 }
 
@@ -55,6 +58,7 @@ export function setPluginMenuVisibility(
   const next: PluginMenuVisibility = {
     contextMenu: patch.contextMenu ?? prev.contextMenu,
     dropdownMenu: patch.dropdownMenu ?? prev.dropdownMenu,
+    ribbonMenu: patch.ribbonMenu ?? prev.ribbonMenu,
   }
   map[pluginId] = next
   saveRawMap(map)

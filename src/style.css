@@ -239,6 +239,14 @@ body.platform-windows #app {
   stroke-width: 1.5;
 }
 
+/* 插件 Ribbon 按钮：文字图标样式 */
+.ribbon-btn.text-icon {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: -0.5px;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
 /* Ribbon 更新提示红点 */
 .ribbon-btn.has-update::after {
   content: '';

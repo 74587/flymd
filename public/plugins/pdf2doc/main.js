@@ -3109,13 +3109,8 @@ export async function activate(context) {
     }
   })()
 
-    context.addMenuItem({
-      label: pdf2docText('PDF / 图片高精度解析', 'PDF / Image High-Precision OCR'),
-      title: pdf2docText(
-        '解析 PDF 或图片为 Markdown 或 docx（图片仅支持 Markdown）',
-        'Parse PDF or images into Markdown or DOCX (images only support Markdown).'
-      ),
-      children: [
+    // 定义菜单项数组（用于下拉菜单和 Ribbon 按钮复用）
+    const pdf2docMenuChildren = [
         {
           label: pdf2docText('余额充值/查询', 'Balance / Top-up'),
           onClick: async () => {
@@ -4553,7 +4548,31 @@ export async function activate(context) {
         }
       }
     ]
-  })
+
+    // 注册菜单项
+    context.addMenuItem({
+      label: pdf2docText('PDF / 图片高精度解析', 'PDF / Image High-Precision OCR'),
+      title: pdf2docText(
+        '解析 PDF 或图片为 Markdown 或 docx（图片仅支持 Markdown）',
+        'Parse PDF or images into Markdown or DOCX (images only support Markdown).'
+      ),
+      children: pdf2docMenuChildren
+    })
+
+    // Ribbon 按钮：PDF 高精度解析（点击显示下拉菜单）
+    if (context.addRibbonButton && context.showDropdownMenu) {
+      try {
+        context.addRibbonButton({
+          icon: 'PDF',
+          iconType: 'text',
+          title: pdf2docText('PDF 高精度解析', 'PDF High-Precision OCR'),
+          onClick: (ev) => {
+            const btn = ev.currentTarget || ev.target
+            context.showDropdownMenu(btn, pdf2docMenuChildren)
+          }
+        })
+      } catch (e) { console.error('[pdf2doc] addRibbonButton failed', e) }
+    }
 
   // 向其他插件暴露 API：按路径解析为 Markdown
   if (typeof context.registerAPI === 'function') {

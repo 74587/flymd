@@ -8,6 +8,10 @@ import {
   getPluginMenuVisibility,
   setPluginMenuVisibility,
 } from './pluginMenuConfig'
+import {
+  getRegisteredRibbonPlugins,
+  refreshAllRibbonButtonVisibility,
+} from './pluginRibbonManager'
 
 export interface PluginMenuManagerHost {
   getInstalledPlugins(): Promise<Record<string, InstalledPlugin>>
@@ -69,6 +73,7 @@ type PluginMenuRow = {
   name: string
   hasContextMenu: boolean
   hasDropdownMenu: boolean
+  hasRibbonMenu: boolean
 }
 
 export async function openPluginMenuManager(host: PluginMenuManagerHost): Promise<void> {
@@ -101,7 +106,16 @@ export async function openPluginMenuManager(host: PluginMenuManagerHost): Promis
 
     const rowsMap = new Map<string, PluginMenuRow>()
 
-    // 先根据“已安装扩展”初始化行（用于提供友好名称）
+    // 获取已注册 Ribbon 按钮的插件
+    let ribbonPlugins: Array<{ pluginId: string; title: string }> = []
+    try {
+      ribbonPlugins = getRegisteredRibbonPlugins() || []
+    } catch {
+      ribbonPlugins = []
+    }
+    const ribbonPluginIds = new Set(ribbonPlugins.map((r) => r.pluginId))
+
+    // 先根据"已安装扩展"初始化行（用于提供友好名称）
     for (const p of Object.values(installed)) {
       if (!p || !p.id) continue
       const id = p.id
@@ -110,6 +124,7 @@ export async function openPluginMenuManager(host: PluginMenuManagerHost): Promis
         name: String(p.name || p.id || '').trim() || id,
         hasContextMenu: false,
         hasDropdownMenu: false,
+        hasRibbonMenu: ribbonPluginIds.has(id),
       })
     }
 
@@ -126,11 +141,12 @@ export async function openPluginMenuManager(host: PluginMenuManagerHost): Promis
           name: id,
           hasContextMenu: true,
           hasDropdownMenu: false,
+          hasRibbonMenu: ribbonPluginIds.has(id),
         })
       }
     }
 
-    // “插件”下拉菜单项 → 标记 hasDropdownMenu
+    // "插件"下拉菜单项 → 标记 hasDropdownMenu
     for (const it of dropdownItems) {
       if (!it || !it.pluginId) continue
       const id = it.pluginId
@@ -146,12 +162,33 @@ export async function openPluginMenuManager(host: PluginMenuManagerHost): Promis
           name: label || id,
           hasContextMenu: false,
           hasDropdownMenu: true,
+          hasRibbonMenu: ribbonPluginIds.has(id),
+        })
+      }
+    }
+
+    // Ribbon 按钮 → 标记 hasRibbonMenu（并确保在列表中显示）
+    for (const rp of ribbonPlugins) {
+      if (!rp || !rp.pluginId) continue
+      const id = rp.pluginId
+      const existed = rowsMap.get(id)
+      if (existed) {
+        existed.hasRibbonMenu = true
+        // 若之前没有友好名称，则使用 Ribbon 标题
+        if (!existed.name && rp.title) existed.name = rp.title
+      } else {
+        rowsMap.set(id, {
+          pluginId: id,
+          name: rp.title || id,
+          hasContextMenu: false,
+          hasDropdownMenu: false,
+          hasRibbonMenu: true,
         })
       }
     }
 
     const rows = Array.from(rowsMap.values()).filter(
-      (r) => r.hasContextMenu || r.hasDropdownMenu,
+      (r) => r.hasContextMenu || r.hasDropdownMenu || r.hasRibbonMenu,
     )
 
     if (!rows.length) {
@@ -171,6 +208,7 @@ export async function openPluginMenuManager(host: PluginMenuManagerHost): Promis
     const headerPlugin = t('plugins.menuManager.col.plugin') || '扩展'
     const headerCtx = t('plugins.menuManager.col.context') || '右键菜单'
     const headerDropdown = t('plugins.menuManager.col.dropdown') || '下拉菜单'
+    const headerRibbon = t('plugins.menuManager.col.ribbon') || '垂直菜单栏'
     const tip = t('plugins.menuManager.tip') || '勾选表示显示，取消勾选后对应菜单将被隐藏。'
 
     let html = ''
@@ -181,18 +219,22 @@ export async function openPluginMenuManager(host: PluginMenuManagerHost): Promis
     html += `<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);">${headerPlugin}</th>`
     html += `<th style="text-align:center;padding:6px 8px;border-bottom:1px solid var(--border);">${headerCtx}</th>`
     html += `<th style="text-align:center;padding:6px 8px;border-bottom:1px solid var(--border);">${headerDropdown}</th>`
+    html += `<th style="text-align:center;padding:6px 8px;border-bottom:1px solid var(--border);">${headerRibbon}</th>`
     html += `</tr></thead><tbody>`
 
     for (const row of rows) {
       const vis = getPluginMenuVisibility(row.pluginId)
       const ctxDisabled = !row.hasContextMenu
       const ddDisabled = !row.hasDropdownMenu
+      const ribbonDisabled = !row.hasRibbonMenu
 
       const ctxChecked = vis.contextMenu !== false && row.hasContextMenu
       const ddChecked = vis.dropdownMenu !== false && row.hasDropdownMenu
+      const ribbonChecked = vis.ribbonMenu !== false && row.hasRibbonMenu
 
       const ctxAttrDisabled = ctxDisabled ? ' disabled' : ''
       const ddAttrDisabled = ddDisabled ? ' disabled' : ''
+      const ribbonAttrDisabled = ribbonDisabled ? ' disabled' : ''
 
       html += `<tr>`
       html += `<td style="padding:4px 8px;border-bottom:1px solid var(--border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${row.pluginId}">${row.name || row.pluginId}</td>`
@@ -201,6 +243,9 @@ export async function openPluginMenuManager(host: PluginMenuManagerHost): Promis
       html += `</td>`
       html += `<td style="padding:4px 8px;text-align:center;border-bottom:1px solid var(--border);">`
       html += `<input type="checkbox" class="plugin-menu-manager-dropdown" data-plugin-id="${row.pluginId}"${ddChecked ? ' checked' : ''}${ddAttrDisabled}>`
+      html += `</td>`
+      html += `<td style="padding:4px 8px;text-align:center;border-bottom:1px solid var(--border);">`
+      html += `<input type="checkbox" class="plugin-menu-manager-ribbon" data-plugin-id="${row.pluginId}"${ribbonChecked ? ' checked' : ''}${ribbonAttrDisabled}>`
       html += `</td>`
       html += `</tr>`
     }
@@ -226,6 +271,19 @@ export async function openPluginMenuManager(host: PluginMenuManagerHost): Promis
         if (!id) return
         try {
           setPluginMenuVisibility(id, { dropdownMenu: el.checked })
+        } catch {}
+      })
+    })
+
+    // 绑定事件：Ribbon 复选框
+    body.querySelectorAll<HTMLInputElement>('input.plugin-menu-manager-ribbon').forEach((el) => {
+      el.addEventListener('change', () => {
+        const id = el.getAttribute('data-plugin-id') || ''
+        if (!id) return
+        try {
+          setPluginMenuVisibility(id, { ribbonMenu: el.checked })
+          // 刷新所有 Ribbon 按钮的可见性
+          refreshAllRibbonButtonVisibility()
         } catch {}
       })
     })

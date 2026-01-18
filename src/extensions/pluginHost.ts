@@ -31,6 +31,11 @@ import type {
   ContextMenuItemConfig,
 } from '../ui/contextMenus'
 import { initPluginsMenu, addToPluginsMenu, removeFromPluginsMenu, togglePluginDropdown } from './pluginMenu'
+import {
+  registerPluginRibbonButton,
+  unregisterPluginRibbonButton,
+  type PluginRibbonIconType,
+} from './pluginRibbonManager'
 import { NotificationManager } from '../core/uiNotifications'
 import type { NotificationType } from '../core/uiNotifications'
 import { t } from '../i18n'
@@ -864,6 +869,38 @@ export function createPluginHost(
           return disposer
         } catch {
           return () => {}
+        }
+      },
+      // 添加垂直菜单栏（Ribbon）按钮
+      addRibbonButton: (opt: {
+        icon: string
+        iconType?: PluginRibbonIconType
+        title: string
+        onClick: (ev: MouseEvent) => void
+      }) => {
+        try {
+          const disposer = registerPluginRibbonButton({
+            pluginId: p.id,
+            icon: opt.icon,
+            iconType: opt.iconType || 'svg',
+            title: opt.title,
+            onClick: opt.onClick,
+          })
+          // 记录 disposer 以便插件停用时自动注销
+          const list = state.pluginMenuDisposers.get(p.id) || []
+          list.push(disposer)
+          state.pluginMenuDisposers.set(p.id, list)
+          return disposer
+        } catch {
+          return () => {}
+        }
+      },
+      // 在指定元素上显示下拉菜单
+      showDropdownMenu: (anchor: HTMLElement, items: any[]) => {
+        try {
+          togglePluginDropdown(anchor, items)
+        } catch (e) {
+          console.error('[Plugin] showDropdownMenu failed', e)
         }
       },
       ui: {
