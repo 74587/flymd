@@ -30,6 +30,10 @@ function s3gText(zh, en) {
 // S3/R2 本地历史分页：超过 9 条就翻页显示，避免一次性渲染太多导致 UI/预览交互不稳定
 const S3G_PAGE_SIZE = 9
 
+// UI 状态持久化：仅用于用户体验，不影响宿主逻辑
+const S3G_SORT_LS_KEY = 'flymd.s3-gallery.sortOrder'
+const S3G_PAGE_LS_KEY = 'flymd.s3-gallery.page'
+
 // 设备检测函数：支持响应式布局
 function s3gIsMobile() {
   return window.innerWidth <= 576
@@ -44,6 +48,126 @@ function s3gGetDeviceType() {
   if (width <= 576) return 'mobile'
   if (width <= 768) return 'tablet'
   return 'desktop'
+}
+
+function s3gLoadPersistedSortOrder() {
+  try {
+    const ls = typeof localStorage !== 'undefined' ? localStorage : null
+    const v = ls && ls.getItem(S3G_SORT_LS_KEY)
+    if (v === 'asc' || v === 'desc') return v
+  } catch {}
+  return 'desc'
+}
+
+function s3gPersistSortOrder(order) {
+  try {
+    const ls = typeof localStorage !== 'undefined' ? localStorage : null
+    if (ls) ls.setItem(S3G_SORT_LS_KEY, order === 'asc' ? 'asc' : 'desc')
+  } catch {}
+}
+
+function s3gLoadPersistedPage() {
+  try {
+    const ls = typeof localStorage !== 'undefined' ? localStorage : null
+    const v = ls && ls.getItem(S3G_PAGE_LS_KEY)
+    const n = v ? parseInt(String(v), 10) : 0
+    return Number.isFinite(n) && n > 0 ? n : 1
+  } catch {}
+  return 1
+}
+
+function s3gPersistPage(page) {
+  try {
+    const ls = typeof localStorage !== 'undefined' ? localStorage : null
+    const n = typeof page === 'number' ? page : parseInt(String(page || ''), 10)
+    if (ls && Number.isFinite(n) && n > 0) ls.setItem(S3G_PAGE_LS_KEY, String(n))
+  } catch {}
+}
+
+function s3gGetRecordTimeRaw(rec) {
+  if (!rec) return ''
+  // 兼容多种字段命名：S3/R2 历史 / ImgLa 返回值
+  const cands = [
+    rec.uploaded_at,
+    rec.uploadedAt,
+    rec.created_at,
+    rec.createdAt,
+    rec.last_modified,
+    rec.lastModified,
+    rec.LastModified,
+  ]
+  for (const v of cands) {
+    if (v == null) continue
+    if (typeof v === 'string' && v.trim()) return v.trim()
+    if (typeof v === 'number' && Number.isFinite(v)) return v
+    if (typeof v === 'object') {
+      try {
+        if (v instanceof Date && !isNaN(v.getTime())) return v.toISOString()
+      } catch {}
+    }
+  }
+  return ''
+}
+
+function s3gToTimeMs(v) {
+  if (v == null) return -1
+  if (typeof v === 'number') {
+    if (!Number.isFinite(v)) return -1
+    // 兼容秒/毫秒时间戳
+    return v > 1e12 ? Math.floor(v) : Math.floor(v * 1000)
+  }
+  const s = typeof v === 'string' ? v.trim() : ''
+  if (!s) return -1
+  // 纯数字字符串：当作时间戳
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    const n = Number(s)
+    if (!Number.isFinite(n)) return -1
+    return n > 1e12 ? Math.floor(n) : Math.floor(n * 1000)
+  }
+  const d = new Date(s)
+  const ms = d.getTime()
+  return Number.isFinite(ms) && !isNaN(ms) ? ms : -1
+}
+
+function s3gFormatRecordTime(rec) {
+  const raw = s3gGetRecordTimeRaw(rec)
+  const ms = s3gToTimeMs(raw)
+  if (ms > 0) {
+    const d = new Date(ms)
+    const yy = d.getFullYear()
+    const mm = String(d.getMonth() + 1).padStart(2, '0')
+    const dd = String(d.getDate()).padStart(2, '0')
+    const hh = String(d.getHours()).padStart(2, '0')
+    const mi = String(d.getMinutes()).padStart(2, '0')
+    return `${yy}-${mm}-${dd} ${hh}:${mi}`
+  }
+  if (typeof raw === 'string' && raw) return raw
+  return ''
+}
+
+function s3gSortRecordsByTime(records, sortOrder) {
+  const arr = Array.isArray(records) ? records : []
+  if (arr.length <= 1) return arr.slice()
+  const order = sortOrder === 'asc' ? 'asc' : 'desc'
+  const decorated = arr.map((r, idx) => ({
+    r,
+    idx,
+    t: s3gToTimeMs(s3gGetRecordTimeRaw(r)),
+  }))
+  decorated.sort((a, b) => {
+    const aOk = a.t > 0
+    const bOk = b.t > 0
+    if (aOk && bOk) {
+      const diff = a.t - b.t
+      if (diff !== 0) return order === 'asc' ? diff : -diff
+      return a.idx - b.idx
+    }
+    // 无时间的一律排最后，避免“未知时间”干扰排序
+    if (aOk && !bOk) return -1
+    if (!aOk && bOk) return 1
+    return a.idx - b.idx
+  })
+  return decorated.map((x) => x.r)
 }
 
 let _panel = null
@@ -71,6 +195,12 @@ let _pagerEl = null
 let _pagePrevBtnEl = null
 let _pageNextBtnEl = null
 let _pageLabelEl = null
+let _pageJumpInputEl = null
+let _pageJumpBtnEl = null
+
+// 排序：默认“新到旧”（上传时间）
+let _sortOrder = 'desc' // 'desc' | 'asc'
+let _sortSelectEl = null
 
 // 悬浮预览层：鼠标悬浮缩略图时展示大图，避免改动现有布局
 let _previewRoot = null
@@ -415,6 +545,10 @@ function ensurePanel(context) {
   _ctx = context
   if (_panel && document.body.contains(_panel)) return _panel
 
+  // 只在首次创建面板时读取一次：避免每次打开覆盖用户当前选择
+  _sortOrder = s3gLoadPersistedSortOrder()
+  _page = s3gLoadPersistedPage()
+
   const panel = document.createElement('div')
   panel.id = 'flymd-s3-gallery-panel'
   panel.style.position = 'fixed'
@@ -553,6 +687,39 @@ function ensurePanel(context) {
   }
   _providerTagEl = providerTag
 
+  const sortSelect = document.createElement('select')
+  sortSelect.style.minWidth = '0'
+  sortSelect.style.borderRadius = '6px'
+  sortSelect.style.border = '1px solid rgba(255,255,255,0.12)'
+  sortSelect.style.background = 'rgba(0,0,0,0.2)'
+  sortSelect.style.color = 'inherit'
+  sortSelect.style.fontSize = '12px'
+  // 响应式宽度和 padding
+  if (s3gIsMobile()) {
+    sortSelect.style.width = '100%'
+    sortSelect.style.padding = '8px'
+  } else {
+    sortSelect.style.maxWidth = '180px'
+    sortSelect.style.padding = '4px 8px'
+  }
+  const optDesc = document.createElement('option')
+  optDesc.value = 'desc'
+  optDesc.textContent = s3gText('上传时间：新到旧', 'Time: New → Old')
+  const optAsc = document.createElement('option')
+  optAsc.value = 'asc'
+  optAsc.textContent = s3gText('上传时间：旧到新', 'Time: Old → New')
+  sortSelect.appendChild(optDesc)
+  sortSelect.appendChild(optAsc)
+  sortSelect.value = _sortOrder === 'asc' ? 'asc' : 'desc'
+  sortSelect.onchange = () => {
+    const v = String(sortSelect.value || '').toLowerCase()
+    _sortOrder = v === 'asc' ? 'asc' : 'desc'
+    s3gPersistSortOrder(_sortOrder)
+    _page = 1
+    renderList(_records)
+  }
+  _sortSelectEl = sortSelect
+
   const albumSelect = document.createElement('select')
   albumSelect.style.minWidth = '0'
   albumSelect.style.borderRadius = '6px'
@@ -605,6 +772,7 @@ function ensurePanel(context) {
   _albumRefreshBtnEl = albumRefreshBtn
 
   controls.appendChild(providerTag)
+  controls.appendChild(sortSelect)
   controls.appendChild(albumSelect)
   controls.appendChild(albumRefreshBtn)
   _controlsEl = controls
@@ -677,6 +845,49 @@ function ensurePanel(context) {
   pageLabel.style.whiteSpace = 'nowrap'
   _pageLabelEl = pageLabel
 
+  const jumpInput = document.createElement('input')
+  jumpInput.type = 'number'
+  jumpInput.min = '1'
+  jumpInput.placeholder = s3gText('页码', 'Page')
+  jumpInput.style.borderRadius = '6px'
+  jumpInput.style.border = '1px solid rgba(255,255,255,0.12)'
+  jumpInput.style.background = 'rgba(0,0,0,0.2)'
+  jumpInput.style.color = 'inherit'
+  jumpInput.style.fontSize = '12px'
+  if (s3gIsMobile()) {
+    jumpInput.style.width = '64px'
+    jumpInput.style.padding = '6px 8px'
+  } else {
+    jumpInput.style.width = '72px'
+    jumpInput.style.padding = '4px 8px'
+  }
+  jumpInput.onkeydown = (e) => {
+    if (!e) return
+    if ((e.key || '') !== 'Enter') return
+    const v = parseInt(String(jumpInput.value || ''), 10)
+    void s3gJumpToPage(_ctx, v)
+  }
+  _pageJumpInputEl = jumpInput
+
+  const jumpBtn = document.createElement('button')
+  jumpBtn.textContent = s3gText('跳转', 'Go')
+  jumpBtn.style.cursor = 'pointer'
+  jumpBtn.style.border = '1px solid rgba(255,255,255,0.12)'
+  jumpBtn.style.borderRadius = '6px'
+  jumpBtn.style.background = 'rgba(0,0,0,0.2)'
+  jumpBtn.style.color = 'inherit'
+  jumpBtn.style.fontSize = '12px'
+  if (s3gIsMobile()) {
+    jumpBtn.style.padding = '6px 10px'
+  } else {
+    jumpBtn.style.padding = '4px 10px'
+  }
+  jumpBtn.onclick = () => {
+    const v = parseInt(String(jumpInput.value || ''), 10)
+    void s3gJumpToPage(_ctx, v)
+  }
+  _pageJumpBtnEl = jumpBtn
+
   const nextBtn = document.createElement('button')
   nextBtn.textContent = s3gText('下一页', 'Next')
   nextBtn.style.cursor = 'pointer'
@@ -693,6 +904,8 @@ function ensurePanel(context) {
 
   pager.appendChild(prevBtn)
   pager.appendChild(pageLabel)
+  pager.appendChild(jumpInput)
+  pager.appendChild(jumpBtn)
   pager.appendChild(nextBtn)
   footer.appendChild(pager)
 
@@ -784,6 +997,11 @@ function s3gUpdatePager(totalCount) {
   const canNext = _page < pages || (_mode === 'imgla' && _imglaHasMore)
   _pageNextBtnEl.disabled = !canNext
 
+  if (_pageJumpInputEl) {
+    _pageJumpInputEl.value = String(_page)
+  }
+  s3gPersistPage(_page)
+
   if (_loadMoreBtnEl) {
     _loadMoreBtnEl.disabled = !(_mode === 'imgla' && _imglaHasMore)
   }
@@ -792,7 +1010,7 @@ function s3gUpdatePager(totalCount) {
 function renderList(records) {
   if (!_listRoot) return
   _listRoot.innerHTML = ''
-  _records = Array.isArray(records) ? records.slice() : []
+  _records = s3gSortRecordsByTime(records, _sortOrder)
   s3gUpdatePager(_records.length)
 
   if (!_records.length) {
@@ -881,22 +1099,10 @@ function renderList(records) {
     const time = document.createElement('div')
     time.style.fontSize = '11px'
     time.style.opacity = '0.7'
-    const t = rec.uploaded_at || rec.uploadedAt || ''
-    if (t) {
-      const d = new Date(t)
-      if (!isNaN(d.getTime())) {
-        const yy = d.getFullYear()
-        const mm = String(d.getMonth() + 1).padStart(2, '0')
-        const dd = String(d.getDate()).padStart(2, '0')
-        const hh = String(d.getHours()).padStart(2, '0')
-        const mi = String(d.getMinutes()).padStart(2, '0')
-        time.textContent = `${yy}-${mm}-${dd} ${hh}:${mi}`
-      } else {
-        time.textContent = t
-      }
-    } else {
-      time.textContent = '(未知时间)'
-    }
+    const ft = s3gFormatRecordTime(rec)
+    time.textContent = ft
+      ? s3gText('上传：', 'Uploaded: ') + ft
+      : s3gText('上传：(未知)', 'Uploaded: (unknown)')
 
     const sizeLine = document.createElement('div')
     sizeLine.style.fontSize = '11px'
@@ -1079,6 +1285,33 @@ async function loadMoreImgla(context, opts) {
   }
 }
 
+async function s3gJumpToPage(context, targetPage) {
+  const n = typeof targetPage === 'number' ? targetPage : parseInt(String(targetPage || ''), 10)
+  if (!Number.isFinite(n) || n < 1) return
+  s3gHidePreview()
+
+  // S3/R2：纯本地分页，直接跳
+  if (_mode !== 'imgla') {
+    _page = n
+    renderList(_records)
+    return
+  }
+
+  // ImgLa：允许跳到“尚未加载”的页（需要把远端页逐页拉下来）
+  if (!context || !context.invoke) return
+  let loops = 0
+  while (_imglaHasMore) {
+    const loadedPages = Math.max(1, Math.ceil((_records.length || 0) / S3G_PAGE_SIZE))
+    if (loadedPages >= n) break
+    loops += 1
+    if (loops > 30) break
+    const added = await loadMoreImgla(context, { noRender: true, keepLoading: true })
+    if (added <= 0) break
+  }
+  _page = n
+  renderList(_records)
+}
+
 async function s3gNextPage(context) {
   s3gHidePreview()
   if (_page < (_pageTotal || 1)) {
@@ -1140,8 +1373,7 @@ async function refreshList(context) {
 
     const list = await context.invoke('flymd_list_uploaded_images')
     if (Array.isArray(list)) {
-      // S3/R2：每次刷新回到第一页（避免删除/新增导致页码越界）
-      _page = 1
+      // S3/R2：保留当前页码，由分页器自动钳制范围
       // 兼容：若历史中包含 ImgLa 记录（bucket/provider），在 S3/R2 模式下不显示
       const filtered = list.filter((r) => {
         try {
@@ -1414,6 +1646,10 @@ export function deactivate() {
   _pagePrevBtnEl = null
   _pageNextBtnEl = null
   _pageLabelEl = null
+  _pageJumpInputEl = null
+  _pageJumpBtnEl = null
+  _sortOrder = 'desc'
+  _sortSelectEl = null
   _previewRoot = null
   _previewImg = null
   _previewCaption = null
