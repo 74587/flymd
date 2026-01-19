@@ -5506,6 +5506,21 @@ async function openWriteWithChoiceDialog(ctx) {
   typesetHint.textContent = t('只影响显示/写入的正文文本，不影响走向候选与提示词。', 'Affects only displayed/written prose; does not change options/prompt.')
   sec.appendChild(typesetHint)
 
+  const cbAutoTitleLine = document.createElement('label')
+  cbAutoTitleLine.style.display = 'flex'
+  cbAutoTitleLine.style.gap = '8px'
+  cbAutoTitleLine.style.alignItems = 'center'
+  cbAutoTitleLine.style.marginTop = '6px'
+  const cbAutoTitle = document.createElement('input')
+  cbAutoTitle.type = 'checkbox'
+  cbAutoTitle.checked = cfg.autoChapterTitle !== false
+  cbAutoTitle.onchange = async () => {
+    try { cfg = await saveCfg(ctx, { autoChapterTitle: !!cbAutoTitle.checked }) } catch {}
+  }
+  cbAutoTitleLine.appendChild(cbAutoTitle)
+  cbAutoTitleLine.appendChild(document.createTextNode(t('自动生成章节标题（写入到本章文件第一行）', 'Auto-generate chapter title (write into the first line)')))
+  sec.appendChild(cbAutoTitleLine)
+
   // 人物状态（06_人物状态.md）——自动注入到硬约束，避免“人被忘掉”（这会直接影响剧情走向）
   const _castState = { items: [] }
 
@@ -7447,13 +7462,34 @@ async function openWriteWithChoiceDialog(ctx) {
     selectedIdx = Math.max(0, v | 0)
     renderOptions()
   }
-  btnAppend.onclick = () => {
+  btnAppend.onclick = async () => {
+    if (!lastText) return
+    setBusy(btnAppend, true)
     try {
-      if (!lastText) return
+      cfg = await loadCfg(ctx)
+      if (cbAutoTitle && cbAutoTitle.checked && cfg && cfg.autoChapterTitle !== false) {
+        const title0 = await _ainGenerateChapterTitle(ctx, cfg, lastText, {
+          onTick: ({ waitMs }) => {
+            try {
+              const s = Math.max(0, Math.round(Number(waitMs || 0) / 1000))
+              out.textContent = t('生成章节标题中… 已等待 ', 'Generating chapter title... waited ') + s + 's'
+            } catch {}
+          }
+        })
+        if (title0) {
+          const ok = await _ainMaybeAppendTitleToCurrentChapterFirstLine(ctx, title0)
+          if (ok) {
+            try { ctx.ui.notice(t('已写入章节标题：', 'Chapter title written: ') + title0, 'ok', 1800) } catch {}
+          }
+        }
+      }
       appendToDoc(ctx, lastText)
       ctx.ui.notice(t('已追加到文末', 'Appended'), 'ok', 1600)
     } catch (e) {
       ctx.ui.notice(t('追加失败：', 'Append failed: ') + (e && e.message ? e.message : String(e)), 'err', 2400)
+    } finally {
+      setBusy(btnAppend, false)
+      try { out.textContent = lastText } catch {}
     }
   }
 
@@ -7592,6 +7628,21 @@ async function openAutoWriteDialog(ctx) {
     ''
   )
   sec.appendChild(inpExtra.wrap)
+
+  const autoTitleLine = document.createElement('label')
+  autoTitleLine.style.display = 'flex'
+  autoTitleLine.style.gap = '8px'
+  autoTitleLine.style.alignItems = 'center'
+  autoTitleLine.style.marginTop = '6px'
+  const cbAutoTitle = document.createElement('input')
+  cbAutoTitle.type = 'checkbox'
+  cbAutoTitle.checked = cfg.autoChapterTitle !== false
+  cbAutoTitle.onchange = async () => {
+    try { cfg = await saveCfg(ctx, { autoChapterTitle: !!cbAutoTitle.checked }) } catch {}
+  }
+  autoTitleLine.appendChild(cbAutoTitle)
+  autoTitleLine.appendChild(document.createTextNode(t('自动生成章节标题（写入到章节文件第一行）', 'Auto-generate chapter title (write into the first line)')))
+  sec.appendChild(autoTitleLine)
 
   const hint = document.createElement('div')
   hint.className = 'ain-muted'
@@ -7766,8 +7817,18 @@ async function openAutoWriteDialog(ctx) {
         if (await fileExists(ctx, inf.chapPath)) {
           throw new Error(t('目标章节文件已存在：', 'Target chapter file already exists: ') + String(fsBaseName(inf.chapPath)))
         }
-        const title = `# 第${inf.chapZh}章`
-        const full = (title + '\n\n' + safeText(text0).trim()).trimEnd() + '\n'
+        let head = `# 第${inf.chapZh}章`
+        if (cbAutoTitle && cbAutoTitle.checked && cfg && cfg.autoChapterTitle !== false) {
+          setStatus(t('生成章节标题…', 'Generating chapter title...'))
+          const title0 = await _ainGenerateChapterTitle(ctx, cfg, text0, {
+            onTick: ({ waitMs }) => {
+              const s = Math.max(0, Math.round(Number(waitMs || 0) / 1000))
+              setStatus(t('生成章节标题… 已等待 ', 'Generating chapter title... waited ') + String(s) + 's')
+            }
+          })
+          if (title0) head = head + ' ' + title0
+        }
+        const full = (head + '\n\n' + safeText(text0).trim()).trimEnd() + '\n'
         await writeTextAny(ctx, inf.chapPath, full)
         try {
           if (typeof ctx.openFileByPath === 'function') await ctx.openFileByPath(inf.chapPath)
@@ -9199,6 +9260,83 @@ function _ainMaybeTypesetWebNovel(cfg, text) {
     return _ainTypesetWebNovelText(text, 2)
   } catch {
     return text
+  }
+}
+
+function _ainCleanChapterTitleText(s) {
+  const raw = safeText(s).replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim()
+  if (!raw) return ''
+  // 去掉可能的引号/序号/标题符号，避免变成 “# # 第X章 …”
+  let t0 = raw.replace(/^#+\s*/, '').trim()
+  t0 = t0.replace(/^(第\s*\d+\s*章|第\s*[一二三四五六七八九十百千零]+\s*章)\s*/u, '').trim()
+  t0 = t0.replace(/^["'“‘《【（(]+/, '').replace(/["'”’》】）)]+$/, '').trim()
+  // 极限兜底：不要太长
+  if (t0.length > 40) t0 = t0.slice(0, 40).trim()
+  return t0
+}
+
+async function _ainGenerateChapterTitle(ctx, cfg, chapterText, opt) {
+  try {
+    if (!cfg || !cfg.token) return ''
+    if (!cfg.upstream || !cfg.upstream.baseUrl || !cfg.upstream.model) return ''
+    const txt = safeText(chapterText).trim()
+    if (!txt) return ''
+
+    const o = opt && typeof opt === 'object' ? opt : {}
+    const onTick = o.onTick && typeof o.onTick === 'function' ? o.onTick : null
+    const snippet = sliceHeadTail(txt, 1200, 0.7).trim()
+
+    const q = [
+      '任务：为下面这章小说正文起一个“章节标题”。',
+      '硬规则：只输出标题本身，不要加任何前缀/编号/引号/括号/解释，不要换行。',
+      '长度：尽量 8~16 个中文字符（不要太长）。',
+      '风格：贴合正文气质，避免剧透过度。',
+      '',
+      '正文节选：',
+      snippet
+    ].join('\n')
+
+    const r = await apiFetchConsultWithJob(ctx, cfg, {
+      upstream: {
+        baseUrl: cfg.upstream.baseUrl,
+        apiKey: cfg.upstream.apiKey,
+        model: cfg.upstream.model
+      },
+      input: { question: q }
+    }, {
+      timeoutMs: 90000,
+      onTick: onTick ? ({ waitMs }) => { try { onTick({ waitMs }) } catch {} } : null
+    })
+
+    const text = safeText((r && r.text) ? r.text : '').trim()
+    if (!text) return ''
+    const first = text.split(/\r?\n/).map((x) => safeText(x).trim()).filter(Boolean)[0] || ''
+    return _ainCleanChapterTitleText(first)
+  } catch {
+    return ''
+  }
+}
+
+async function _ainMaybeAppendTitleToCurrentChapterFirstLine(ctx, titleText) {
+  try {
+    const t0 = _ainCleanChapterTitleText(titleText)
+    if (!t0) return false
+    if (!ctx || typeof ctx.getCurrentFilePath !== 'function') return false
+    const p = String(await ctx.getCurrentFilePath() || '').trim()
+    if (!p) return false
+
+    const doc = safeText(ctx.getEditorValue ? (ctx.getEditorValue() || '') : '')
+    if (!doc) return false
+    const m = /^([^\r\n]*)(\r?\n|$)/.exec(doc)
+    const firstLine = m && m[1] != null ? String(m[1]) : ''
+    const firstTrim = safeText(firstLine).trim()
+    // 只在“纯章节标题行”上追加，避免覆盖用户自己写的标题
+    if (!/^#\s*第[^#\r\n]*章\s*$/u.test(firstTrim)) return false
+
+    const next = firstTrim + ' ' + t0
+    return await _ainTryReplaceFirstLineInPath(ctx, p, firstTrim, next)
+  } catch {
+    return false
   }
 }
 
@@ -10875,201 +11013,10 @@ async function openBootstrapDialog(ctx) {
   bootstrapHint.className = 'ain-muted'
   bootstrapHint.style.marginTop = '6px'
   bootstrapHint.textContent = t(
-    '流程：先点“AI 生成资料”，再点“创建项目并写入文件”。项目创建后，用“开始下一章”创建章节文件开始写作。',
-    'Flow: AI generate meta → Create project & write files → Start next chapter to begin writing.'
+    '步骤：① AI 生成资料（可编辑）→ ② 创建项目并写入文件 → ③ 开始写作：用“开始下一章”；分卷写作：用“新开一卷”。',
+    'Steps: 1) Generate meta (editable) → 2) Create project & write files → 3) Start writing: Start next chapter / Start new volume.'
   )
   sec.appendChild(bootstrapHint)
-
-  const structBox = document.createElement('div')
-  structBox.style.marginTop = '10px'
-  structBox.style.display = 'flex'
-  structBox.style.flexWrap = 'wrap'
-  structBox.style.gap = '10px'
-  structBox.style.alignItems = 'center'
-
-  const volLine = document.createElement('label')
-  volLine.style.display = 'flex'
-  volLine.style.gap = '8px'
-  volLine.style.alignItems = 'center'
-  const cbSplitVolume = document.createElement('input')
-  cbSplitVolume.type = 'checkbox'
-  cbSplitVolume.checked = true
-  volLine.appendChild(cbSplitVolume)
-  volLine.appendChild(document.createTextNode(t('开启分卷（推荐：创建 卷01_第一卷 并把第一章放入其中）', 'Use volumes (recommended): create Vol01 and put Chapter 1 inside')))
-  structBox.appendChild(volLine)
-
-  const typesetLine = document.createElement('label')
-  typesetLine.style.display = 'flex'
-  typesetLine.style.gap = '8px'
-  typesetLine.style.alignItems = 'center'
-  const cbTypeset = document.createElement('input')
-  cbTypeset.type = 'checkbox'
-  cbTypeset.checked = !!cfg.typesetWebNovel
-  cbTypeset.onchange = async () => {
-    try { cfg = await saveCfg(ctx, { typesetWebNovel: !!cbTypeset.checked }) } catch {}
-  }
-  typesetLine.appendChild(cbTypeset)
-  typesetLine.appendChild(document.createTextNode(t('网文排版（每段 1-2 句，自动提行）', 'Web novel typesetting (1–2 sentences/paragraph)')))
-  structBox.appendChild(typesetLine)
-  sec.appendChild(structBox)
-
-  const a0 = _ainAgentGetCfg(cfg)
-  const agentBox = document.createElement('div')
-  agentBox.style.marginTop = '10px'
-  agentBox.style.display = 'flex'
-  agentBox.style.flexWrap = 'wrap'
-  agentBox.style.gap = '10px'
-  agentBox.style.alignItems = 'center'
-
-  const agentLine = document.createElement('label')
-  agentLine.style.display = 'flex'
-  agentLine.style.gap = '8px'
-  agentLine.style.alignItems = 'center'
-  const cbAgent = document.createElement('input')
-  cbAgent.type = 'checkbox'
-  cbAgent.checked = !!a0.enabled
-  agentLine.appendChild(cbAgent)
-  agentLine.appendChild(document.createTextNode(t('Agent（Plan模式）', 'Agent (Plan)')))
-  agentBox.appendChild(agentLine)
-
-  const selAgentTarget = document.createElement('select')
-  selAgentTarget.className = 'ain-in ain-select'
-  selAgentTarget.style.width = '180px'
-  ;[1000, 2000, 3000].forEach((n) => {
-    const op = document.createElement('option')
-    op.value = String(n)
-    op.textContent = t('≈ ', '≈ ') + String(n) + t(' 字', ' chars') + (n === 3000 ? t('（上限）', ' (max)') : '')
-    selAgentTarget.appendChild(op)
-  })
-  try { selAgentTarget.value = String(_ainAgentNormTargetChars(a0.targetChars || 3000, 3000)) } catch {}
-  agentBox.appendChild(selAgentTarget)
-
-  const auditLine = document.createElement('label')
-  auditLine.style.display = 'flex'
-  auditLine.style.gap = '8px'
-  auditLine.style.alignItems = 'center'
-  const cbAudit = document.createElement('input')
-  cbAudit.type = 'checkbox'
-  cbAudit.checked = !!a0.audit
-  auditLine.appendChild(cbAudit)
-  auditLine.appendChild(document.createTextNode(t('自动审计（更耗字符）', 'Auto audit (costs more)')))
-  agentBox.appendChild(auditLine)
-
-  const modeLine = document.createElement('label')
-  modeLine.style.display = 'flex'
-  modeLine.style.gap = '8px'
-  modeLine.style.alignItems = 'center'
-  const selThinkingMode = document.createElement('select')
-  selThinkingMode.className = 'ain-in ain-select'
-  selThinkingMode.style.width = '260px'
-  ;[
-    { v: 'none', zh: '不思考', en: 'None (default)' },
-    { v: 'normal', zh: '正常思考', en: 'Normal (inject checklist)' },
-    { v: 'strong', zh: '强思考', en: 'Strong (slower, steadier)' },
-  ].forEach((it) => {
-    const op = document.createElement('option')
-    op.value = String(it.v)
-    op.textContent = t(String(it.zh), String(it.en))
-    selThinkingMode.appendChild(op)
-  })
-  try { selThinkingMode.value = String(a0.thinkingMode || 'none') } catch {}
-  modeLine.appendChild(document.createTextNode(t('思考模式：', 'Mode: ')))
-  modeLine.appendChild(selThinkingMode)
-  agentBox.appendChild(modeLine)
-
-  function _bootstrapSyncTargetOptions() {
-    const max = _ainAgentMaxTargetCharsByMode(selThinkingMode.value)
-    try {
-      const opts = selAgentTarget.querySelectorAll('option')
-      for (let i = 0; i < opts.length; i++) {
-        const v = parseInt(String(opts[i].value || '0'), 10) || 0
-        opts[i].disabled = v > max
-      }
-    } catch {}
-    const cur = parseInt(String(selAgentTarget.value || '3000'), 10) || 3000
-    const next = _ainAgentClampTargetCharsByMode(selThinkingMode.value, cur)
-    if (next !== cur) {
-      try { selAgentTarget.value = String(next) } catch {}
-    }
-  }
-  selThinkingMode.onchange = () => { _bootstrapSyncTargetOptions() }
-  _bootstrapSyncTargetOptions()
-
-  const agentHint = document.createElement('div')
-  agentHint.className = 'ain-muted'
-  agentHint.style.marginTop = '6px'
-  agentHint.textContent = t(
-    '提示：Agent 会先生成 TODO，再逐项执行，并实时显示进度；字数是“目标值”不是硬上限：默认≈3000，中等≈2000，加强≈1000（越高越耗字符余额）。',
-    'Note: Agent generates TODO then executes step-by-step with live progress; targets (not hard caps): None≈3000, Normal≈2000, Strong≈1000 (higher costs more tokens).'
-  )
-
-  const agentProgress = document.createElement('div')
-  agentProgress.className = 'ain-card'
-  agentProgress.style.display = 'none'
-  agentProgress.innerHTML = `<div style="font-weight:700;margin-bottom:6px">${t('Agent 进度', 'Agent progress')}</div>`
-  const agentTodo = document.createElement('div')
-  agentTodo.className = 'ain-todo'
-  const agentLog = document.createElement('div')
-  agentLog.className = 'ain-todo-log'
-  agentLog.textContent = t('等待开始。', 'Waiting.')
-  agentProgress.appendChild(agentTodo)
-  agentProgress.appendChild(agentLog)
-
-  const agentCtrlRow = mkBtnRow()
-  agentCtrlRow.style.marginTop = '8px'
-  const btnAgentAbort = document.createElement('button')
-  btnAgentAbort.className = 'ain-btn gray'
-  btnAgentAbort.textContent = t('终止本次任务', 'Abort task')
-  btnAgentAbort.disabled = true
-  const btnAgentRetry = document.createElement('button')
-  btnAgentRetry.className = 'ain-btn gray'
-  btnAgentRetry.textContent = t('重试', 'Retry')
-  btnAgentRetry.style.display = 'none'
-  const btnAgentSkip = document.createElement('button')
-  btnAgentSkip.className = 'ain-btn gray'
-  btnAgentSkip.textContent = t('跳过该步骤', 'Skip step')
-  btnAgentSkip.style.display = 'none'
-  agentCtrlRow.appendChild(btnAgentAbort)
-  agentCtrlRow.appendChild(btnAgentRetry)
-  agentCtrlRow.appendChild(btnAgentSkip)
-  agentProgress.appendChild(agentCtrlRow)
-
-  function renderAgentProgress(items, logs) {
-    try { agentProgress.style.display = '' } catch {}
-    try {
-      agentTodo.innerHTML = ''
-      const arr = Array.isArray(items) ? items : []
-      for (let i = 0; i < arr.length; i++) {
-        const it = arr[i] || {}
-        const row = document.createElement('div')
-        row.className = 'ain-todo-item'
-        const st = document.createElement('div')
-        st.className = 'ain-todo-st'
-        st.textContent = _ainAgentStatusSymbol(it.status)
-        const ttl = document.createElement('div')
-        ttl.className = 'ain-todo-title'
-        ttl.textContent = safeText(it.title || '')
-        const meta = document.createElement('span')
-        meta.className = 'ain-muted'
-        meta.textContent = safeText(it.type || '')
-        ttl.appendChild(meta)
-        row.appendChild(st)
-        row.appendChild(ttl)
-        agentTodo.appendChild(row)
-      }
-    } catch {}
-    try {
-      // 只有用户本来就在底部时才跟随滚动；否则用户上滑查看历史会被强制拉回底部。
-      const nearBottom = (agentLog.scrollTop + agentLog.clientHeight) >= (agentLog.scrollHeight - 24)
-      const lines = Array.isArray(logs) ? logs : []
-      agentLog.textContent = lines.join('\n')
-      if (nearBottom) agentLog.scrollTop = agentLog.scrollHeight
-    } catch {}
-  }
-
-  sec.appendChild(agentBox)
-  sec.appendChild(agentHint)
-  sec.appendChild(agentProgress)
 
   const out = document.createElement('div')
   out.className = 'ain-out'
@@ -11111,40 +11058,7 @@ async function openBootstrapDialog(ctx) {
 
   body.appendChild(sec)
 
-  let lastChapter = ''
-  let projectTitle = ''
   let lastQuestions = []
-  let agentControl = null
-
-  function _syncAgentCtrlUiPaused(meta) {
-    btnAgentRetry.style.display = ''
-    btnAgentSkip.style.display = (meta && meta.type === 'write') ? 'none' : ''
-  }
-
-  function _syncAgentCtrlUiRunning() {
-    btnAgentRetry.style.display = 'none'
-    btnAgentSkip.style.display = 'none'
-  }
-
-  btnAgentAbort.onclick = () => {
-    try {
-      if (!agentControl || typeof agentControl.abort !== 'function') return
-      agentControl.abort()
-      ctx.ui.notice(t('已发出终止请求', 'Abort requested'), 'ok', 1200)
-    } catch {}
-  }
-  btnAgentRetry.onclick = () => {
-    try {
-      if (!agentControl || typeof agentControl.resume !== 'function') return
-      agentControl.resume('retry')
-    } catch {}
-  }
-  btnAgentSkip.onclick = () => {
-    try {
-      if (!agentControl || typeof agentControl.resume !== 'function') return
-      agentControl.resume('skip')
-    } catch {}
-  }
 
   function renderQuestions() {
     const arr = Array.isArray(lastQuestions) ? lastQuestions : []
@@ -11273,157 +11187,14 @@ async function openBootstrapDialog(ctx) {
     }
   }
 
-  async function doGenerate() {
-    const promptIdea = safeText(idea.ta.value).trim()
-    if (!promptIdea) {
-      ctx.ui.notice(t('请先填写故事概念', 'Please input story idea'), 'err', 2000)
-      return
-    }
-    cfg = await loadCfg(ctx)
-    await ensureTitle()
-    setBusy(btnGen, true)
-    setBusy(btnAppend, true)
-    out.textContent = t('生成中…', 'Generating...')
-    lastChapter = ''
-    projectTitle = safeText(titleIn.ta.value).trim()
-    try {
-      const constraints = mergeConstraints(cfg, '')
-
-      // 为 options 获取上下文，让走向候选更贴合当前剧情
-      let optProgress = ''
-      let optBible = ''
-      let optPrev = ''
-      let optRag = null
-      try { optProgress = await getProgressDocText(ctx, cfg) } catch {}
-      try { optBible = await getBibleDocText(ctx, cfg) } catch {}
-      try { optPrev = sliceTail(await getPrevTextForRequest(ctx, cfg), 4000) } catch {}
-      try { optRag = await rag_get_hits(ctx, cfg, promptIdea) } catch {}
-
-      const opt = await apiFetch(ctx, cfg, 'ai/proxy/chat/', {
-        mode: 'novel',
-        action: 'options',
-        upstream: {
-          baseUrl: cfg.upstream.baseUrl,
-          apiKey: cfg.upstream.apiKey,
-          model: cfg.upstream.model
-        },
-        input: {
-          instruction: promptIdea,
-          progress: optProgress || '',
-          bible: optBible || '',
-          prev: optPrev || '',
-          rag: optRag || null,
-          constraints: constraints || undefined
-        }
-      })
-      const arr = Array.isArray(opt && opt.data) ? opt.data : null
-      const chosen = (arr && arr.length) ? arr[0] : { title: '自动', one_line: '自动走向', conflict: '', characters: [], foreshadow: '', risks: '' }
-
-      const agentEnabled = !!cbAgent.checked
-      if (agentEnabled) {
-        const wantAudit = !!cbAudit.checked
-        const thinkingMode = _ainAgentNormThinkingMode(selThinkingMode.value) || 'none'
-        const targetChars0 = parseInt(String(selAgentTarget.value || '3000'), 10) || 3000
-        const targetChars = _ainAgentClampTargetCharsByMode(thinkingMode, targetChars0)
-        if (targetChars !== targetChars0) {
-          try { selAgentTarget.value = String(targetChars) } catch {}
-          ctx.ui.notice(t('已按思考模式收紧字数目标：', 'Target adjusted by mode: ') + String(targetChars), 'ok', 1800)
-        }
-        const chunkCount = _ainAgentDeriveChunkCount(targetChars)
-        // 记住用户选择（但不强行改动“是否默认启用 Agent”）
-        try {
-          const curEnabled = !!(cfg && cfg.agent && cfg.agent.enabled)
-          cfg = await saveCfg(ctx, { agent: { enabled: curEnabled, targetChars, thinkingMode, audit: wantAudit } })
-        } catch {}
-        try { agentProgress.style.display = '' } catch {}
-        try { agentLog.textContent = t('Agent 执行中…', 'Agent running...') } catch {}
-
-        try {
-          if (agentControl && typeof agentControl.abort === 'function') agentControl.abort()
-        } catch {}
-        agentControl = _ainCreateAgentRunControl()
-        agentControl.onEvent = (ev, meta) => {
-          if (ev === 'paused') _syncAgentCtrlUiPaused(meta)
-          else _syncAgentCtrlUiRunning()
-          if (ev === 'abort') btnAgentAbort.disabled = true
-        }
-        btnAgentAbort.disabled = false
-        _syncAgentCtrlUiRunning()
-
-        out.textContent = t('Agent 执行中…（多轮）', 'Agent running... (multi-round)')
-
-        let rag = null
-        try { rag = await rag_get_hits(ctx, cfg, promptIdea) } catch {}
-
-        const res = await agentRunPlan(ctx, cfg, {
-          instruction: promptIdea,
-          choice: chosen,
-          constraints: constraints || '',
-          prev: '',
-          progress: '',
-          bible: '',
-          rag: rag || null,
-          thinkingMode,
-          targetChars,
-          chunkCount,
-          audit: wantAudit
-        }, { render: renderAgentProgress, control: agentControl })
-
-        const aborted = !!(agentControl && agentControl.aborted)
-        lastChapter = safeText(res && res.text).trim()
-        lastChapter = _ainMaybeTypesetWebNovel(cfg, lastChapter)
-        out.textContent = lastChapter || (aborted ? t('已终止（无输出）', 'Aborted (no output)') : '')
-        btnAgentAbort.disabled = true
-        _syncAgentCtrlUiRunning()
-        agentControl = null
-
-        if (aborted) {
-          btnAppend.disabled = !lastChapter
-          ctx.ui.notice(t('Agent 已终止（未写入文档）', 'Agent aborted (not inserted)'), 'ok', 1800)
-          return
-        }
-      } else {
-        const first = await apiFetchChatWithJob(ctx, cfg, {
-          mode: 'novel',
-          action: 'write',
-          upstream: {
-            baseUrl: cfg.upstream.baseUrl,
-            apiKey: cfg.upstream.apiKey,
-            model: cfg.upstream.model
-          },
-          input: { instruction: promptIdea, progress: '', bible: '', prev: '', choice: chosen, constraints: constraints || undefined }
-        }, {
-          onTick: ({ waitMs }) => {
-            const s = Math.max(0, Math.round(Number(waitMs || 0) / 1000))
-            out.textContent = t('生成中… 已等待 ', 'Generating... waited ') + s + 's'
-          }
-        })
-        lastChapter = safeText(first && first.text).trim()
-        lastChapter = _ainMaybeTypesetWebNovel(cfg, lastChapter)
-      }
-      if (!lastChapter) throw new Error(t('后端未返回正文', 'Backend returned empty text'))
-      out.textContent = lastChapter
-      btnAppend.disabled = false
-      ctx.ui.notice(t('已生成第一章（未写入文档）', 'Chapter generated (not inserted)'), 'ok', 1800)
-    } catch (e) {
-      out.textContent = t('失败：', 'Failed: ') + (e && e.message ? e.message : String(e))
-    } finally {
-      setBusy(btnGen, false)
-      try { btnAgentAbort.disabled = true } catch {}
-      try { _syncAgentCtrlUiRunning() } catch {}
-      agentControl = null
-    }
-  }
-
   async function doCreateProject() {
     cfg = await loadCfg(ctx)
-    const inf = await inferProjectDir(ctx, cfg)
     if (!ctx.getLibraryRoot) throw new Error(t('当前环境不支持获取库根目录', 'Cannot get library root'))
     const libRoot = normFsPath(await ctx.getLibraryRoot())
     if (!libRoot) throw new Error(t('无法获取库根目录', 'Library root is empty'))
 
     const rootPrefix = normFsPath(cfg.novelRootDir || '小说/').replace(/^\/+/, '')
-    const title = safeFileName(projectTitle || safeText(titleIn.ta.value), '新小说')
+    const title = safeFileName(safeText(titleIn.ta.value), '新小说')
     let projectRel = joinFsPath(rootPrefix, title)
     let projectAbs = joinFsPath(libRoot, projectRel)
 
@@ -11442,7 +11213,7 @@ async function openBootstrapDialog(ctx) {
         t('将在以下目录创建项目：', 'Will create project at: ') +
         projectRel +
         '\n' +
-        t('并写入资料设定文件（世界/角色/关系/大纲等）。创建后请用“开始下一章”创建章节文件开始写作。继续？', 'and write meta files (world/characters/relations/outline). Then use Start next chapter to begin writing. Continue?')
+        t('并写入资料设定文件（世界/角色/关系/大纲等）。创建后：用“开始下一章”开始写作；需要分卷就用“新开一卷”。继续？', 'and write meta files (world/characters/relations/outline). Then Start next chapter (or Start new volume). Continue?')
     })
     if (!ok) return
 
@@ -11488,7 +11259,7 @@ async function openBootstrapDialog(ctx) {
     } catch {}
 
     out.textContent = t('已创建项目并写入文件：', 'Project created: ') + projectRel
-    ctx.ui.notice(t('已创建项目：请用“开始下一章”开始写作', 'Project created: use Start next chapter to begin writing'), 'ok', 2600)
+    ctx.ui.notice(t('已创建项目：请用“开始下一章”或“新开一卷”开始写作', 'Project created: use Start next chapter or Start new volume'), 'ok', 2800)
   }
 
   btnAppend.onclick = () => {
