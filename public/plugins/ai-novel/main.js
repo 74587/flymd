@@ -5920,9 +5920,10 @@ async function openWriteWithChoiceDialog(ctx) {
   }
 
   function _castGuessHiddenFromStatus(status) {
-    const s = safeText(status)
-    if (!s) return false
-    if (/(?:失踪|下落不明|潜伏|隐藏|躲藏|隐匿|避难|离开|远走|不在场|未出现|未出场|缺席)/u.test(s)) return true
+    // 禁用“从上一章状态文本里猜隐藏/失踪”：
+    // 这类正则匹配误判成本太高（“缺席/未出场”常是叙述角度，不等于角色应被隐藏）。
+    // 现在 hidden 只由用户在 UI 里显式标记（并持久化到 storage）。
+    void status
     return false
   }
 
