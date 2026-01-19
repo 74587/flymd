@@ -252,17 +252,27 @@ function showQuotaRiskDialog(context, pdfPages, remainPages, opt) {
       return
     }
 
-    const hasPdfPages =
-      typeof pdfPages === 'number' &&
-      Number.isFinite(pdfPages) &&
-      pdfPages > 0
+    let pdfPagesValue =
+      typeof pdfPages === 'number' && Number.isFinite(pdfPages) && pdfPages > 0
+        ? pdfPages
+        : null
 
-    const requireLibrary = !!(opt && opt.requireLibrary)
+    const hasPdfPages = () =>
+      typeof pdfPagesValue === 'number' &&
+      Number.isFinite(pdfPagesValue) &&
+      pdfPagesValue > 0
+
+    let requireLibrary = !!(opt && opt.requireLibrary)
     const canMoveToLibrary = !!(opt && opt.canMoveToLibrary)
-    const requireSplit = !!(opt && opt.requireSplit)
+    let requireSplit = !!(opt && opt.requireSplit)
     const canSplit = !!(opt && opt.canSplit)
     const enableAutoMergeAfterBatch = !!(opt && opt.enableAutoMergeAfterBatch)
     const defaultAutoMergeAfterBatch = !!(opt && opt.defaultAutoMergeAfterBatch)
+    const shouldCheckLibrary = !!(opt && opt.shouldCheckLibrary)
+    const inLib = opt && typeof opt.inLib === 'boolean' ? opt.inLib : true
+    const requireLibraryReason = opt && opt.requireLibraryReason ? String(opt.requireLibraryReason) : ''
+    const retryPdfPath = opt && opt.retryPdfPath ? String(opt.retryPdfPath) : ''
+    const retryDirAbs = opt && opt.retryDirAbs ? String(opt.retryDirAbs) : ''
 
     const overlay = document.createElement('div')
     overlay.style.cssText =
@@ -289,16 +299,8 @@ function showQuotaRiskDialog(context, pdfPages, remainPages, opt) {
       remainPages >= 0
     const safeRemain = hasRemain && remainPages > 0 ? remainPages : 0
     const remainText = hasRemain ? String(remainPages) : pdf2docText('未知', 'unknown')
-    const pdfText = hasPdfPages ? String(pdfPages) : pdf2docText('未知', 'unknown')
 
     // 上游按“PDF 原页数”扣费：这里只在“确定不足”时提示，避免吓用户。
-    const isInsufficient =
-      hasPdfPages && hasRemain && (safeRemain <= 0 || safeRemain < pdfPages)
-    const warnText = isInsufficient
-      ? (safeRemain <= 0
-          ? pdf2docText('剩余解析页数为 0（不足以开始解析）', 'Remaining pages: 0 (not enough to start)')
-          : pdf2docText('剩余解析页数不足以覆盖 PDF 页数，解析可能中断', 'Remaining pages are lower than PDF pages; parsing may stop early'))
-      : ''
     const cacheHint = pdf2docText(
       '解析为 Markdown 支持缓存',
       'Markdown parsing supports resume with cache;'
@@ -307,17 +309,28 @@ function showQuotaRiskDialog(context, pdfPages, remainPages, opt) {
       '多页数 PDF 建议先转换成 MD 再另存为 Docx，直接转换 Docx 的失败也会扣费。',
       'For multi-page PDFs, convert to Markdown first and then export to DOCX; failed DOCX conversion is still billed.'
     )
-    msg.innerHTML = pdf2docText(
-      `当前 PDF 页数：<strong>${pdfText}</strong> 页<br>剩余解析页数：<strong>${remainText}</strong> 页` +
-        `<br><span style="color:#16a34a;font-weight:600;">${cacheHint}</span>` +
-        `<br><span style="color:#dc2626;font-weight:600;">${docxHint}</span>` +
-        (warnText ? `<br><span style="color:#dc2626;font-weight:600;">${warnText}</span>` : ''),
-      `PDF pages: <strong>${pdfText}</strong><br>Remaining parse pages: <strong>${remainText}</strong>` +
-        `<br><span style="color:#16a34a;font-weight:600;">${cacheHint}</span>` +
-        `<br><span style="color:#dc2626;font-weight:600;">${docxHint}</span>` +
-        (warnText ? `<br><span style="color:#dc2626;font-weight:600;">${warnText}</span>` : '')
-    )
     body.appendChild(msg)
+
+    const retryRow = document.createElement('div')
+    retryRow.style.cssText =
+      'display:none;align-items:center;gap:10px;margin-top:10px;padding:10px 12px;border-radius:10px;border:1px solid var(--border,#e5e7eb);background:rgba(127,127,127,.04);'
+
+    const btnRetryPages = document.createElement('button')
+    btnRetryPages.type = 'button'
+    btnRetryPages.style.cssText =
+      'padding:6px 12px;border-radius:8px;border:1px solid #2563eb;background:#fff;color:#2563eb;cursor:pointer;font-size:12px;'
+    btnRetryPages.textContent = pdf2docText('尝试获取页数', 'Retry page count')
+
+    const retryHint = document.createElement('div')
+    retryHint.style.cssText = 'font-size:12px;opacity:.85;'
+    retryHint.textContent = pdf2docText(
+      '未获取到当前 PDF 的页数，点击按钮重新尝试获取',
+      'Failed to get PDF page count; click to retry'
+    )
+
+    retryRow.appendChild(btnRetryPages)
+    retryRow.appendChild(retryHint)
+    body.appendChild(retryRow)
 
     let autoMergeAfterBatch = defaultAutoMergeAfterBatch
     if (enableAutoMergeAfterBatch) {
@@ -340,23 +353,23 @@ function showQuotaRiskDialog(context, pdfPages, remainPages, opt) {
       body.appendChild(row)
     }
 
-    if (requireSplit) {
-      const tip = document.createElement('div')
-      tip.style.cssText = 'margin-top:10px;padding:10px 12px;border-radius:10px;border:1px solid #f59e0b;background:rgba(245,158,11,.08);color:var(--fg,#333);font-size:12px;line-height:1.6;'
-      tip.innerHTML = pdf2docText(
-        '当前 PDF 过大，需分割。分割文档会新建文件名文件夹，可通过“📁 同文件夹批量解析”进行解析，解析完成后可通过“🧩 分段解析结果合并”进行合并。',
-        'This PDF is too large and must be split. A folder will be created; use “Parse all PDFs in this folder”, then use “Merge split parts”.'
-      )
-      body.appendChild(tip)
-    } else if (requireLibrary) {
-      const tip = document.createElement('div')
-      tip.style.cssText = 'margin-top:10px;padding:10px 12px;border-radius:10px;border:1px solid #f59e0b;background:rgba(245,158,11,.08);color:var(--fg,#333);font-size:12px;line-height:1.6;'
-      tip.innerHTML = pdf2docText(
-        '检测到当前 PDF 不在库内，或无法获取页数。为保证解析稳定，请先使用复制到库内并打开。',
-        'The current PDF is outside the library, or its page count is unavailable. Please use “Copy into library and open” first.'
-      )
-      body.appendChild(tip)
-    }
+    const splitTip = document.createElement('div')
+    splitTip.style.cssText =
+      'display:none;margin-top:10px;padding:10px 12px;border-radius:10px;border:1px solid #f59e0b;background:rgba(245,158,11,.08);color:var(--fg,#333);font-size:12px;line-height:1.6;'
+    splitTip.innerHTML = pdf2docText(
+      '当前 PDF 过大，需分割。分割文档会新建文件名文件夹，可通过“📁 同文件夹批量解析”进行解析，解析完成后可通过“🧩 分段解析结果合并”进行合并。',
+      'This PDF is too large and must be split. A folder will be created; use “Parse all PDFs in this folder”, then use “Merge split parts”.'
+    )
+    body.appendChild(splitTip)
+
+    const libraryTip = document.createElement('div')
+    libraryTip.style.cssText =
+      'display:none;margin-top:10px;padding:10px 12px;border-radius:10px;border:1px solid #f59e0b;background:rgba(245,158,11,.08);color:var(--fg,#333);font-size:12px;line-height:1.6;'
+    libraryTip.innerHTML = pdf2docText(
+      '检测到当前 PDF 不在库内，或无法获取页数。为保证解析稳定，请先使用复制到库内并打开。',
+      'The current PDF is outside the library, or its page count is unavailable. Please use “Copy into library and open” first.'
+    )
+    body.appendChild(libraryTip)
 
     const footer = document.createElement('div')
     footer.style.cssText =
@@ -392,6 +405,79 @@ function showQuotaRiskDialog(context, pdfPages, remainPages, opt) {
       'padding:6px 12px;border-radius:8px;border:1px solid #f59e0b;background:#fff;color:#b45309;cursor:pointer;font-size:12px;'
     btnSplit.textContent = pdf2docText('分割并打开文件夹', 'Split and open folder')
 
+    const setContinueEnabled = (enabled) => {
+      const ok = !!enabled
+      btnOk.disabled = !ok
+      btnOk.style.opacity = ok ? '1' : '0.55'
+      btnOk.style.cursor = ok ? 'pointer' : 'not-allowed'
+    }
+
+    const setButtonVisible = (btn, visible) => {
+      btn.style.display = visible ? '' : 'none'
+    }
+
+    const render = () => {
+      const hasPages = hasPdfPages()
+      const pdfText = hasPages ? String(pdfPagesValue) : pdf2docText('未知', 'unknown')
+      const n = hasPages && typeof pdfPagesValue === 'number' ? pdfPagesValue : 0
+
+      const isInsufficient =
+        hasPages && hasRemain && (safeRemain <= 0 || safeRemain < n)
+      const warnText = isInsufficient
+        ? (safeRemain <= 0
+            ? pdf2docText('剩余解析页数为 0（不足以开始解析）', 'Remaining pages: 0 (not enough to start)')
+            : pdf2docText('剩余解析页数不足以覆盖 PDF 页数，解析可能中断', 'Remaining pages are lower than PDF pages; parsing may stop early'))
+        : ''
+
+      msg.innerHTML = pdf2docText(
+        `当前 PDF 页数：<strong>${pdfText}</strong> 页<br>剩余解析页数：<strong>${remainText}</strong> 页` +
+          `<br><span style="color:#16a34a;font-weight:600;">${cacheHint}</span>` +
+          `<br><span style="color:#dc2626;font-weight:600;">${docxHint}</span>` +
+          (warnText ? `<br><span style="color:#dc2626;font-weight:600;">${warnText}</span>` : ''),
+        `PDF pages: <strong>${pdfText}</strong><br>Remaining parse pages: <strong>${remainText}</strong>` +
+          `<br><span style="color:#16a34a;font-weight:600;">${cacheHint}</span>` +
+          `<br><span style="color:#dc2626;font-weight:600;">${docxHint}</span>` +
+          (warnText ? `<br><span style="color:#dc2626;font-weight:600;">${warnText}</span>` : '')
+      )
+
+      const canRetryPages =
+        !hasPages &&
+        !!retryPdfPath &&
+        !!retryDirAbs &&
+        context &&
+        typeof context.openFileByPath === 'function' &&
+        typeof context.writeFileBinary === 'function' &&
+        typeof context.removePath === 'function' &&
+        typeof context.readFileBinary === 'function' &&
+        typeof context.getPdfPageCount === 'function'
+
+      retryRow.style.display = canRetryPages ? 'flex' : 'none'
+
+      if (requireSplit) {
+        splitTip.style.display = ''
+        libraryTip.style.display = 'none'
+      } else if (requireLibrary) {
+        splitTip.style.display = 'none'
+        // 页数未知但 PDF 已在库内：不再提示复制到库内（那只会制造重复文件）
+        if (requireLibraryReason === 'pagesUnknown' && shouldCheckLibrary && inLib) {
+          libraryTip.style.display = 'none'
+        } else {
+          libraryTip.style.display = ''
+        }
+      } else {
+        splitTip.style.display = 'none'
+        libraryTip.style.display = 'none'
+      }
+
+      setButtonVisible(btnSplit, requireSplit && canSplit)
+
+      // 页数未知但 PDF 已在库内：不需要再复制一份，直接提示重试获取页数
+      const showMove = requireLibrary && canMoveToLibrary && !(requireLibraryReason === 'pagesUnknown' && shouldCheckLibrary && inLib)
+      setButtonVisible(btnMove, showMove)
+
+      setContinueEnabled(!(requireLibrary || requireSplit))
+    }
+
     const done = (action) => {
       try {
         document.body.removeChild(overlay)
@@ -411,17 +497,8 @@ function showQuotaRiskDialog(context, pdfPages, remainPages, opt) {
 
     footer.appendChild(btnCancel)
     footer.appendChild(btnRecharge)
-    if (requireSplit && canSplit) {
-      footer.appendChild(btnSplit)
-    }
-    if (requireLibrary && canMoveToLibrary) {
-      footer.appendChild(btnMove)
-    }
-    if (requireLibrary || requireSplit) {
-      btnOk.disabled = true
-      btnOk.style.opacity = '0.55'
-      btnOk.style.cursor = 'not-allowed'
-    }
+    footer.appendChild(btnSplit)
+    footer.appendChild(btnMove)
     footer.appendChild(btnOk)
 
     dialog.appendChild(header)
@@ -429,6 +506,87 @@ function showQuotaRiskDialog(context, pdfPages, remainPages, opt) {
     dialog.appendChild(footer)
     overlay.appendChild(dialog)
     document.body.appendChild(overlay)
+
+    btnRetryPages.onclick = async () => {
+      const canRetry =
+        !!retryPdfPath &&
+        !!retryDirAbs &&
+        context &&
+        typeof context.openFileByPath === 'function' &&
+        typeof context.writeFileBinary === 'function' &&
+        typeof context.removePath === 'function' &&
+        typeof context.readFileBinary === 'function' &&
+        typeof context.getPdfPageCount === 'function'
+      if (!canRetry) return
+
+      btnRetryPages.disabled = true
+      btnRetryPages.style.opacity = '0.7'
+      btnRetryPages.style.cursor = 'not-allowed'
+      retryHint.textContent = pdf2docText('正在尝试获取页数...', 'Retrying page count...')
+
+      let tempPath = ''
+      try {
+        const tempName = '.pdf2doc-页数重试-' + String(Date.now()) + '.pdf'
+        const abs = joinPath(retryDirAbs, tempName)
+        tempPath = await writeFileBinaryRenameAuto(
+          context,
+          abs,
+          createPdf2DocBlankPdfBytes()
+        )
+
+        try { await context.openFileByPath(tempPath) } catch {}
+        await pdf2docSleep(300)
+        try { await context.openFileByPath(retryPdfPath) } catch {}
+        await pdf2docSleep(300)
+
+        let bytes = null
+        try {
+          bytes = await context.readFileBinary(retryPdfPath)
+        } catch {}
+
+        if (bytes) {
+          let copy = bytes
+          try {
+            if (bytes instanceof ArrayBuffer) copy = bytes.slice(0)
+            else if (bytes instanceof Uint8Array) copy = bytes.slice(0)
+          } catch {}
+          const n = await context.getPdfPageCount(copy)
+          const pages = typeof n === 'number' ? n : parseInt(String(n || '0'), 10) || 0
+          if (Number.isFinite(pages) && pages > 0) {
+            pdfPagesValue = pages
+
+            // 页数恢复后，解除“页数未知”导致的库校验阻断；但如果文件本来就不在库内，仍保持阻断。
+            if (requireLibraryReason === 'pagesUnknown') {
+              requireLibrary = shouldCheckLibrary ? !inLib : false
+            }
+            requireSplit = pages > PDF2DOC_SPLIT_THRESHOLD_PAGES
+
+            retryHint.textContent = pdf2docText('页数已更新', 'Page count updated')
+            render()
+            return
+          }
+        }
+
+        retryHint.textContent = pdf2docText('获取失败，请稍后再试', 'Failed; please retry later')
+      } catch {
+        retryHint.textContent = pdf2docText('获取失败，请稍后再试', 'Failed; please retry later')
+      } finally {
+        if (tempPath) {
+          try {
+            const ok = await context.removePath(tempPath)
+            if (!ok) {
+              await pdf2docSleep(200)
+              await context.removePath(tempPath)
+            }
+          } catch {}
+        }
+        btnRetryPages.disabled = false
+        btnRetryPages.style.opacity = '1'
+        btnRetryPages.style.cursor = 'pointer'
+      }
+    }
+
+    render()
   })
 }
 
@@ -894,6 +1052,60 @@ async function writeTextFileRenameAuto(context, absPath, content) {
   throw new Error(pdf2docText('文件名冲突过多', 'Too many file name conflicts'))
 }
 
+function createPdf2DocBlankPdfBytes() {
+  // 最小 1 页空白 PDF，用于“切换到另一个 PDF 再切回来”刷新宿主状态
+  // 由脚本生成并固定，确保 PDF.js 能稳定解析
+  const b64 =
+    'JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA2MTIgNzkyXSAvQ29udGVudHMgNCAwIFIgL1Jlc291cmNlcyA8PCA+PiA+PgplbmRvYmoKNCAwIG9iago8PCAvTGVuZ3RoIDAgPj4Kc3RyZWFtCgplbmRzdHJlYW0KZW5kb2JqCnhyZWYKMCA1CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAwOSAwMDAwMCBuIAowMDAwMDAwMDU4IDAwMDAwIG4gCjAwMDAwMDAxMTUgMDAwMDAgbiAKMDAwMDAwMDIxOSAwMDAwMCBuIAp0cmFpbGVyCjw8IC9TaXplIDUgL1Jvb3QgMSAwIFIgPj4Kc3RhcnR4cmVmCjI2OAolJUVPRgo='
+  try {
+    const bin = typeof atob === 'function' ? atob(b64) : ''
+    const out = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i) & 0xff
+    return out
+  } catch {
+    return new Uint8Array([])
+  }
+}
+
+async function writeFileBinaryRenameAuto(context, absPath, bytes) {
+  if (!context || typeof context.writeFileBinary !== 'function') {
+    throw new Error(pdf2docText('当前版本不支持写入文件', 'Writing files is not supported in this version'))
+  }
+  if (typeof context.exists !== 'function') {
+    await context.writeFileBinary(absPath, bytes)
+    return absPath
+  }
+
+  const tryPath = async (p) => {
+    const ok = await context.exists(p)
+    if (!ok) {
+      await context.writeFileBinary(p, bytes)
+      return p
+    }
+    return ''
+  }
+
+  const base = String(absPath || '')
+  if (!base) {
+    throw new Error(pdf2docText('路径错误', 'Invalid path'))
+  }
+
+  const dot = base.lastIndexOf('.')
+  const prefix = dot > 0 ? base.slice(0, dot) : base
+  const ext = dot > 0 ? base.slice(dot) : ''
+
+  const first = await tryPath(base)
+  if (first) return first
+
+  for (let i = 1; i <= 50; i += 1) {
+    const p = prefix + '-' + i + ext
+    const saved = await tryPath(p)
+    if (saved) return saved
+  }
+
+  throw new Error(pdf2docText('文件名冲突过多', 'Too many file name conflicts'))
+}
+
 async function mergeSegmentedResultsInDir(context, fileDirAbs, relDir, opt) {
   const allowEmpty = !!(opt && opt.allowEmpty)
   if (
@@ -1125,12 +1337,17 @@ async function confirmQuotaRiskBeforeParse(context, cfg, pdfBytes, pdfPagesHint,
     let canMoveToLibrary = false
     let requireSplit = false
     let canSplit = false
+    let shouldCheckLibrary = false
+    let inLib = true
+    let requireLibraryReason = ''
     if (pdfPath && context) {
       try {
         const root = typeof context.getLibraryRoot === 'function' ? await context.getLibraryRoot() : null
-        const shouldCheckLibrary = !!root && isAbsolutePath(pdfPath)
-        const inLib = shouldCheckLibrary && root ? isPathInDir(pdfPath, root) : true
+        shouldCheckLibrary = !!root && isAbsolutePath(pdfPath)
+        inLib = shouldCheckLibrary && root ? isPathInDir(pdfPath, root) : true
         requireLibrary = shouldCheckLibrary && (!inLib || !hasPdfPages)
+        if (shouldCheckLibrary && !inLib) requireLibraryReason = 'notInLibrary'
+        if (shouldCheckLibrary && inLib && !hasPdfPages) requireLibraryReason = 'pagesUnknown'
         canMoveToLibrary =
           shouldCheckLibrary &&
           !!root &&
@@ -1141,6 +1358,7 @@ async function confirmQuotaRiskBeforeParse(context, cfg, pdfBytes, pdfPagesHint,
         // 对于“选择文件”这类拿不到绝对路径的场景：如果连页数都拿不到，就要求用户先复制到库内再解析。
         if (!shouldCheckLibrary && !!root && !hasPdfPages) {
           requireLibrary = true
+          requireLibraryReason = 'pagesUnknownNoPath'
           canMoveToLibrary =
             typeof context.saveBinaryToCurrentFolder === 'function' &&
             typeof context.openFileByPath === 'function' &&
@@ -1167,6 +1385,11 @@ async function confirmQuotaRiskBeforeParse(context, cfg, pdfBytes, pdfPagesHint,
       canMoveToLibrary,
       requireSplit,
       canSplit,
+      shouldCheckLibrary,
+      inLib,
+      requireLibraryReason,
+      retryPdfPath: requireLibraryReason === 'pagesUnknown' && shouldCheckLibrary && inLib ? String(pdfPath) : '',
+      retryDirAbs: requireLibraryReason === 'pagesUnknown' && shouldCheckLibrary && inLib ? String(pdfPath).replace(/[\\/][^\\/]+$/, '') : '',
       enableAutoMergeAfterBatch: !!(opt && opt.enableAutoMergeAfterBatch),
       defaultAutoMergeAfterBatch: !!(opt && opt.defaultAutoMergeAfterBatch)
     })
