@@ -1480,13 +1480,23 @@ async function loadConfig(context) {
   const mdJobUser = (await context.storage.get('mdJobUser')) || ''
   const defaultOutput = (await context.storage.get('defaultOutput')) || 'markdown'
   const sendToAI = await context.storage.get('sendToAI')
+  const localImagePreferRelativeRaw = await context.storage.get('localImagePreferRelative')
+  const localImagePreferRelative =
+    localImagePreferRelativeRaw === false ||
+    localImagePreferRelativeRaw === 0 ||
+    localImagePreferRelativeRaw === '0' ||
+    String(localImagePreferRelativeRaw || '').toLowerCase() === 'false'
+      ? false
+      : true
   return {
     apiBaseUrl,
     apiToken,
     apiTokens,
     mdJobUser: typeof mdJobUser === 'string' ? mdJobUser : String(mdJobUser || ''),
     defaultOutput: defaultOutput === 'docx' ? 'docx' : 'markdown',
-    sendToAI: sendToAI ?? true
+    sendToAI: sendToAI ?? true,
+    // 图片本地化后写入 Markdown 的路径形式：默认相对路径优先（更适合同步/跨设备）
+    localImagePreferRelative
   }
 }
 
@@ -1501,6 +1511,7 @@ async function saveConfig(context, cfg) {
   await context.storage.set('mdJobUser', mdJobUser)
   await context.storage.set('defaultOutput', cfg.defaultOutput)
   await context.storage.set('sendToAI', cfg.sendToAI)
+  await context.storage.set('localImagePreferRelative', !(cfg && cfg.localImagePreferRelative === false))
 }
 
 
@@ -1798,6 +1809,7 @@ async function localizeMarkdownImages(context, markdown, opt) {
   if (!text) return text
 
   const onProgress = opt && typeof opt.onProgress === 'function' ? opt.onProgress : null
+  const preferRelativePath = !(opt && opt.preferRelativePath === false)
   const report = (done, total) => {
     if (!onProgress) return
     try {
@@ -1860,6 +1872,49 @@ async function localizeMarkdownImages(context, markdown, opt) {
   const totalToProcess = Math.min(maxImages, urlMap.size)
   let index = 0
 
+  const wrapMarkdownUrlIfNeeded = (s) => {
+    const u = String(s || '').trim()
+    if (!u) return ''
+    if (u.startsWith('<') && u.endsWith('>')) return u
+    if (/\s|\(|\)/.test(u)) return '<' + u + '>'
+    return u
+  }
+
+  const safeFileNameFromPathLike = (pathLike) => {
+    let s = String(pathLike || '').trim()
+    if (!s) return ''
+    s = s.replace(/\\/g, '/')
+    try { s = decodeURIComponent(s) } catch {}
+    s = s.replace(/[?#].*$/, '')
+    const base = s.split('/').filter(Boolean).pop() || ''
+    // 避免把后端的 assets.php 当作图片文件名
+    if (!base) return ''
+    if (/^assets\.php$/i.test(base)) return ''
+    return base
+  }
+
+  const guessSuggestedNameFromUrl = (url) => {
+    try {
+      const u = new URL(url)
+      // 优先解析 query 中的 path（例如 assets.php?job=...&path=images/xxx.png）
+      const fromPathParam = safeFileNameFromPathLike(u.searchParams.get('path'))
+      if (fromPathParam) return fromPathParam
+
+      // 兼容其它常见参数名
+      const fromFileParam =
+        safeFileNameFromPathLike(u.searchParams.get('file')) ||
+        safeFileNameFromPathLike(u.searchParams.get('filename')) ||
+        safeFileNameFromPathLike(u.searchParams.get('name'))
+      if (fromFileParam) return fromFileParam
+
+      // 回退：从 pathname 取最后一段
+      const fromPathname = safeFileNameFromPathLike(u.pathname || '')
+      // 如果还是 php 结尾，宁可放弃，避免落地为 .php
+      if (fromPathname && !/\.php$/i.test(fromPathname)) return fromPathname
+    } catch {}
+    return ''
+  }
+
   if (totalToProcess > 0) {
     report(0, totalToProcess)
   }
@@ -1872,12 +1927,7 @@ async function localizeMarkdownImages(context, markdown, opt) {
     let suggestedName = ''
     try {
       try {
-        const u = new URL(url)
-        const path = u.pathname || ''
-        const parts = path.split('/').filter(Boolean)
-        if (parts.length) {
-          suggestedName = parts[parts.length - 1]
-        }
+        suggestedName = guessSuggestedNameFromUrl(url)
       } catch {
         // 忽略 URL 解析失败，回退到简单切分
       }
@@ -1887,6 +1937,10 @@ async function localizeMarkdownImages(context, markdown, opt) {
         if (segs.length) {
           suggestedName = segs[segs.length - 1]
         }
+      }
+      // 有些图片 URL 的 pathname 可能是 assets.php（实际图片在 query 参数中）；避免落地为 .php
+      if (suggestedName && /\.php$/i.test(String(suggestedName))) {
+        suggestedName = ''
       }
       const safeBase =
         baseName.replace(/[\\/:*?"<>|]+/g, '_') || 'image'
@@ -1933,12 +1987,13 @@ async function localizeMarkdownImages(context, markdown, opt) {
     if (!info) continue
     const fullPath = info.fullPath && String(info.fullPath).trim()
     const relPath = info.relativePath && String(info.relativePath).trim()
-    // 优先使用绝对路径，满足需要“绝对路径图片引用”的场景
-    const target = fullPath || relPath
+    // 默认相对路径优先（更适合同步/跨设备）；需要绝对路径时可在设置中切换
+    const target = preferRelativePath ? (relPath || fullPath) : (fullPath || relPath)
     if (!target) continue
+    const targetForMd = wrapMarkdownUrlIfNeeded(target)
     const escaped = oldUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const re = new RegExp(escaped, 'g')
-    result = result.replace(re, target)
+    result = result.replace(re, targetForMd)
   }
 
   // 最后一步：将 HTML img 标签统一转换为 Markdown 图片语法，保证在 Markdown 预览和编辑器中可见
@@ -3318,6 +3373,59 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
     rowOut.appendChild(outSelect)
     body.appendChild(rowOut)
 
+    const rowImgPath = document.createElement('div')
+    rowImgPath.className = 'pdf2doc-settings-row'
+    const labImgPath = document.createElement('div')
+    labImgPath.className = 'pdf2doc-settings-label'
+    labImgPath.textContent = pdf2docText('图片路径写入', 'Image path writing')
+    const boxImgPath = document.createElement('div')
+
+    const imgPathGroup = document.createElement('div')
+    imgPathGroup.className = 'pdf2doc-settings-radio-group'
+
+    const preferRel = !(cfg && cfg.localImagePreferRelative === false)
+    const imgPathRadioName = 'pdf2doc-img-path-mode'
+
+    const optRel = document.createElement('label')
+    optRel.className = 'pdf2doc-settings-radio'
+    const inputRel = document.createElement('input')
+    inputRel.type = 'radio'
+    inputRel.name = imgPathRadioName
+    inputRel.value = 'relative'
+    inputRel.checked = preferRel
+    const txtRel = document.createElement('span')
+    txtRel.textContent = pdf2docText('相对路径优先（推荐）', 'Prefer relative paths (recommended)')
+    optRel.appendChild(inputRel)
+    optRel.appendChild(txtRel)
+
+    const optAbs = document.createElement('label')
+    optAbs.className = 'pdf2doc-settings-radio'
+    const inputAbs = document.createElement('input')
+    inputAbs.type = 'radio'
+    inputAbs.name = imgPathRadioName
+    inputAbs.value = 'absolute'
+    inputAbs.checked = !preferRel
+    const txtAbs = document.createElement('span')
+    txtAbs.textContent = pdf2docText('绝对路径优先（兼容旧习惯）', 'Prefer absolute paths (legacy)')
+    optAbs.appendChild(inputAbs)
+    optAbs.appendChild(txtAbs)
+
+    imgPathGroup.appendChild(optRel)
+    imgPathGroup.appendChild(optAbs)
+
+    const tipImgPath = document.createElement('div')
+    tipImgPath.className = 'pdf2doc-settings-desc'
+    tipImgPath.textContent = pdf2docText(
+      '图片会保存到当前文档同目录 images/；相对路径更适合同步/跨设备，避免绝对路径失效。',
+      'Images are saved to images/ next to the current document; relative paths work better across sync/devices.'
+    )
+
+    boxImgPath.appendChild(imgPathGroup)
+    boxImgPath.appendChild(tipImgPath)
+    rowImgPath.appendChild(labImgPath)
+    rowImgPath.appendChild(boxImgPath)
+    body.appendChild(rowImgPath)
+
     const footer = document.createElement('div')
     footer.className = 'pdf2doc-settings-footer'
     const btnCancel = document.createElement('button')
@@ -3348,6 +3456,7 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
       const defaultOutput =
         outSelect.value === 'docx' ? 'docx' : 'markdown'
       const mdJobUser = String(inputJobUser.value || '').trim()
+      const localImagePreferRelative = inputRel.checked
 
       document.body.removeChild(overlay)
       resolve({
@@ -3356,7 +3465,8 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
         apiTokens,
         mdJobUser,
         defaultOutput,
-        sendToAI: cfg.sendToAI ?? true
+        sendToAI: cfg.sendToAI ?? true,
+        localImagePreferRelative
       })
     })
 
@@ -3423,7 +3533,7 @@ export async function activate(context) {
     // 定义菜单项数组（用于下拉菜单和 Ribbon 按钮复用）
     const pdf2docMenuChildren = [
         {
-          label: pdf2docText('💳 余额/充值', '💳 Balance / Top-up'),
+          label: pdf2docText('💳 设置/充值 & 查询', '💳 Settings / Top-up & Check'),
           order: 80,
           onClick: async () => {
             try {
@@ -3473,7 +3583,8 @@ export async function activate(context) {
               if (result.format === 'markdown' && result.markdown) {
                 const baseName = file && file.name ? file.name.replace(/\.[^.]+$/i, '') : 'image'
                 const localized = await localizeMarkdownImages(context, result.markdown, {
-                  baseName
+                  baseName,
+                  preferRelativePath: cfg.localImagePreferRelative !== false
                 })
                 const current = context.getEditorValue()
                 const merged = current ? current + '\n\n' + localized : localized
@@ -3715,6 +3826,7 @@ export async function activate(context) {
                 .trim() || 'document'
               const localized = await localizeMarkdownImages(context, result.markdown, {
                 baseName: safeBaseName,
+                preferRelativePath: cfg.localImagePreferRelative !== false,
                 onProgress: (done, total) => {
                   if (parseOverlay && typeof parseOverlay.setPostProgress === 'function') {
                     parseOverlay.setPostProgress(done, total)
@@ -4005,7 +4117,8 @@ export async function activate(context) {
               }
 
               const localized = await localizeMarkdownImages(context, result.markdown, {
-                baseName: safeBaseName
+                baseName: safeBaseName,
+                preferRelativePath: cfg.localImagePreferRelative !== false
               })
 
               const mdName = '解析' + safeBaseName + '.md'
@@ -4551,6 +4664,7 @@ export async function activate(context) {
                     result.markdown,
                     {
                       baseName: baseNameInner,
+                      preferRelativePath: cfg.localImagePreferRelative !== false,
                       onProgress: (done, total) => {
                         if (parseOverlay && typeof parseOverlay.setPostProgress === 'function') {
                           parseOverlay.setPostProgress(done, total)
@@ -4646,6 +4760,7 @@ export async function activate(context) {
                   result.markdown,
                   {
                     baseName: baseNameFile,
+                    preferRelativePath: cfg.localImagePreferRelative !== false,
                     onProgress: (done, total) => {
                       if (parseOverlay && typeof parseOverlay.setPostProgress === 'function') {
                         parseOverlay.setPostProgress(done, total)
