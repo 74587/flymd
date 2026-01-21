@@ -4665,16 +4665,62 @@ async function exportCurrentDocToPdf(target: string): Promise<void> {
     alert('导出 PDF 功能需要在 Tauri 应用中使用')
     throw new Error('writeFile not available')
   }
-  status.textContent = '正在导出 PDF...'
-  // 导出应当按打印语义渲染：不带所见模式的模拟光标/交互标记
-  await renderPreview({ forPrint: true })
-  const el = preview.querySelector('.preview-body') as HTMLElement | null
-  if (!el) throw new Error('未找到预览内容容器')
-  const { exportPdf } = await import('./exporters/pdf')
-  const bytes = await exportPdf(el, {})
-  await writeFile(out as any, bytes as any)
-  status.textContent = '已导出'
-  setTimeout(() => refreshStatus(), 2000)
+  const cancelSource = { cancelled: false }
+  const { openProgressOverlay } = await import('./core/progressOverlay')
+  const overlay = openProgressOverlay({
+    title: '正在导出 PDF',
+    sub: '准备中…',
+    onCancel: () => { cancelSource.cancelled = true },
+  })
+  try {
+    overlay.appendLog('输出：' + out)
+    try { status.textContent = '正在导出 PDF...' } catch {}
+
+    overlay.setSub('正在渲染预览…')
+    // 导出应当按打印语义渲染：不带所见模式的模拟光标/交互标记
+    await renderPreview({ forPrint: true })
+    overlay.appendLog('预览渲染完成')
+
+    const el = preview.querySelector('.preview-body') as HTMLElement | null
+    if (!el) throw new Error('未找到预览内容容器')
+
+    const { exportPdf } = await import('./exporters/pdf')
+    const fmt = (v: any) => {
+      try { return typeof v === 'string' ? v : JSON.stringify(v) } catch { return String(v) }
+    }
+    const bytes = await exportPdf(el, {
+      cancelSource,
+      onLog: (msg: string, data?: any) => overlay.appendLog(data != null ? (msg + ' ' + fmt(data)) : msg),
+      onProgress: (p: any) => {
+        try {
+          const msg = String(p?.message || '').trim()
+          if (msg) overlay.setSub(msg)
+          const done = Number(p?.done)
+          const total = Number(p?.total)
+          if (Number.isFinite(done) && Number.isFinite(total) && total > 0) overlay.setProgress(done, total)
+        } catch {}
+      },
+    })
+
+    overlay.setSub('正在写入文件…')
+    await writeFile(out as any, bytes as any)
+
+    overlay.setTitle('导出完成')
+    overlay.setSub('已写入：' + out)
+    try { status.textContent = '已导出' } catch {}
+    setTimeout(() => refreshStatus(), 2000)
+    setTimeout(() => { try { overlay.close() } catch {} }, 800)
+  } catch (e: any) {
+    if (e && typeof e === 'object' && (e as any)._flymdCancelled === true) {
+      overlay.markCancelled()
+      try { status.textContent = '已取消导出' } catch {}
+      setTimeout(() => refreshStatus(), 2000)
+      return
+    }
+    const msg = (e && (e.message || e.toString?.())) ? String(e.message || e.toString()) : String(e || '')
+    overlay.fail('导出失败', msg)
+    showError('导出失败', e)
+  }
 }
 
 // 打印：始终按阅读模式渲染（不打印 UI/通知）
@@ -4724,14 +4770,56 @@ async function saveAs() {
     if (ext === 'pdf' || ext === 'docx' || ext === 'wps') {
       try {
         if (ext === 'pdf') {
-          status.textContent = '正在导出 PDF...';
-          // 导出应当按打印语义渲染：不带所见模式的模拟光标/交互标记
+          const cancelSource = { cancelled: false }
+          const { openProgressOverlay } = await import('./core/progressOverlay')
+          const overlay = openProgressOverlay({
+            title: '正在导出 PDF',
+            sub: '准备中…',
+            onCancel: () => { cancelSource.cancelled = true },
+          })
+          try {
+            overlay.appendLog('输出：' + String(target))
+            status.textContent = '正在导出 PDF...';
+            // 导出应当按打印语义渲染：不带所见模式的模拟光标/交互标记
+          overlay.setSub('正在渲染预览…')
           await renderPreview({ forPrint: true });
-          const el = preview.querySelector('.preview-body') as HTMLElement | null;
-          if (!el) throw new Error('未找到预览内容容器');
-          const { exportPdf } = await import('./exporters/pdf');
-          const bytes = await exportPdf(el, {});
-          await writeFile(target as any, bytes as any);
+          overlay.appendLog('预览渲染完成')
+            const el = preview.querySelector('.preview-body') as HTMLElement | null;
+            if (!el) throw new Error('未找到预览内容容器');
+            const { exportPdf } = await import('./exporters/pdf');
+            const fmt = (v: any) => {
+              try { return typeof v === 'string' ? v : JSON.stringify(v) } catch { return String(v) }
+            }
+            const bytes = await exportPdf(el, {
+              cancelSource,
+              onLog: (msg: string, data?: any) => overlay.appendLog(data != null ? (msg + ' ' + fmt(data)) : msg),
+              onProgress: (p: any) => {
+                try {
+                  const msg = String(p?.message || '').trim()
+                  if (msg) overlay.setSub(msg)
+                  const done = Number(p?.done)
+                  const total = Number(p?.total)
+                  if (Number.isFinite(done) && Number.isFinite(total) && total > 0) overlay.setProgress(done, total)
+                } catch {}
+              },
+            });
+            overlay.setSub('正在写入文件…')
+            await writeFile(target as any, bytes as any);
+            overlay.setTitle('导出完成')
+            overlay.setSub('已写入：' + String(target))
+            setTimeout(() => { try { overlay.close() } catch {} }, 800)
+          } catch (e: any) {
+            if (e && typeof e === 'object' && (e as any)._flymdCancelled === true) {
+              overlay.markCancelled()
+              status.textContent = '已取消导出'
+              setTimeout(() => refreshStatus(), 2000)
+              return
+            }
+            const msg = (e && (e.message || e.toString?.())) ? String(e.message || e.toString()) : String(e || '')
+            overlay.fail('导出失败', msg)
+            showError('导出失败', e)
+            return
+          }
         } else {
           status.textContent = '正在导出 ' + ext.toUpperCase() + '...';
           // DOCX/WPS 同样按打印语义渲染，避免把所见模式的模拟光标导出进去

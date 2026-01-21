@@ -390,6 +390,32 @@ function adjustBreakAvoidingRanges(breakY: number, yStart: number, ranges: Avoid
 }
 
 export async function exportPdf(el: HTMLElement, opt?: any): Promise<Uint8Array> {
+  // 进度与日志：由调用方（main.ts）决定是否展示遮罩窗口。
+  const startedAt = Date.now()
+  const onProgress = (opt && typeof opt.onProgress === 'function') ? opt.onProgress : null
+  const onLog = (opt && typeof opt.onLog === 'function') ? opt.onLog : null
+  const cancelSource = opt && opt.cancelSource ? opt.cancelSource : null
+  const safeLog = (msg: string, data?: any) => {
+    try { if (onLog) onLog(msg, data) } catch {}
+    try { console.log('[PDF导出]', msg, data || '') } catch {}
+  }
+  const safeProgress = (p: any) => {
+    if (!onProgress) return
+    try { onProgress({ ...(p || {}), elapsedMs: Math.max(0, Date.now() - startedAt) }) } catch {}
+  }
+  const throwIfCancelled = () => {
+    try {
+      if (cancelSource && cancelSource.cancelled) {
+        const e: any = new Error('已取消导出')
+        e._flymdCancelled = true
+        throw e
+      }
+    } catch (e: any) {
+      throw e
+    }
+  }
+
+  safeProgress({ stage: 'prepare', message: '准备导出…' })
   // 先等“原页面”图片与字体稳定下来，否则 html2canvas 计算布局时会把未加载完的图片当成 0 高度，
   // 最终表现为：PDF 里图片缺失/只截了一半（典型就是图床慢的时候更容易触发）。
   try {
@@ -400,6 +426,7 @@ export async function exportPdf(el: HTMLElement, opt?: any): Promise<Uint8Array>
     // 再等一帧，让布局把最终尺寸吃进去
     await nextFrame()
   } catch {}
+  throwIfCancelled()
 
   const options = {
     margin: 10, // 单位：mm
@@ -576,13 +603,17 @@ export async function exportPdf(el: HTMLElement, opt?: any): Promise<Uint8Array>
   // 等克隆节点的图片也进入“可计算尺寸”的稳定态（多数情况下会命中缓存，成本很低）
   const blobUrls: string[] = []
   let mount: HTMLDivElement | null = null
+  let viewport: HTMLDivElement | null = null
   try {
+    throwIfCancelled()
     // 关键：跨域图床如果没给 CORS 头，html2canvas 会直接报错并跳过图片；这里把它们内联为 blob: 同源资源
+    safeProgress({ stage: 'prepare', message: '正在处理图片与字体…' })
     try { blobUrls.push(...(await inlineCrossOriginImages(clone, Math.max(0, Number(opt?.fetchRemoteImageMs ?? EXPORT_FETCH_REMOTE_IMAGE_MS) || 0)))) } catch {}
     try {
       await waitForImagesIn(clone, Math.max(0, Number(opt?.waitCloneImagesMs ?? EXPORT_WAIT_CLONE_IMAGES_MS) || 0))
       await nextFrame()
     } catch {}
+    throwIfCancelled()
 
     let html2canvas: any = null
     let jsPDF: any = null
@@ -597,6 +628,8 @@ export async function exportPdf(el: HTMLElement, opt?: any): Promise<Uint8Array>
 
     // 兜底：如果依赖加载失败，回退到 html2pdf（保持功能可用）
     if (typeof html2canvas !== 'function' || typeof jsPDF !== 'function') {
+      safeLog('html2canvas/jspdf 加载失败，回退到 html2pdf', { html2canvas: typeof html2canvas, jsPDF: typeof jsPDF })
+      safeProgress({ stage: 'render', message: '正在回退导出引擎…' })
       const mod: any = await import('html2pdf.js/dist/html2pdf.bundle.min.js')
       const html2pdf: any = (mod && (mod.default || mod)) || mod
       const ab: ArrayBuffer = await html2pdf().set(options).from(exportRoot).toPdf().output('arraybuffer')
@@ -621,6 +654,7 @@ export async function exportPdf(el: HTMLElement, opt?: any): Promise<Uint8Array>
     exportRoot.style.maxWidth = innerW + 'mm'
 
     // 挂载到 DOM：让 html2canvas 拿到稳定的 layout（不挂载时偶尔会出现高度为 0 或字体测量偏差）。
+    safeProgress({ stage: 'layout', message: '正在准备排版…' })
     mount = document.createElement('div')
     mount.className = 'flymd-pdf-export-mount'
     mount.style.position = 'fixed'
@@ -632,7 +666,16 @@ export async function exportPdf(el: HTMLElement, opt?: any): Promise<Uint8Array>
     mount.style.overflow = 'visible'
     mount.style.pointerEvents = 'none'
     mount.style.zIndex = '-1'
-    mount.appendChild(exportRoot)
+    // viewport：用于“分页渲染”时裁切可视区域，避免一次性生成超长大画布导致黑页。
+    viewport = document.createElement('div')
+    viewport.className = 'flymd-pdf-export-viewport'
+    viewport.style.position = 'relative'
+    viewport.style.width = innerW + 'mm'
+    viewport.style.maxWidth = innerW + 'mm'
+    viewport.style.background = '#ffffff'
+    viewport.style.overflow = 'visible'
+    viewport.appendChild(exportRoot)
+    mount.appendChild(viewport)
     document.body.appendChild(mount)
 
     try {
@@ -640,6 +683,7 @@ export async function exportPdf(el: HTMLElement, opt?: any): Promise<Uint8Array>
       await waitForImagesIn(exportRoot, Math.max(0, Number(opt?.waitCloneImagesMs ?? EXPORT_WAIT_CLONE_IMAGES_MS) || 0))
       await nextFrame()
     } catch {}
+    throwIfCancelled()
 
     // 性能兜底：长文档用较低 scale，避免“导出很慢/内存爆炸”；短文档保持清晰度。
     try {
@@ -658,75 +702,221 @@ export async function exportPdf(el: HTMLElement, opt?: any): Promise<Uint8Array>
       try { return exportRoot.getBoundingClientRect() } catch { return null }
     })()
 
-    const canvas: HTMLCanvasElement = await html2canvas(exportRoot, {
-      ...(options as any)?.html2canvas,
-      backgroundColor: (options as any)?.html2canvas?.backgroundColor || '#ffffff',
-      scrollX: 0,
-      scrollY: 0,
-      logging: false,
-    })
-
-    const pxPerMm = canvas.width / innerW
-    const pageHeightPx = Math.max(1, Math.floor(innerH * pxPerMm))
     const quality = Math.max(0.5, Math.min(1, Number((options as any)?.image?.quality ?? 0.98) || 0.98))
 
-    const avoidRanges = (() => {
+    // 自动选择渲染策略：
+    // - 短文档：一次性渲成大图，再切片（更快）
+    // - 长文档：按页渲染（消灭“超长 canvas 黑页”）
+    const usePagedRender = (() => {
+      if (opt?.paged === true) return true
+      if (opt?.paged === false) return false
       try {
         const wCss = Number(rootRectForMap?.width || 0) || 0
-        const cssToCanvas = canvas.width / Math.max(1, wCss)
-        return mergeRanges(avoidCss.map((r) => ({ top: r.top * cssToCanvas, bottom: r.bottom * cssToCanvas })), 6)
-      } catch {
-        return [] as AvoidRange[]
-      }
+        const hCss = Number(rootRectForMap?.height || 0) || 0
+        const scale = Number((options as any)?.html2canvas?.scale ?? 1) || 1
+        // 经验阈值：Chrome/WebView2 在超大画布上会直接出黑图/空图（通常不抛错），
+        // 这里宁可多做几次按页渲染，也不要再赌“一把梭哈整篇”。
+        const maxCanvasSidePx = Math.max(4096, Number(opt?.maxCanvasSidePx ?? 15000) || 15000)
+        if (wCss * scale > maxCanvasSidePx) return true
+        if (hCss * scale > maxCanvasSidePx) return true
+      } catch {}
+      return false
     })()
 
-    const breakCandidatesPx = (() => {
+    if (usePagedRender && viewport) {
+      // 分页渲染：每一页只渲染一个“裁切视口”，彻底避免创建超长大画布。
+      safeProgress({ stage: 'paginate', message: '正在计算分页…' })
+      const wCss = Math.max(1, Number(rootRectForMap?.width || 0) || 0)
+      const hCssTotal = (() => {
+        try {
+          const r = exportRoot.getBoundingClientRect?.()
+          const h1 = Number(r?.height || 0) || 0
+          const h2 = Number((exportRoot as any).scrollHeight || 0) || 0
+          return Math.max(h1, h2)
+        } catch {
+          return Math.max(1, Number(rootRectForMap?.height || 0) || 0)
+        }
+      })()
+      const pxPerMmCss = wCss / innerW
+      const pageHeightCss = Math.max(1, innerH * pxPerMmCss)
+
+      // 更激进的缩放兜底：长文档按页渲染也会很慢，scale 太高只会让用户等到崩溃。
       try {
-        const wCss = Number(rootRectForMap?.width || 0) || 0
-        const cssToCanvas = canvas.width / Math.max(1, wCss)
-        const arr = (breakCandidatesCss || []).map((v) => v * cssToCanvas).filter((v) => v > 0 && v < canvas.height)
-        arr.push(canvas.height)
-        return uniqSorted(arr, 1)
-      } catch {
-        return [canvas.height]
+        const baseScale = Number((options as any)?.html2canvas?.scale ?? 2) || 2
+        const estPages = Math.max(1, Math.ceil(hCssTotal / pageHeightCss))
+        let cap = baseScale
+        if (estPages > 120) cap = Math.min(cap, 0.9)
+        else if (estPages > 80) cap = Math.min(cap, 1.0)
+        else if (estPages > 50) cap = Math.min(cap, 1.15)
+        else if (estPages > 30) cap = Math.min(cap, 1.25)
+        ;(options as any).html2canvas = { ...(options as any).html2canvas, scale: cap }
+        safeLog('分页渲染参数', { estPages, scale: cap, hCssTotal: Math.round(hCssTotal), pageHeightCss: Math.round(pageHeightCss) })
+      } catch {}
+
+      // 预计算断页信息（CSS 像素坐标）：不要在循环里反复跑 getClientRects。
+      const avoidRangesCss = mergeRanges(avoidCss, 6)
+      const breakCandidates = (() => {
+        try {
+          const arr = (breakCandidatesCss || []).filter((v) => v > 0 && v < hCssTotal)
+          arr.push(hCssTotal)
+          return uniqSorted(arr, 1)
+        } catch {
+          return [hCssTotal]
+        }
+      })()
+
+      viewport.style.overflow = 'hidden'
+      try { exportRoot.style.willChange = 'transform' } catch {}
+
+      // 预计算页边界：先把分页点算出来，这样能拿到“总页数”，避免用户觉得卡死。
+      const pageEnds: number[] = []
+      try {
+        let y = 0
+        let guard = 0
+        while (y < hCssTotal - 1) {
+          guard++
+          if (guard > 20000) break
+          const desiredEnd = Math.min(hCssTotal, y + pageHeightCss)
+          let end = 0
+          if (desiredEnd >= hCssTotal) end = hCssTotal
+          else end = pickEndByCandidates(y, desiredEnd, breakCandidates, avoidRangesCss)
+          if (!end) end = desiredEnd
+          end = adjustBreakAvoidingRanges(end, y, avoidRangesCss)
+          end = clampInt(end, y + 1, desiredEnd)
+          pageEnds.push(end)
+          if (end >= hCssTotal) break
+          y = Math.max(y + 1, end)
+        }
+      } catch {}
+
+      const totalPages = Math.max(1, pageEnds.length || 0)
+      safeProgress({ stage: 'render', message: '开始渲染页面…', done: 0, total: totalPages })
+
+      let first = true
+      let yStart = 0
+      for (let i = 0; i < pageEnds.length; i++) {
+        throwIfCancelled()
+        const end = pageEnds[i]
+        const sliceH = Math.max(1, end - yStart)
+        viewport.style.height = sliceH + 'px'
+        exportRoot.style.transform = `translateY(${-yStart}px)`
+        try { await nextFrame() } catch {}
+
+        safeProgress({
+          stage: 'render',
+          message: `正在渲染第 ${i + 1}/${totalPages} 页…`,
+          done: i,
+          total: totalPages,
+        })
+
+        const pageStartedAt = Date.now()
+        const pageCanvas: HTMLCanvasElement = await html2canvas(viewport, {
+          ...(options as any)?.html2canvas,
+          backgroundColor: (options as any)?.html2canvas?.backgroundColor || '#ffffff',
+          scrollX: 0,
+          scrollY: 0,
+          logging: false,
+        })
+        const pageCostMs = Date.now() - pageStartedAt
+        if (pageCostMs > 4500) {
+          safeLog('单页渲染耗时偏长', { page: i + 1, total: totalPages, ms: pageCostMs })
+        }
+
+        const imgData = pageCanvas.toDataURL('image/jpeg', quality)
+        const pxPerMm = pageCanvas.width / innerW
+        const drawH = pageCanvas.height / Math.max(1e-6, pxPerMm)
+        if (!first) pdf.addPage()
+        first = false
+        pdf.addImage(imgData, 'JPEG', marginMm, marginMm, innerW, drawH, undefined, 'FAST')
+
+        safeProgress({ stage: 'render', done: i + 1, total: totalPages })
+        yStart = end
+        if (end >= hCssTotal) break
       }
-    })()
+      try { exportRoot.style.transform = '' } catch {}
+    } else {
+      // 旧路径：一次性渲整篇再切片。短文档更快，但长文档可能触发“黑页”。
+      safeProgress({ stage: 'render', message: '正在渲染整篇文档…' })
+      const fullStartedAt = Date.now()
+      const canvas: HTMLCanvasElement = await html2canvas(exportRoot, {
+        ...(options as any)?.html2canvas,
+        backgroundColor: (options as any)?.html2canvas?.backgroundColor || '#ffffff',
+        scrollX: 0,
+        scrollY: 0,
+        logging: false,
+      })
+      const fullCostMs = Date.now() - fullStartedAt
+      if (fullCostMs > 4500) safeLog('整篇渲染耗时', { ms: fullCostMs, height: canvas.height, width: canvas.width })
 
-    // 每页切分：优先把切点对齐到“行间空白”，并避开图片/表格等不可切割块。
-    // 不要做“页间重叠”：那只会把上一页的半行文字带到下一页顶部，看起来像“分页乱码”。
-    const overlapPx = 0
-    let y = 0
-    let first = true
-    while (y < canvas.height) {
-      const targetEnd = Math.min(canvas.height, y + pageHeightPx)
-      let end = 0
-      if (targetEnd >= canvas.height) end = canvas.height
-      else end = pickEndByCandidates(y, targetEnd, breakCandidatesPx, avoidRanges)
+      const pxPerMm = canvas.width / innerW
+      const pageHeightPx = Math.max(1, Math.floor(innerH * pxPerMm))
+      const estTotal = Math.max(1, Math.ceil(canvas.height / Math.max(1, pageHeightPx)))
+      safeProgress({ stage: 'render', message: '正在生成 PDF 页面…', done: 0, total: estTotal })
 
-      if (!end) end = pickBreakYByWhitespace(canvas, y, targetEnd, 28)
-      end = adjustBreakAvoidingRanges(end, y, avoidRanges)
-      end = clampInt(end, y + 1, targetEnd)
-      const sliceH = Math.max(1, end - y)
+      const avoidRanges = (() => {
+        try {
+          const wCss = Number(rootRectForMap?.width || 0) || 0
+          const cssToCanvas = canvas.width / Math.max(1, wCss)
+          return mergeRanges(avoidCss.map((r) => ({ top: r.top * cssToCanvas, bottom: r.bottom * cssToCanvas })), 6)
+        } catch {
+          return [] as AvoidRange[]
+        }
+      })()
 
-      const pageCanvas = document.createElement('canvas')
-      pageCanvas.width = canvas.width
-      pageCanvas.height = sliceH
-      const pctx = pageCanvas.getContext('2d')
-      if (!pctx) throw new Error('无法创建 canvas 上下文')
-      pctx.drawImage(canvas, 0, y, canvas.width, sliceH, 0, 0, canvas.width, sliceH)
+      const breakCandidatesPx = (() => {
+        try {
+          const wCss = Number(rootRectForMap?.width || 0) || 0
+          const cssToCanvas = canvas.width / Math.max(1, wCss)
+          const arr = (breakCandidatesCss || []).map((v) => v * cssToCanvas).filter((v) => v > 0 && v < canvas.height)
+          arr.push(canvas.height)
+          return uniqSorted(arr, 1)
+        } catch {
+          return [canvas.height]
+        }
+      })()
 
-      const imgData = pageCanvas.toDataURL('image/jpeg', quality)
-      const drawH = sliceH / pxPerMm
-      if (!first) pdf.addPage()
-      first = false
-      pdf.addImage(imgData, 'JPEG', marginMm, marginMm, innerW, drawH, undefined, 'FAST')
+      // 每页切分：优先把切点对齐到“行间空白”，并避开图片/表格等不可切割块。
+      // 不要做“页间重叠”：那只会把上一页的半行文字带到下一页顶部，看起来像“分页乱码”。
+      const overlapPx = 0
+      let y = 0
+      let first = true
+      let donePages = 0
+      while (y < canvas.height) {
+        throwIfCancelled()
+        const targetEnd = Math.min(canvas.height, y + pageHeightPx)
+        let end = 0
+        if (targetEnd >= canvas.height) end = canvas.height
+        else end = pickEndByCandidates(y, targetEnd, breakCandidatesPx, avoidRanges)
 
-      if (end >= canvas.height) break
-      // 保证单调前进：不重叠时直接从切点继续。
-      y = Math.max(y + 1, end - overlapPx)
+        if (!end) end = pickBreakYByWhitespace(canvas, y, targetEnd, 28)
+        end = adjustBreakAvoidingRanges(end, y, avoidRanges)
+        end = clampInt(end, y + 1, targetEnd)
+        const sliceH = Math.max(1, end - y)
+
+        const pageCanvas = document.createElement('canvas')
+        pageCanvas.width = canvas.width
+        pageCanvas.height = sliceH
+        const pctx = pageCanvas.getContext('2d')
+        if (!pctx) throw new Error('无法创建 canvas 上下文')
+        pctx.drawImage(canvas, 0, y, canvas.width, sliceH, 0, 0, canvas.width, sliceH)
+
+        const imgData = pageCanvas.toDataURL('image/jpeg', quality)
+        const drawH = sliceH / pxPerMm
+        if (!first) pdf.addPage()
+        first = false
+        pdf.addImage(imgData, 'JPEG', marginMm, marginMm, innerW, drawH, undefined, 'FAST')
+        donePages++
+        safeProgress({ stage: 'render', done: donePages, total: estTotal })
+
+        if (end >= canvas.height) break
+        // 保证单调前进：不重叠时直接从切点继续。
+        y = Math.max(y + 1, end - overlapPx)
+      }
     }
 
+    safeProgress({ stage: 'finalize', message: '正在写入 PDF…' })
     const ab: ArrayBuffer = pdf.output('arraybuffer')
+    safeProgress({ stage: 'done', message: 'PDF 已生成' })
     return new Uint8Array(ab)
   } finally {
     try {
