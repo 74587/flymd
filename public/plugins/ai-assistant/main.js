@@ -5879,7 +5879,7 @@ export async function openSettings(context){
     '  <div class="set-row mode-row"><label>' + aiText('模式', 'Mode') + '</label><span class="mode-label" id="mode-label-custom">' + aiText('自定义', 'Custom') + '</span><label class="toggle-switch"><input type="checkbox" id="set-provider-toggle"/><span class="toggle-slider"></span></label><span class="mode-label" id="mode-label-free">' + aiText('免费模型', 'Free model') + '</span></div>',
     '  <div class="set-row mode-row"><label>' + aiText('翻译免费', 'Free translation') + '</label><span style="font-size:12px;color:#6b7280;">' + aiText('翻译功能始终使用免费模型', 'Always use free model for translation') + '</span><label class="toggle-switch"><input type="checkbox" id="set-trans-free-toggle"/><span class="toggle-slider"></span></label></div>',
     '  <div class="free-warning" id="free-warning">' + aiText('免费模型由硅基流动提供，', 'Free models are provided by SiliconFlow, ') + '<a href="https://cloud.siliconflow.cn/i/X96CT74a" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline;">' + aiText('推荐注册硅基流动账号获得顶级模型体验', 'we recommend registering a SiliconFlow account for top-tier models') + '</a></div>',
-    '  <div class="set-row custom-only"><label>Base URL</label><select id="set-base-select"><option value="https://api.siliconflow.cn/v1">' + aiText('硅基流动', 'SiliconFlow') + '</option><option value="https://api.openai.com/v1">OpenAI</option><option value="https://apic1.ohmycdn.com/api/v1/ai/openai/cc-omg/v1">' + aiText('OMG资源包', 'OMG pack') + '</option><option value="custom">' + aiText('自定义', 'Custom') + '</option></select><input id="set-base" type="text" placeholder="https://api.siliconflow.cn/v1（或完整 …/chat/completions）"/></div>',
+    '  <div class="set-row custom-only"><label>Base URL</label><select id="set-base-select"><option value="https://api.siliconflow.cn/v1">' + aiText('硅基流动', 'SiliconFlow') + '</option><option value="https://api.openai.com/v1">OpenAI</option><option value="custom">' + aiText('自定义', 'Custom') + '</option></select><input id="set-base" type="text" placeholder="https://api.siliconflow.cn/v1（或完整 …/chat/completions）"/></div>',
     '  <div class="set-row custom-only"><label>API Key</label><input id="set-key" type="password" placeholder="sk-..."/></div>',
     '  <div class="set-row custom-only"><label>' + aiText('模型', 'Model') + '</label><input id="set-model" type="text" placeholder="gpt-4o-mini"/></div>',
     '  <div class="set-row"><label>' + aiText('侧栏宽度(px)', 'Sidebar width (px)') + '</label><input id="set-sidew" type="number" min="400" step="10" placeholder="400"/></div>',
@@ -5889,7 +5889,6 @@ export async function openSettings(context){
     '  <div class="set-row"><label>' + aiText('引用字数', 'Max chars') + '</label><input id="set-kb-maxchars" type="number" min="200" step="200" placeholder="2000"/></div>',
     '  <div class="set-row"><span style="font-size:12px;color:#6b7280;line-height:1.4;">' + aiText('开启后会在发送前调用 flymd-RAG 检索并追加引用上下文；未安装/未启用 flymd-RAG 时不影响现有行为。', 'When enabled, AI Assistant will call flymd-RAG search before sending and append cited context; if flymd-RAG is not installed/enabled, behavior stays unchanged.') + '</span></div>',
     '  <div class="set-row set-link-row custom-only"><a href="https://cloud.siliconflow.cn/i/X96CT74a" target="_blank" rel="noopener noreferrer">' + aiText('点此注册硅基流动得2000万免费Token', 'Click to register at SiliconFlow to get 20M free tokens') + '</a></div>',
-    '  <div class="set-row set-link-row custom-only"><a href="https://x.dogenet.win/i/dXCKvZ6Q" target="_blank" rel="noopener noreferrer">' + aiText('点此注册OMG获得20美元Claude资源包', 'Click to register OMG to get 20 USD Claude credits') + '</a></div>',
     '  <div class="powered-by-img" id="powered-by-container" style="display:none;text-align:center;margin:12px 0 4px 0;"><a href="https://cloud.siliconflow.cn/i/X96CT74a" target="_blank" rel="noopener noreferrer" style="border:none;outline:none;"><img id="powered-by-img" src="" alt="Powered by" style="max-width:180px;height:auto;cursor:pointer;border:none;outline:none;"/></a></div>',
     ' </div>',
     ' <div id="ai-set-actions"><button id="ai-set-cancel">' + aiText('取消', 'Cancel') + '</button><button class="primary" id="ai-set-ok">' + aiText('保存', 'Save') + '</button></div>',
@@ -5921,10 +5920,11 @@ export async function openSettings(context){
   const elModeLabelCustom = overlay.querySelector('#mode-label-custom')
   const elModeLabelFree = overlay.querySelector('#mode-label-free')
   const FREE_PROXY_URL = 'https://flymd.llingfei.com/ai/ai_proxy.php'
+  const DEFAULT_BASE_URL = 'https://api.siliconflow.cn/v1'
   if (elProviderToggle) elProviderToggle.checked = cfg.provider === 'free'
   if (elTransFreeToggle) elTransFreeToggle.checked = !!cfg.alwaysUseFreeTrans
   // 始终显示用户保存的自定义配置值（不因免费模式而清空）
-  elBase.value = cfg.baseUrl || 'https://api.siliconflow.cn/v1'
+  elBase.value = cfg.baseUrl || DEFAULT_BASE_URL
   elKey.value = cfg.apiKey || ''
   elModel.value = cfg.model || 'gpt-4o-mini'
   elMax.value = String((cfg.limits?.maxCtxChars) || DEFAULT_MAX_CTX_CHARS)
@@ -5934,14 +5934,13 @@ export async function openSettings(context){
   if (elKbMaxChars) elKbMaxChars.value = String((cfg.kb && cfg.kb.maxChars) || 2000)
   if (elBaseSel) {
     const cur = String(cfg.baseUrl || '').trim()
-    if (!cur || cur === 'https://api.siliconflow.cn/v1') elBaseSel.value = 'https://api.siliconflow.cn/v1'
+    if (!cur || cur === DEFAULT_BASE_URL) elBaseSel.value = DEFAULT_BASE_URL
     else if (cur === 'https://api.openai.com/v1') elBaseSel.value = 'https://api.openai.com/v1'
-    else if (cur === 'https://apic1.ohmycdn.com/api/v1/ai/openai/cc-omg/v1') elBaseSel.value = 'https://apic1.ohmycdn.com/api/v1/ai/openai/cc-omg/v1'
     else elBaseSel.value = 'custom'
-      elBaseSel.addEventListener('change', () => {
-        const val = elBaseSel.value
-        if (val && val !== 'custom') elBase.value = val
-      })
+    elBaseSel.addEventListener('change', () => {
+      const val = elBaseSel.value
+      if (val && val !== 'custom') elBase.value = val
+    })
   }
   const applyProviderUI = () => {
     const isFree = elProviderToggle && elProviderToggle.checked
@@ -5998,7 +5997,7 @@ export async function openSettings(context){
     const provider = elProviderToggle && elProviderToggle.checked ? 'free' : 'openai'
     const alwaysUseFreeTrans = elTransFreeToggle && elTransFreeToggle.checked
     // 始终保存用户输入的自定义配置值，不因免费模式而清空
-    const baseUrl = String(elBase.value || '').trim() || 'https://api.siliconflow.cn/v1'
+    const baseUrl = String(elBase.value || '').trim() || DEFAULT_BASE_URL
     const apiKey = String(elKey.value || '').trim()
     const model = String(elModel.value || '').trim() || 'gpt-4o-mini'
     const n = Math.max(1000, parseInt(String(elMax.value || DEFAULT_MAX_CTX_CHARS),10) || DEFAULT_MAX_CTX_CHARS)
