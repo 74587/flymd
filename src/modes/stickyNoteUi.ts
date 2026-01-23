@@ -22,6 +22,8 @@ export type StickyNoteUiDeps = {
 
   // 脏标记与状态刷新
   markDirtyAndRefresh: () => void
+  // 便签自动保存：用于在切换回阅读模式前强制落盘，避免“刚改完就切换/关闭”丢数据
+  flushAutoSave?: () => Promise<void> | void
 
   // 渲染与模式通知
   renderPreview: () => Promise<void> | void
@@ -187,6 +189,10 @@ export function createStickyNoteUi(deps: StickyNoteUiDeps): StickyNoteUiHandles 
   async function toggleStickyEditMode(btn: HTMLButtonElement): Promise<void> {
     const isCurrentlyEditing = deps.getMode() === 'edit'
     if (isCurrentlyEditing) {
+      // 先落盘：别让用户以为“切回阅读=保存了”，结果啥也没写到磁盘
+      try {
+        await deps.flushAutoSave?.()
+      } catch {}
       // 切换到阅读模式
       deps.setMode('preview')
       try {
@@ -263,4 +269,3 @@ export function createStickyNoteUi(deps: StickyNoteUiDeps): StickyNoteUiHandles 
     createStickyNoteControls: stickyNoteWindowHost.createStickyNoteControls,
   }
 }
-

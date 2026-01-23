@@ -12,6 +12,14 @@ import { getUiZoom, zoomReset, getPreviewWidth, resetPreviewWidth } from './uiZo
 // ===== 缩放气泡（类似 Edge） =====
 let _zoomBubbleTimer: number | null = null
 
+function isStickyNoteModeUi(): boolean {
+  try {
+    return !!document?.body?.classList?.contains('sticky-note-mode')
+  } catch {
+    return false
+  }
+}
+
 function ensureZoomBubble(): HTMLDivElement | null {
   try {
     let el = document.getElementById('zoom-bubble') as HTMLDivElement | null
@@ -80,6 +88,8 @@ function ensureWidthBubble(): HTMLDivElement | null {
 
 export function showWidthBubble(): void {
   try {
+    // 便签模式：右下角气泡一律不显示
+    if (isStickyNoteModeUi()) return
     const el = ensureWidthBubble(); if (!el) return
     const label = el.querySelector('#width-bubble-label') as HTMLSpanElement | null
     if (label) label.textContent = Math.round(getPreviewWidth()) + 'px'
@@ -231,6 +241,8 @@ export class NotificationManager {
     },
   ): string {
     try {
+      // 便签模式：隐藏一切右下角通知（包含插件通知/同步通知/模式提示）
+      if (isStickyNoteModeUi()) return ''
       const container = this.ensureContainer()
       const config = this.configs[type]
       const id = `notification-${++this.idCounter}`
@@ -317,6 +329,8 @@ export class NotificationManager {
 
   static show(type: NotificationType, message: string, duration?: number, onClick?: () => void): string {
     try {
+      // 便签模式：隐藏一切右下角通知（包含插件通知/同步通知/模式提示）
+      if (isStickyNoteModeUi()) return ''
       const container = this.ensureContainer()
       const config = this.configs[type]
       const id = `notification-${++this.idCounter}`

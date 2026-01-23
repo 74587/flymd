@@ -2184,6 +2184,14 @@ body.focus-mode .lib-float-toggle.show { display: flex; }
   pointer-events: none; /* 容器本身不拦截事件 */
 }
 
+/* 便签模式：隐藏所有右下角通知/气泡（别打扰用户盯便签） */
+body.sticky-note-mode #notification-container,
+body.sticky-note-mode .notification-container,
+body.sticky-note-mode #sync-status,
+body.sticky-note-mode .width-bubble {
+  display: none !important;
+}
+
 /* 通知项 */
 .notification-item {
   pointer-events: auto;
@@ -8295,7 +8303,12 @@ body.sticky-note-mode .task-tooltip {
   padding: 4px 10px;
   border-radius: var(--radius-sm);
   font-size: 11px;
-  white-space: nowrap;
+  box-sizing: border-box;
+  max-width: min(360px, calc(100vw - 24px));
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.35;
   pointer-events: none;
   opacity: 0;
   transition: opacity 0.15s ease, transform 0.15s ease;

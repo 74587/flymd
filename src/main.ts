@@ -110,6 +110,7 @@ import {
   createStickyNoteUi,
   type StickyNoteUiHandles,
 } from './modes/stickyNoteUi'
+import { createStickyAutoSaver } from './modes/stickyAutoSave'
 import {
   initFocusModeEventsImpl,
   updateFocusSidebarBgImpl,
@@ -6566,6 +6567,13 @@ window.addEventListener('flymd:darkmode:changed', async () => {
 
 // ========== 便签模式 ==========
 // 便签 UI 行为：通过 modes/stickyNoteUi.ts 集中实现，main.ts 只注入状态与依赖
+// 便签自动保存：内容一变就落盘（防抖 + 串行写，避免写盘风暴/乱序覆盖）
+const _stickyAutoSaver = createStickyAutoSaver({
+  isStickyNoteMode: () => stickyNoteMode,
+  isDirty: () => dirty,
+  hasCurrentFile: () => !!currentFilePath,
+  saveNow: () => saveFile(),
+})
 const stickyNoteUi: StickyNoteUiHandles = createStickyNoteUi({
   getMode: () => mode,
   setMode: (m) => { mode = m },
@@ -6580,8 +6588,10 @@ const stickyNoteUi: StickyNoteUiHandles = createStickyNoteUi({
       dirty = true
       refreshTitle()
       refreshStatus()
+      _stickyAutoSaver.schedule()
     } catch {}
   },
+  flushAutoSave: () => _stickyAutoSaver.flush(),
   renderPreview: () => renderPreview(),
   syncToggleButton: () => { try { syncToggleButton() } catch {} },
   notifyModeChange: () => { try { notifyModeChange() } catch {} },
@@ -9147,6 +9157,8 @@ function bindEvents() {
   editor.addEventListener('scroll', () => { scheduleSaveDocPos() })
   editor.addEventListener('keyup', () => { scheduleSaveDocPos(); try { notifySelectionChangeForPlugins() } catch {} })
   editor.addEventListener('click', () => { scheduleSaveDocPos(); try { notifySelectionChangeForPlugins() } catch {} })
+  // 便签模式：失焦时强制落盘，避免“改完就关窗口”撞上防抖窗口期
+  editor.addEventListener('blur', () => { try { void _stickyAutoSaver.flush() } catch {} })
 
   // 预览滚动也记录阅读位置
   preview.addEventListener('scroll', () => { scheduleSaveDocPos() })
@@ -9182,6 +9194,8 @@ function bindEvents() {
   editor.addEventListener('input', () => {
     dirty = true
     refreshTitle()
+    // 便签模式：内容一变就自动保存（防抖）
+    try { _stickyAutoSaver.schedule() } catch {}
   })
   editor.addEventListener('keyup', (ev) => { refreshStatus(ev); try { notifySelectionChangeForPlugins() } catch {} })
   editor.addEventListener('click', (ev) => { refreshStatus(ev); try { notifySelectionChangeForPlugins() } catch {} })
