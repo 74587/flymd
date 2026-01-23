@@ -6273,8 +6273,20 @@ function initWindowsCompositorPoke() {
       const win = getCurrentWindow()
       try { await win.onMoved(() => schedule()) } catch {}
       try { await win.onResized(() => schedule()) } catch {}
+      // 切换到其它程序再切回来时，透明 surface 也可能没刷新（表现为顶部白条）
+      try { await win.onFocusChanged(({ payload }) => { if (payload) schedule() }) } catch {}
+      // 跨屏/改缩放时同样可能触发合成残影
+      try { await win.onScaleChanged(() => schedule()) } catch {}
     } catch {}
   })()
+
+  // 兜底：某些情况下 Tauri focus 事件可能丢，浏览器侧 focus/visibility 仍能捕获
+  try {
+    window.addEventListener('focus', () => schedule(), { passive: true })
+    document.addEventListener('visibilitychange', () => {
+      try { if (!document.hidden) schedule() } catch {}
+    }, { passive: true } as any)
+  } catch {}
 }
 
 
