@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-01-14T00:00:00Z",
+  "updatedAt": "2026-01-30T00:00:00Z",
   "ttlSeconds": 3600,
   "items": [
     {
@@ -299,6 +299,19 @@
       "category": "知识管理",
       "install": {
         "ref": "https://raw.githubusercontent.com/flyhunterl/flymd/main/public/plugins/graph-view/manifest.json",
+        "type": "manifest"
+      }
+    },
+    {
+      "homepage": "https://github.com/flyhunterl/flymd",
+      "name": "文档脑图（Markmap）",
+      "description": "将当前 Markdown 文档渲染为 Markmap 风格脑图，右侧停靠预览；支持全屏遮挡查看、导出 SVG/PNG；点击节点跳转文档位置。",
+      "author": "flyMD",
+      "id": "doc-mindmap",
+      "featured": true,
+      "category": "知识管理",
+      "install": {
+        "ref": "https://raw.githubusercontent.com/flyhunterl/flymd/main/public/plugins/doc-mindmap/manifest.json",
         "type": "manifest"
       }
     },
