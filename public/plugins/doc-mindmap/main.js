@@ -25,6 +25,8 @@ function mmText(zh, en) {
 
 const PLUGIN_ID = 'doc-mindmap'
 const PANEL_WIDTH = 420
+const PANEL_MIN_WIDTH = 260
+const PANEL_MAX_WIDTH = 980
 
 const STORAGE_KEY = `${PLUGIN_ID}:settings`
 const DEFAULT_SETTINGS = {
@@ -32,6 +34,7 @@ const DEFAULT_SETTINGS = {
   maxDepth: 6,
   pngScale: 2,
   pngBackground: 'auto', // 'auto' | 'transparent' | '#ffffff' | '#111111'
+  panelWidth: PANEL_WIDTH,
 }
 
 let _ctx = null
@@ -40,6 +43,7 @@ let _panelRoot = null
 let _toolbarEl = null
 let _optsEl = null
 let _graphWrap = null
+let _resizerEl = null
 let _statusEl = null
 let _timer = null
 let _panelVisible = false
@@ -105,6 +109,7 @@ async function loadSettings(ctx) {
       _settings = { ...DEFAULT_SETTINGS, ...raw }
       _settings.maxDepth = clampInt(_settings.maxDepth, 1, 20, DEFAULT_SETTINGS.maxDepth)
       _settings.pngScale = clampInt(_settings.pngScale, 1, 6, DEFAULT_SETTINGS.pngScale)
+      _settings.panelWidth = clampInt(_settings.panelWidth, PANEL_MIN_WIDTH, PANEL_MAX_WIDTH, DEFAULT_SETTINGS.panelWidth)
       return
     }
   } catch {}
@@ -132,7 +137,7 @@ function ensurePanelMounted(ctx) {
   root.style.top = '0'
   root.style.right = '0'
   root.style.bottom = 'var(--workspace-bottom-gap, 0px)'
-  root.style.width = PANEL_WIDTH + 'px'
+  root.style.width = String(clampInt(_settings.panelWidth, PANEL_MIN_WIDTH, PANEL_MAX_WIDTH, PANEL_WIDTH)) + 'px'
   root.style.height = 'auto'
   root.style.overflow = 'hidden'
   root.style.borderLeft = '1px solid rgba(0,0,0,0.08)'
@@ -140,6 +145,58 @@ function ensurePanelMounted(ctx) {
   root.style.display = _panelVisible ? 'flex' : 'none'
   root.style.flexDirection = 'column'
   root.style.zIndex = '8'
+  root.style.boxSizing = 'border-box'
+
+  // 拖拽改变面板宽度：做成“左侧把手”，简单直接。
+  const resizer = getDoc().createElement('div')
+  resizer.title = mmText('拖拽调整面板宽度', 'Drag to resize panel')
+  resizer.style.position = 'absolute'
+  resizer.style.left = '0'
+  resizer.style.top = '0'
+  resizer.style.bottom = '0'
+  resizer.style.width = '6px'
+  resizer.style.cursor = 'col-resize'
+  resizer.style.zIndex = '9'
+  resizer.style.background = 'transparent'
+  resizer.style.touchAction = 'none'
+  resizer.addEventListener('mouseenter', () => { try { resizer.style.background = 'rgba(0,0,0,0.06)' } catch {} })
+  resizer.addEventListener('mouseleave', () => { try { resizer.style.background = 'transparent' } catch {} })
+
+  let dragging = false
+  let startX = 0
+  let startW = 0
+  const onMove = (ev) => {
+    if (!dragging) return
+    try { ev.preventDefault() } catch {}
+    const dx = (Number(ev.clientX) || 0) - startX
+    const nextW = clampInt(startW - dx, PANEL_MIN_WIDTH, PANEL_MAX_WIDTH, startW)
+    _settings.panelWidth = nextW
+    try { root.style.width = String(nextW) + 'px' } catch {}
+    try { if (_dockHandle) _dockHandle.setSize(nextW) } catch {}
+  }
+  const onUp = async () => {
+    if (!dragging) return
+    dragging = false
+    try { getDoc().body.style.cursor = '' } catch {}
+    try { getDoc().body.style.userSelect = '' } catch {}
+    try { window.removeEventListener('pointermove', onMove) } catch {}
+    try { window.removeEventListener('pointerup', onUp) } catch {}
+    try { await saveSettings(ctx) } catch {}
+    // 尺寸变化后做一次 fit，避免图挤在角落。
+    try { if (_mmPanel) await _mmPanel.fit() } catch {}
+  }
+  resizer.addEventListener('pointerdown', (ev) => {
+    try { ev.preventDefault() } catch {}
+    try { ev.stopPropagation() } catch {}
+    dragging = true
+    startX = Number(ev.clientX) || 0
+    startW = clampInt(_settings.panelWidth, PANEL_MIN_WIDTH, PANEL_MAX_WIDTH, PANEL_WIDTH)
+    try { resizer.setPointerCapture(ev.pointerId) } catch {}
+    try { getDoc().body.style.cursor = 'col-resize' } catch {}
+    try { getDoc().body.style.userSelect = 'none' } catch {}
+    try { window.addEventListener('pointermove', onMove, { passive: false }) } catch {}
+    try { window.addEventListener('pointerup', onUp, { passive: true }) } catch {}
+  })
 
   const toolbar = getDoc().createElement('div')
   toolbar.style.display = 'flex'
@@ -258,12 +315,14 @@ function ensurePanelMounted(ctx) {
   root.appendChild(opts)
   root.appendChild(graphWrap)
   root.appendChild(status)
+  root.appendChild(resizer)
 
   container.appendChild(root)
   _panelRoot = root
   _toolbarEl = toolbar
   _optsEl = opts
   _graphWrap = graphWrap
+  _resizerEl = resizer
   _statusEl = status
 }
 
@@ -1154,7 +1213,7 @@ export async function activate(context) {
     if (context.layout && typeof context.layout.registerPanel === 'function') {
       _dockHandle = context.layout.registerPanel(PLUGIN_ID, {
         side: 'right',
-        size: PANEL_WIDTH,
+        size: clampInt(_settings.panelWidth, PANEL_MIN_WIDTH, PANEL_MAX_WIDTH, PANEL_WIDTH),
         visible: false,
       })
     }
@@ -1240,6 +1299,7 @@ export function deactivate() {
   _toolbarEl = null
   _optsEl = null
   _graphWrap = null
+  _resizerEl = null
   _statusEl = null
   try {
     if (_fsRoot && _fsRoot.parentNode) _fsRoot.parentNode.removeChild(_fsRoot)
