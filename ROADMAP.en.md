@@ -2,6 +2,13 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v1.3.0
+- Added: AI Assistant quick action “Summary” (summarizes the current document by default when there is no selection)
+- Improved: Editor “scroll past end” bottom whitespace + auto stick-to-bottom when typing near the end
+- Fixed: Nested context menus (3rd-level submenus) no longer get clipped by scrollable submenus (Todo menu compatibility)
+- Updated: Built-in “Document Mindmap (Markmap)” v0.2.1 — text wrapping for long nodes; “AI Outline / Original” toggle (mindmap-only, does not modify the document); export SVG/PNG keeps wrapping
+- Updated: Built-in “xxtui Todo Push” v0.2.2 — push title/content templates (`$title`/`$content`); plain-text push; force push toggle with “keep tail flags” option
+
 ## Update v1.2.9
 - Added: Built-in “Document Mindmap (Markmap)” v0.2.0 — render the current Markdown doc as a mindmap (right dock panel, fullscreen overlay, export SVG/PNG, click node to jump)
 - Added: Library tree context menu “Show in File Manager” (file opens its parent folder; folder opens itself)
