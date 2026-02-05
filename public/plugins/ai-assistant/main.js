@@ -1,7 +1,7 @@
 ﻿// AI 写作助手（OpenAI 兼容路径）
 // 说明：
 // - 仅实现 OpenAI 兼容接口（/v1/chat/completions）
-// - 浮动窗口、基本对话、快捷动作（续写/润色/纠错/提纲）
+// - 浮动窗口、基本对话、快捷动作（续写/润色/纠错/提纲/摘要）
 // - 设置项：baseUrl、apiKey、model、上下文截断长度
 // - 默认不写回文档，需用户点击“插入文末”
 
@@ -4020,11 +4020,12 @@ async function mountWindow(context){
      '     <option value="">' + aiText('智能问答', 'Ask AI') + '</option>',
      '     <option value="续写">' + aiText('续写', 'Continue writing') + '</option>',
      '     <option value="润色">' + aiText('润色', 'Polish') + '</option>',
-     '     <option value="纠错">' + aiText('纠错', 'Correct') + '</option>',
-     '     <option value="提纲">' + aiText('提纲', 'Outline') + '</option>',
-     '     <option value="待办">' + aiText('待办', 'Todo') + '</option>',
-     '     <option value="提醒">' + aiText('提醒', 'Reminder') + '</option>',
-      '    </select>',
+      '     <option value="纠错">' + aiText('纠错', 'Correct') + '</option>',
+      '     <option value="提纲">' + aiText('提纲', 'Outline') + '</option>',
+      '     <option value="摘要">' + aiText('摘要', 'Summary') + '</option>',
+      '     <option value="待办">' + aiText('待办', 'Todo') + '</option>',
+      '     <option value="提醒">' + aiText('提醒', 'Reminder') + '</option>',
+       '    </select>',
       '    <button id="ai-vision-toggle" class="ai-vision-toggle" title="' + aiText('视觉模式：点击开启，让 AI 读取文档中的图片', 'Vision mode: let AI read images from the document') + '">Vision</button>',
       '    <button id="ai-rag-toggle" class="ai-rag-toggle" title="' + aiText('知识库检索：点击开启/关闭（与设置联动）', 'RAG: toggle knowledge search (sync with settings)') + '">RAG</button>',
       '    <button id="ai-agent-toggle" class="ai-agent-toggle" title="' + aiText('Agent模式：把你的修改要求应用到选区或全文', 'Agent mode: apply your edit requests to selection or doc') + '">Agent</button>',
@@ -4590,6 +4591,10 @@ function buildPromptPrefix(kind){
     case '润色': return '基于文档上下文，润色并提升表达的清晰度与逻辑性，仅输出修改后的结果。'
     case '纠错': return '基于文档上下文，找出并修正错别字、语法问题，仅输出修订后的结果。'
     case '提纲': return '阅读文档上下文，输出一份结构化提纲（分级列表）。'
+    case '摘要': return aiText(
+      '阅读文档上下文，输出一段简洁摘要：先给 3-7 条要点（项目符号列表），再给一句话结论。',
+      'Read the document context and produce a concise summary: first 3-7 bullet points, then a one-sentence conclusion.'
+    )
     case '翻译': return '将以下内容翻译成中文，保持原文格式和结构，译文要自然流畅、符合中文表达习惯。只输出翻译结果，不要添加任何解释。'
     case '解疑': return aiText(
       '你是严谨的助手。请对用户选中的内容进行“解疑”：解释它在说什么、关键概念/结论/前提；如果存在歧义，列出并给出可能解释；必要时给出简短例子帮助理解。用中文回答，使用 Markdown 排版。',
@@ -4658,7 +4663,7 @@ async function quick(context, kind, options = {}){
   // 选区策略：解疑必须有选区；续写/润色/纠错优先选区；其它不关心选区
   const selectionPolicy = (kind === '解疑')
     ? 'required'
-    : (['续写', '润色', '纠错'].includes(kind) ? 'prefer' : 'none')
+    : (['续写', '润色', '纠错', '摘要'].includes(kind) ? 'prefer' : 'none')
 
   const ctx = options && typeof options === 'object' ? options.ctx : null
   const selected = await getSelectedTextSmart(context, ctx, options.selectedText)
@@ -4666,6 +4671,26 @@ async function quick(context, kind, options = {}){
   if (selectionPolicy === 'required' && !selected) {
     context.ui.notice(aiText('请先选中一段文本再使用“解疑”', 'Please select some text before using “Explain”'), 'err', 2200)
     return
+  }
+
+  // 摘要：无选区时默认对当前文档做摘要（避免用户还要手动复制全文）
+  if (kind === '摘要' && !selected) {
+    try {
+      const doc = String(context && typeof context.getEditorValue === 'function' ? context.getEditorValue() : '').trim()
+      if (doc) {
+        const maxChars = 12000
+        const clipped = doc.length > maxChars ? (doc.slice(0, maxChars) + '\n\n[内容过长，已截断]') : doc
+        finalPrompt = [
+          prefix,
+          '',
+          aiText('当前文档内容：', 'Document content:'),
+          '',
+          clipped,
+          '',
+          aiText('请基于以上内容输出摘要。', 'Please summarize the content above.')
+        ].join('\n')
+      }
+    } catch {}
   }
 
   if (selected && selectionPolicy !== 'none') {
@@ -5259,6 +5284,10 @@ function aiGuardCheckText(text){
   // 你的要求：强规则命中 >=2 才拒绝；弱规则命中 >=4 才拒绝。
   const strongRules = [
     // 强规则：每个词/模式出现一次，只算一次命中（同一个词重复出现不叠加）。
+    /性爱/,
+    /做爱/,
+    /性药/,
+    /撸管/,
     /口交/i,
     /肛交/i,
     /轮奸/i,
@@ -5296,8 +5325,10 @@ function aiGuardCheckText(text){
   if (strongHits >= 2) return { reason: '强规则命中' }
 
   const weakRules = [
-    /(阴茎|龟头|睾丸|阴道|乳头|裸体|裸露|性交|做爱|高潮|成人视频|A片|勃起|性暗示|情色|色情|性器官|私处|欲望|性欲|按摩|特殊服务|一夜情|炮友|性玩具|阴毛|体毛|抚摸|挑逗)/,
-    /(手淫|自慰|射精|精液)/,
+    /(阴茎|龟头|阴道|乳头|裸体|裸露|性交|高潮|成人视频|A片|勃起|性暗示|情色|色情|性器官|私处|欲望|性欲|按摩|特殊服务|一夜情|炮友|性玩具|阴毛|体毛|抚摸|挑逗)/,
+    /(手淫|自慰|射精)/,
+    /精液/,
+    /睾丸/,
     /(强奸|迷奸|奸淫)/,
     /(操我)/,
     /\b(porn|penis|vagina|nude)\b/i,
@@ -6142,6 +6173,17 @@ export async function activate(context) {
               el('ai-assist-win').style.display = 'block'
               setDockPush(true)
               await quick(context, '提纲', { ctx })
+            }
+          },
+          {
+            label: aiText('摘要', 'Summary'),
+            icon: '🧾',
+            onClick: async (ctx) => {
+              const selectedText = snapshotSelectedTextFromCtx(ctx)
+              await ensureWindow(context)
+              el('ai-assist-win').style.display = 'block'
+              setDockPush(true)
+              await quick(context, '摘要', { ctx, selectedText })
             }
           },
           {

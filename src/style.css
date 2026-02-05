@@ -7210,7 +7210,12 @@ body.dark-mode .preview hr {
   max-width: 280px;
   z-index: 10001;
   pointer-events: auto;
-  /* 溢出自适应：支持滚动 */
+  /* 默认不裁剪：避免三级菜单被父级子菜单裁掉 */
+  overflow: visible;
+}
+
+/* 子菜单滚动（仅在不会出现三级菜单时启用，见 contextMenus.ts） */
+.context-menu-submenu.scrollable {
   overflow-y: auto;
   overflow-x: hidden;
 }

@@ -285,6 +285,13 @@ export async function showContextMenu(
           if (wouldOverflowRight) submenu.classList.add('expand-left')
           else submenu.classList.remove('expand-left')
 
+          // 三级子菜单兼容：如果当前子菜单内部还包含“有子菜单”的项，不能开启 overflow 滚动，否则会裁剪三级菜单
+          const hasNestedSubmenu = !!submenu.querySelector(
+            '.context-menu-item.has-children',
+          )
+          if (hasNestedSubmenu) submenu.classList.remove('scrollable')
+          else submenu.classList.add('scrollable')
+
           // 计算上下可用空间
           const availableAbove = itemRect.bottom - padding
           const availableBelow = viewportHeight - itemRect.top - padding
