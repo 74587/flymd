@@ -2,6 +2,13 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v1.3.2
+- Fixed: WebDAV sync could fail to run before app exit
+- Fixed: Window size persistence issues in zoom mode
+- Fixed: Sticky Note window restore could be misaligned/distorted under Windows display scaling
+- Improved: In Sticky Note mode, height resizing is disabled when the preview is hidden to avoid layout glitches
+- Improved: Built-in “AI Novel Engine” settings now shows a “New users get 500k free characters” hint
+
 ## Update v1.3.1
 - Added: Network proxy settings (HTTP/HTTPS) in Theme Settings; when enabled, plugin requests also route through the proxy on desktop and can bypass some CORS limitations
 - Added: In Source mode, pressing Enter on ordered/unordered lists auto-continues the list marker; ordered list numbers increment; Enter on an empty item exits the list
