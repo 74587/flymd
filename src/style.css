@@ -5197,7 +5197,7 @@ html, body { overflow: hidden; }
 .container.wysiwyg-v2 .ProseMirror pre .highlight-layer .hljs-number,
 .container.wysiwyg-v2 .ProseMirror pre .highlight-layer .hljs-literal { color: #098658; }
 .container.wysiwyg-v2 .ProseMirror pre .highlight-layer .hljs-comment,
-.container.wysiwyg-v2 .ProseMirror pre .highlight-layer .hljs-quote { color: #008000; font-style: italic; }
+.container.wysiwyg-v2 .ProseMirror pre .highlight-layer .hljs-quote { color: #008000; font-style: normal; }
 .container.wysiwyg-v2 .ProseMirror pre .highlight-layer .hljs-variable,
 .container.wysiwyg-v2 .ProseMirror pre .highlight-layer .hljs-params { color: #001080; }
 .container.wysiwyg-v2 .ProseMirror pre .highlight-layer .hljs-class,
@@ -5236,7 +5236,7 @@ body.dark-mode .container.wysiwyg-v2 .ProseMirror pre .highlight-layer .hljs-tem
 body.dark-mode .container.wysiwyg-v2 .ProseMirror pre .highlight-layer .hljs-number,
 body.dark-mode .container.wysiwyg-v2 .ProseMirror pre .highlight-layer .hljs-literal { color: #b5cea8 !important; }
 body.dark-mode .container.wysiwyg-v2 .ProseMirror pre .highlight-layer .hljs-comment,
-body.dark-mode .container.wysiwyg-v2 .ProseMirror pre .highlight-layer .hljs-quote { color: #6a9955 !important; font-style: italic; }
+body.dark-mode .container.wysiwyg-v2 .ProseMirror pre .highlight-layer .hljs-quote { color: #6a9955 !important; font-style: normal; }
 body.dark-mode .container.wysiwyg-v2 .ProseMirror pre .highlight-layer .hljs-variable,
 body.dark-mode .container.wysiwyg-v2 .ProseMirror pre .highlight-layer .hljs-params { color: #9cdcfe !important; }
 body.dark-mode .container.wysiwyg-v2 .ProseMirror pre .highlight-layer .hljs-class,
@@ -5275,7 +5275,7 @@ body.dark-mode .container.wysiwyg-v2 .ProseMirror pre .highlight-layer .hljs-pun
   .container.wysiwyg-v2 .ProseMirror pre .highlight-layer .hljs-number,
   .container.wysiwyg-v2 .ProseMirror pre .highlight-layer .hljs-literal { color: #b5cea8 !important; }
   .container.wysiwyg-v2 .ProseMirror pre .highlight-layer .hljs-comment,
-  .container.wysiwyg-v2 .ProseMirror pre .highlight-layer .hljs-quote { color: #6a9955 !important; font-style: italic; }
+  .container.wysiwyg-v2 .ProseMirror pre .highlight-layer .hljs-quote { color: #6a9955 !important; font-style: normal; }
   .container.wysiwyg-v2 .ProseMirror pre .highlight-layer .hljs-variable,
   .container.wysiwyg-v2 .ProseMirror pre .highlight-layer .hljs-params { color: #9cdcfe !important; }
   .container.wysiwyg-v2 .ProseMirror pre .highlight-layer .hljs-class,
