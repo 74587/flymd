@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <DirectoryRef Id="INSTALLDIR">
+      <Component Id="FileAssociationIconOverrides" Guid="*">
+        <!-- 单独覆写文件关联图标，别把程序图标硬塞给文档 -->
+        <RegistryKey Root="HKLM" Key="Software\Classes\flymd.md\DefaultIcon">
+          <RegistryValue
+            Type="string"
+            Value="&quot;[INSTALLDIR]resources\file-association.ico&quot;"
+            KeyPath="yes"
+          />
+        </RegistryKey>
+        <RegistryKey Root="HKLM" Key="Software\Classes\flymd.markdown\DefaultIcon">
+          <RegistryValue
+            Type="string"
+            Value="&quot;[INSTALLDIR]resources\file-association.ico&quot;"
+          />
+        </RegistryKey>
+        <RegistryKey Root="HKLM" Key="Software\Classes\flymd.pdf\DefaultIcon">
+          <RegistryValue
+            Type="string"
+            Value="&quot;[INSTALLDIR]resources\file-association.ico&quot;"
+          />
+        </RegistryKey>
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+</Wix>

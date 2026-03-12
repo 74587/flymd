@@ -233,6 +233,22 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": {
+      "windows/file-association.ico": "resources/file-association.ico"
+    },
+    "windows": {
+      "wix": {
+        "fragmentPaths": [
+          "windows/file-association.wxs"
+        ],
+        "componentRefs": [
+          "FileAssociationIconOverrides"
+        ]
+      },
+      "nsis": {
+        "installerHooks": "windows/file-association-hooks.nsh"
+      }
+    },
     "macOS": {
       "infoPlist": "Info.plist"
     },

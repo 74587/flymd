@@ -9,12 +9,16 @@ const cp = require('child_process');
 
 const projectRoot = process.cwd();
 const iconsDir = path.join(projectRoot, 'src-tauri', 'icons');
+const windowsDir = path.join(projectRoot, 'src-tauri', 'windows');
 const iconPng = path.join(iconsDir, 'icon.png');
 const iconIco = path.join(iconsDir, 'icon.ico');
 const iconIcns = path.join(iconsDir, 'icon.icns');
+const fileAssocIconIco = path.join(windowsDir, 'file-association.ico');
 const sourceRaw = path.join(projectRoot, 'Flymdnew.png');
 const sourceSafe = path.join(iconsDir, 'icon-source.png');
 const safeMaker = path.join(projectRoot, 'scripts', 'make_icon_safearea.py');
+const fileAssocSource = path.join(projectRoot, 'ICO03.png');
+const fileAssocMaker = path.join(projectRoot, 'scripts', 'make_file_assoc_icon.py');
 
 function mtimeMs(file) {
   try {
@@ -155,4 +159,47 @@ function ensureIcons() {
   return ok;
 }
 
+function ensureFileAssociationIcon() {
+  if (!fs.existsSync(fileAssocSource)) {
+    console.warn(`[ensure-icons] 警告：未找到文件关联图标源文件: ${fileAssocSource}`);
+    return false;
+  }
+
+  if (!fs.existsSync(fileAssocMaker)) {
+    console.warn(`[ensure-icons] 警告：未找到文件关联图标生成脚本: ${fileAssocMaker}`);
+    return false;
+  }
+
+  const needGen =
+    !fs.existsSync(fileAssocIconIco) ||
+    isNewer(fileAssocSource, fileAssocIconIco) ||
+    isNewer(fileAssocMaker, fileAssocIconIco) ||
+    fs.statSync(fileAssocIconIco).size < 1000;
+
+  if (!needGen) {
+    console.log('[ensure-icons] 文件关联图标已满足要求，跳过生成');
+    return true;
+  }
+
+  const args = [fileAssocMaker, '--in', fileAssocSource, '--out', fileAssocIconIco];
+  console.log(`[ensure-icons] 生成文件关联图标：python ${args.map((x) => JSON.stringify(x)).join(' ')}`);
+
+  try {
+    const r = cp.spawnSync('python', args, {
+      stdio: 'inherit',
+      cwd: projectRoot,
+      env: process.env,
+    });
+    if (r.status !== 0) throw new Error(`exit ${r.status}`);
+  } catch (e) {
+    console.error(`[ensure-icons] 文件关联图标生成失败：${e.message}`);
+    return false;
+  }
+
+  const ok = fs.existsSync(fileAssocIconIco) && fs.statSync(fileAssocIconIco).size >= 1000;
+  console.log(`[ensure-icons] 文件关联图标生成完成：${ok ? 'OK' : '未检测到有效的 file-association.ico'}`);
+  return ok;
+}
+
 ensureIcons();
+ensureFileAssociationIcon();
