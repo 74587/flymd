@@ -3,18 +3,12 @@
   <Fragment>
     <DirectoryRef Id="INSTALLDIR">
       <Component Id="FileAssociationIconOverrides" Guid="*">
-        <!-- 单独覆写文件关联图标，别把程序图标硬塞给文档 -->
-        <RegistryKey Root="HKLM" Key="Software\Classes\flymd.md\DefaultIcon">
-          <RegistryValue
-            Type="string"
-            Value="&quot;[INSTALLDIR]resources\file-association.ico&quot;"
-            KeyPath="yes"
-          />
-        </RegistryKey>
+        <!-- 只覆写 FlyMD 自己的 ProgID，别污染系统通用类型名 -->
         <RegistryKey Root="HKLM" Key="Software\Classes\flymd.markdown\DefaultIcon">
           <RegistryValue
             Type="string"
             Value="&quot;[INSTALLDIR]resources\file-association.ico&quot;"
+            KeyPath="yes"
           />
         </RegistryKey>
         <RegistryKey Root="HKLM" Key="Software\Classes\flymd.pdf\DefaultIcon">

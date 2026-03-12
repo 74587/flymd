@@ -261,7 +261,7 @@
         "role": "Editor",
         "description": "Markdown 文档",
         "mimeType": "text/markdown",
-        "name": "Markdown"
+        "name": "flymd.markdown"
       },
       {
         "ext": [
@@ -270,7 +270,7 @@
         "role": "Viewer",
         "description": "PDF document",
         "mimeType": "application/pdf",
-        "name": "PDF"
+        "name": "flymd.pdf"
       }
     ]
   }
