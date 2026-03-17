@@ -18,6 +18,7 @@ import { protectExcelDollarRefs, unprotectExcelDollarRefs } from '../../utils/ex
 import { getPasteUrlTitleFetchEnabled } from '../../core/pasteUrlTitle'
 import { guessSyncedDocImageAbsPath } from '../../utils/localImagePath'
 import { resolveLocalImageAbsPathFromSrc } from '../../utils/localImageSrcResolve'
+import { normalizeTabIndentText } from '../../utils/tabIndent'
 import { mermaidPlugin } from './plugins/mermaid'
 import { mathInlineViewPlugin, mathBlockViewPlugin } from './plugins/math'
 import { htmlMediaPlugin } from './plugins/htmlMedia'
@@ -338,7 +339,7 @@ function cleanupEditorOnly() {
 
 export async function enableWysiwygV2(root: HTMLElement, initialMd: string, onChange: (md: string) => void) {
   // 规范化内容：空内容也是合法的（新文档或空文档）
-  const content0 = (initialMd || '').toString()
+  const content0 = normalizeTabIndentText((initialMd || '').toString())
   const content = maybeConvertHtmlTableBlocksToGfm(content0)
   // 保护 Excel 公式里的 `$`，避免被 remark-math / 输入规则误识别为行内数学
   const contentForEditor = protectExcelDollarRefs(content)
@@ -527,7 +528,7 @@ export async function enableWysiwygV2(root: HTMLElement, initialMd: string, onCh
           return s
         } catch { return md2 }
       })()
-      const md4 = unprotectExcelDollarRefs(md3)
+      const md4 = normalizeTabIndentText(unprotectExcelDollarRefs(md3))
       _lastMd = md4
       try { _onChange?.(md4) } catch {}
       try { setTimeout(() => { try { rewriteLocalImagesToAsset() } catch {} }, 0) } catch {}
@@ -552,7 +553,7 @@ export async function disableWysiwygV2() {
     if (_editor) {
       try {
         const mdNow = await (_editor as any).action(getMarkdown())
-        _lastMd = unprotectExcelDollarRefs(mdNow)
+        _lastMd = normalizeTabIndentText(unprotectExcelDollarRefs(mdNow))
       } catch {}
     }
   } catch {}
@@ -586,7 +587,7 @@ export async function wysiwygV2ReplaceAll(markdown: string) {
     // 若 editorView 尚未就绪或已被销毁，直接跳过，避免 MilkdownError 冒泡
     try { ctx.get(editorViewCtx) } catch { return }
     const next0 = maybeConvertHtmlTableBlocksToGfm(String(markdown || ''))
-    const next = protectExcelDollarRefs(next0)
+    const next = protectExcelDollarRefs(normalizeTabIndentText(next0))
     await _editor.action(replaceAll(next))
   } catch {}
 }
@@ -601,7 +602,7 @@ export async function wysiwygV2ReplaceAll(markdown: string) {
 function _getView(): any { try { return (_editor as any)?.ctx?.get?.(editorViewCtx) } catch { return null } }
 
 // 所见模式：列表项 Tab/Shift+Tab 缩进（次级列表/反缩进）
-// 返回 true 表示“当前选区在列表项中，已尝试处理（无论是否真正发生缩进）”，外层应停止再做 &emsp; 段落缩进。
+// 返回 true 表示“当前选区在列表项中，已尝试处理（无论是否真正发生缩进）”，外层应停止再做段落缩进。
 export function wysiwygV2HandleListTab(outdent: boolean): boolean {
   try {
     const view = _getView()

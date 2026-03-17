@@ -41,6 +41,7 @@ import { transcodeToWebpIfNeeded } from './utils/image'
 import { protectExcelDollarRefs } from './utils/excelFormula'
 import { guessSyncedDocImageAbsPath } from './utils/localImagePath'
 import { resolveLocalImageAbsPathFromSrc, toDocRelativeImagePathIfInImages } from './utils/localImageSrcResolve'
+import { TAB_INDENT, normalizeTabIndentText, ensureLeadingTabIndent, removeLeadingTabIndent, getLeadingTabIndentLength, getTabIndentLengthEndingAt } from './utils/tabIndent'
 import {
   copySelectionAsRichHtmlWithEmbeddedImages,
   hasSelectionInside,
@@ -2432,7 +2433,7 @@ async function buildWysiwygV2FromTextarea(): Promise<HTMLDivElement | null> {
   const __mdInitBody = fmSplit.body
   await enableWysiwygV2(scrollView!, __mdInitBody, (mdNext) => {
     try {
-      const bodyNext = String(mdNext || '').replace(/\u2003/g, '&emsp;')
+      const bodyNext = normalizeTabIndentText(String(mdNext || ''))
       const fm = currentFrontMatter || ''
       const combined = fm ? fm + bodyNext : bodyNext
       if (combined !== editor.value) {
@@ -8241,28 +8242,39 @@ function bindEvents() {
         e.preventDefault()
         const val = String(ta.value || '')
         const start = ta.selectionStart >>> 0; const end = ta.selectionEnd >>> 0
-        const isShift = !!e.shiftKey; const indent = "&emsp;&emsp;"
+        const isShift = !!e.shiftKey
         const lineStart = val.lastIndexOf('\n', start - 1) + 1
         const sel = val.slice(lineStart, end)
         if (start === end) {
           if (isShift) {
-            if (val.slice(lineStart).startsWith(indent)) {
-              const nv = val.slice(0, lineStart) + val.slice(lineStart + indent.length)
+            const leadingIndentLength = getLeadingTabIndentLength(val.slice(lineStart))
+            if (leadingIndentLength > 0) {
+              const nv = val.slice(0, lineStart) + val.slice(lineStart + leadingIndentLength)
               ta.value = nv
-              const newPos = Math.max(lineStart, start - indent.length)
+              const newPos = Math.max(lineStart, start - leadingIndentLength)
               ta.selectionStart = ta.selectionEnd = newPos
             }
           } else {
-            if (!val.slice(lineStart).startsWith(indent)) {
-              const nv = val.slice(0, lineStart) + indent + val.slice(lineStart)
+            const curLine = val.slice(lineStart)
+            if (getLeadingTabIndentLength(curLine) === 0) {
+              const nv = val.slice(0, lineStart) + TAB_INDENT + curLine
               ta.value = nv
-              const newPos = start + indent.length
+              const newPos = start + TAB_INDENT.length
               ta.selectionStart = ta.selectionEnd = newPos
             }
           }
         } else if (start !== end && sel.includes('\n')) {
           const lines = val.slice(lineStart, end).split('\n')
-          const changed = lines.map((ln) => isShift ? (ln.startsWith(indent) ? ln.slice(indent.length) : (ln.startsWith(' \t') ? ln.slice(1) : (ln.startsWith('\t') ? ln.slice(1) : ln))) : ((ln.startsWith(indent) ? ln : (indent + ln)))).join('\n')
+          const changed = lines.map((ln) => {
+            if (isShift) {
+              const next = removeLeadingTabIndent(ln)
+              if (next !== ln) return next
+              if (ln.startsWith(' \t')) return ln.slice(1)
+              if (ln.startsWith('\t')) return ln.slice(1)
+              return ln
+            }
+            return ensureLeadingTabIndent(ln)
+          }).join('\n')
           const newVal = val.slice(0, lineStart) + changed + val.slice(end)
           const delta = changed.length - (end - lineStart)
           ta.value = newVal; ta.selectionStart = lineStart; ta.selectionEnd = end + delta
@@ -8270,10 +8282,11 @@ function bindEvents() {
           if (isShift) {
             const curLineStart = lineStart
             const cur = val.slice(curLineStart)
-            if (cur.startsWith(indent, start - curLineStart)) { const nv = val.slice(0, start - indent.length) + val.slice(start); ta.value = nv; ta.selectionStart = ta.selectionEnd = start - indent.length }
+            const indentLength = getTabIndentLengthEndingAt(cur, start - curLineStart)
+            if (indentLength > 0) { const nv = val.slice(0, start - indentLength) + val.slice(start); ta.value = nv; ta.selectionStart = ta.selectionEnd = start - indentLength }
             else if ((start - curLineStart) > 0 && val.slice(curLineStart, curLineStart + 1) === '\t') { const nv = val.slice(0, curLineStart) + val.slice(curLineStart + 1); ta.value = nv; const shift = (start > curLineStart) ? 1 : 0; ta.selectionStart = ta.selectionEnd = start - shift }
           } else {
-            const nv = val.slice(0, start) + indent + val.slice(end); ta.value = nv; ta.selectionStart = ta.selectionEnd = start + indent.length
+            const nv = val.slice(0, start) + TAB_INDENT + val.slice(end); ta.value = nv; ta.selectionStart = ta.selectionEnd = start + TAB_INDENT.length
           }
         }
         try { dirty = true; refreshTitle(); refreshStatus() } catch {}
@@ -8293,7 +8306,7 @@ function bindEvents() {
           if (!rootEl || !tgt || !rootEl.contains(tgt)) return
 
           // 列表项优先：Tab 缩进到次级列表，Shift+Tab 反缩进
-          // 这里必须先处理，否则后续的 &emsp; 段落缩进会把 Tab “吃掉”，导致列表永远只有一层。
+          // 这里必须先处理，否则后续的段落缩进会把 Tab “吃掉”，导致列表永远只有一层。
           const inList = (() => { try { return wysiwygV2HandleListTab(!!ev.shiftKey) } catch { return false } })()
           if (inList) {
             ev.preventDefault(); try { ev.stopPropagation() } catch {} ; try { (e as any).stopImmediatePropagation && (e as any).stopImmediatePropagation() } catch {}
@@ -8302,7 +8315,7 @@ function bindEvents() {
 
           ev.preventDefault(); try { ev.stopPropagation() } catch {} ; try { (e as any).stopImmediatePropagation && (e as any).stopImmediatePropagation() } catch {}
 
-          const em = '&emsp;&emsp;'
+          const em = TAB_INDENT
           const sel = window.getSelection()
           // 反缩进：Shift+Tab 删除光标前一组，或当前段落行首一组
           if (ev.shiftKey) {
@@ -8313,8 +8326,8 @@ function bindEvents() {
                 if (r.startContainer && r.startContainer.nodeType === 3) {
                   const tn = r.startContainer as Text
                   const off = r.startOffset >>> 0
-                  const need = em.length
-                  if (off >= need && tn.data.slice(off - need, off) === em) {
+                  const need = getTabIndentLengthEndingAt(tn.data, off)
+                  if (need > 0) {
                     tn.deleteData(off - need, need)
                     const rr = document.createRange(); rr.setStart(tn, off - need); rr.collapse(true)
                     sel.removeAllRanges(); sel.addRange(rr)
@@ -8325,8 +8338,9 @@ function bindEvents() {
                 const block = (tgt.closest('p,div,li,h1,h2,h3,h4,h5,h6,blockquote,pre') as HTMLElement) || (rootEl as HTMLElement)
                 if (block && block.firstChild && block.firstChild.nodeType === 3) {
                   const t0 = (block.firstChild as Text)
-                  if ((t0.data || '').startsWith(em)) {
-                    t0.deleteData(0, em.length)
+                  const leadingIndentLength = getLeadingTabIndentLength(t0.data || '')
+                  if (leadingIndentLength > 0) {
+                    t0.deleteData(0, leadingIndentLength)
                     const rr = document.createRange(); rr.setStart(t0, 0); rr.collapse(true)
                     sel?.removeAllRanges(); sel?.addRange(rr)
                   }
@@ -8341,7 +8355,7 @@ function bindEvents() {
             if (sel && sel.rangeCount > 0) {
               const r = sel.getRangeAt(0)
               const block = (tgt.closest('p,div,li,h1,h2,h3,h4,h5,h6,blockquote,pre') as HTMLElement) || (rootEl as HTMLElement)
-              const already = (() => { try { const fc = block?.firstChild; return (fc && fc.nodeType === 3 && (fc as Text).data.startsWith(em)) } catch { return false } })()
+              const already = (() => { try { const fc = block?.firstChild; return !!(fc && fc.nodeType === 3 && getLeadingTabIndentLength((fc as Text).data || '') > 0) } catch { return false } })()
               if (already) return
             }
           } catch {}
@@ -9126,24 +9140,25 @@ function bindEvents() {
         const start = ta.selectionStart >>> 0
         const end = ta.selectionEnd >>> 0
         const isShift = !!e.shiftKey
-        const indent = "&emsp;&emsp;" // 使用 HTML 实体 &emsp;&emsp; 模拟缩进，避免触发代码块
         // 选区起始行与结束行的起始偏移
         const lineStart = val.lastIndexOf('\n', start - 1) + 1
         const lineEndBoundary = val.lastIndexOf('\n', Math.max(end - 1, 0)) + 1
         const sel = val.slice(lineStart, end)
         if (start === end) {
           if (isShift) {
-            if (val.slice(lineStart).startsWith(indent)) {
-              const nv = val.slice(0, lineStart) + val.slice(lineStart + indent.length)
+            const leadingIndentLength = getLeadingTabIndentLength(val.slice(lineStart))
+            if (leadingIndentLength > 0) {
+              const nv = val.slice(0, lineStart) + val.slice(lineStart + leadingIndentLength)
               ta.value = nv
-              const newPos = Math.max(lineStart, start - indent.length)
+              const newPos = Math.max(lineStart, start - leadingIndentLength)
               ta.selectionStart = ta.selectionEnd = newPos
             }
           } else {
-            if (!val.slice(lineStart).startsWith(indent)) {
-              const nv = val.slice(0, lineStart) + indent + val.slice(lineStart)
+            const curLine = val.slice(lineStart)
+            if (getLeadingTabIndentLength(curLine) === 0) {
+              const nv = val.slice(0, lineStart) + TAB_INDENT + curLine
               ta.value = nv
-              const newPos = start + indent.length
+              const newPos = start + TAB_INDENT.length
               ta.selectionStart = ta.selectionEnd = newPos
             }
           }
@@ -9152,12 +9167,13 @@ function bindEvents() {
           const lines = val.slice(lineStart, end).split('\n')
           const changed = lines.map((ln) => {
             if (isShift) {
-              if (ln.startsWith(indent)) return ln.slice(indent.length)
+              const next = removeLeadingTabIndent(ln)
+              if (next !== ln) return next
               if (ln.startsWith(' \t')) return ln.slice(1) // 宽松回退
               if (ln.startsWith('\t')) return ln.slice(1)
               return ln
             } else {
-              return (ln.startsWith(indent) ? ln : indent + ln)
+              return ensureLeadingTabIndent(ln)
             }
           }).join('\n')
           const newVal = val.slice(0, lineStart) + changed + val.slice(end)
@@ -9171,10 +9187,11 @@ function bindEvents() {
           const curLineStart = lineStart
           if (isShift) {
             const cur = val.slice(curLineStart)
-            if (cur.startsWith(indent, start - curLineStart)) {
-              const newVal = val.slice(0, start - indent.length) + val.slice(start)
+            const indentLength = getTabIndentLengthEndingAt(cur, start - curLineStart)
+            if (indentLength > 0) {
+              const newVal = val.slice(0, start - indentLength) + val.slice(start)
               ta.value = newVal
-              ta.selectionStart = ta.selectionEnd = start - indent.length
+              ta.selectionStart = ta.selectionEnd = start - indentLength
             } else if ((start - curLineStart) > 0 && val.slice(curLineStart, curLineStart + 1) === '\t') {
               const newVal = val.slice(0, curLineStart) + val.slice(curLineStart + 1)
               ta.value = newVal
@@ -9182,9 +9199,9 @@ function bindEvents() {
               ta.selectionStart = ta.selectionEnd = start - shift
             }
           } else {
-            const newVal = val.slice(0, start) + indent + val.slice(end)
+            const newVal = val.slice(0, start) + TAB_INDENT + val.slice(end)
             ta.value = newVal
-            ta.selectionStart = ta.selectionEnd = start + indent.length
+            ta.selectionStart = ta.selectionEnd = start + TAB_INDENT.length
           }
         }
         dirty = true
