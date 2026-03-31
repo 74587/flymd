@@ -906,6 +906,7 @@ body.compact-titlebar .window-btn.window-close:hover {
   position: relative;
   transform: translateY(0);
   will-change: transform;
+  counter-reset: flymd-line;
 }
 
 .editor-line-number {
@@ -916,6 +917,11 @@ body.compact-titlebar .window-btn.window-close:hover {
   padding-right: 12px;
   font-size: 0.84em;
   white-space: nowrap;
+}
+
+.editor-line-number::before {
+  counter-increment: flymd-line;
+  content: counter(flymd-line);
 }
 
 .editor-line-number.active {
