@@ -1742,6 +1742,71 @@ function fileUrlToPreviewPath(input: string): string | null {
   }
 }
 
+function normalizePreviewAnchorText(input: string): string {
+  try { return decodeURIComponent(String(input || '')) } catch { return String(input || '') }
+}
+
+function makePreviewHeadingId(text: string, index: number): string {
+  const base = normalizePreviewAnchorText(text)
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\u4e00-\u9fa5\s-]/gi, '')
+    .replace(/\s+/g, '-')
+    .slice(0, 64)
+  return base || `toc-${index}`
+}
+
+function ensurePreviewHeadingIds(root: ParentNode): void {
+  try {
+    const used = new Set<string>()
+    const heads = Array.from(root.querySelectorAll('h1,h2,h3,h4,h5,h6')) as HTMLElement[]
+    heads.forEach((h, idx) => {
+      let id = String(h.getAttribute('id') || '').trim()
+      if (!id) id = makePreviewHeadingId(h.textContent || '', idx)
+      const base = id
+      let n = 1
+      while (used.has(id)) id = `${base}-${n++}`
+      used.add(id)
+      if (h.getAttribute('id') !== id) h.setAttribute('id', id)
+    })
+  } catch {}
+}
+
+function isPreviewHashLink(href: string): boolean {
+  return /^#[^#\s]+/.test(String(href || '').trim())
+}
+
+function findPreviewAnchorTarget(hashHref: string): HTMLElement | null {
+  try {
+    const raw = String(hashHref || '').trim()
+    if (!isPreviewHashLink(raw)) return null
+    const id = normalizePreviewAnchorText(raw.slice(1)).trim()
+    if (!id) return null
+    const body = document.querySelector('.preview .preview-body') as HTMLElement | null
+    const root = body || preview || document
+    let target = root.querySelector(`#${cssEscapeCompat(id)}`) as HTMLElement | null
+    if (target) return target
+
+    const wanted = makePreviewHeadingId(id, 0)
+    const heads = Array.from(root.querySelectorAll('h1,h2,h3,h4,h5,h6')) as HTMLElement[]
+    target = heads.find((h, idx) => {
+      const text = (h.textContent || '').trim()
+      return text === id || makePreviewHeadingId(text, idx) === wanted
+    }) || null
+    if (target && !target.id) target.id = wanted
+    return target
+  } catch {
+    return null
+  }
+}
+
+function scrollPreviewAnchorIntoView(hashHref: string): boolean {
+  const target = findPreviewAnchorTarget(hashHref)
+  if (!target) return false
+  try { target.scrollIntoView({ behavior: 'smooth', block: 'start' }) } catch { target.scrollIntoView() }
+  return true
+}
+
 function resolvePreviewLocalDocPath(href: string): string | null {
   const rawHref = String(href || '').trim()
   if (!rawHref || rawHref.startsWith('#')) return null
@@ -1805,7 +1870,14 @@ function ensurePreviewLinkHandlingBound(): void {
         if (!link || !preview.contains(link)) return
 
         const href = String(link.getAttribute('href') || '').trim()
-        if (!href || href.startsWith('#')) return
+        if (!href) return
+        if (isPreviewHashLink(href)) {
+          if (scrollPreviewAnchorIntoView(href)) {
+            ev.preventDefault()
+            try { ev.stopPropagation() } catch {}
+          }
+          return
+        }
 
         const resolvedPath = resolvePreviewLocalDocPath(href)
         if (!resolvedPath) return
@@ -3858,6 +3930,7 @@ async function renderPreview(opts?: RenderPreviewOptions) {
     const buf = document.createElement('div') as HTMLDivElement
     buf.className = 'preview-body'
     buf.innerHTML = safe
+    ensurePreviewHeadingIds(buf)
     // KaTeX 渲染放到 DOM 提交之后，并使用时间切片避免长任务卡死（见 renderKatexPlaceholders）。
     // 任务列表映射与事件绑定（仅阅读模式）
     try {
@@ -3969,8 +4042,12 @@ async function renderPreview(opts?: RenderPreviewOptions) {
   mdHost.querySelectorAll('a[href]').forEach((a) => {
     const el = a as HTMLAnchorElement
     const href = el.getAttribute('href') || ''
-    // 脚注/反向脚注链接：保持为页内跳转，不改 target
-    if (href.startsWith('#fn') || href.startsWith('#fnref')) return
+    // 页内锚点链接：保持在当前预览中滚动，不打开新窗口。
+    if (isPreviewHashLink(href)) {
+      el.removeAttribute('target')
+      el.removeAttribute('rel')
+      return
+    }
     if (resolvePreviewLocalDocPath(href)) {
       el.removeAttribute('target')
       el.removeAttribute('rel')
@@ -5668,7 +5745,6 @@ function renderOutlinePanel() {
     const heads = ctx.heads
     // level: 标题级别；id: DOM 锚点或逻辑标识；text: 显示文本；offset: 源码中的大致字符偏移（仅源码模式下用于跳转）
     const items: { level: number; id: string; text: string; offset?: number }[] = []
-    const slug = (s: string) => s.toLowerCase().trim().replace(/[^a-z0-9\u4e00-\u9fa5\s-]/gi,'').replace(/\s+/g,'-').slice(0,64) || ('toc-' + Math.random().toString(36).slice(2))
     const useDomHeads = (wysiwyg || mode === 'preview') && heads.length > 0
     if (useDomHeads) {
       heads.forEach((h, idx) => {
@@ -5676,7 +5752,7 @@ function renderOutlinePanel() {
         const level = Math.min(6, Math.max(1, Number(tag.replace('H','')) || 1))
         let id = h.getAttribute('id') || ''
         const text = (h.textContent || '').trim() || ('标题 ' + (idx+1))
-        if (!id) { id = slug(text + '-' + idx); try { h.setAttribute('id', id) } catch {} }
+        if (!id) { id = makePreviewHeadingId(text, idx); try { h.setAttribute('id', id) } catch {} }
         items.push({ level, id, text })
       })
     } else {
@@ -5700,7 +5776,7 @@ function renderOutlinePanel() {
         if (m) {
           const level = m[1].length
           const text = m[2].trim()
-          const id = slug(text + '-' + i)
+          const id = makePreviewHeadingId(text, i)
           // 记录标题在源码中的大致字符偏移，用于源码模式下跳转
           items.push({ level, id, text, offset: lineStarts?.[i] ?? offset })
         }
