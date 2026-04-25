@@ -2,6 +2,10 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v1.3.8
+- Fixed: Table-of-contents anchor jumps in article Preview now land on the matching heading reliably, avoiding no-op clicks or inaccurate scroll positions
+- Improved: Source mode long-document performance has been tightened again, reducing repeated work during scrolling, selection changes, line-number refreshes, and IME patch fallback paths on very large files
+
 ## Update v1.3.7
 - Improved: Long-document performance in Source mode has been tightened again. High-frequency paths such as status-bar row/column calculation, title refresh, and source-outline scanning now reuse cached data, making typing and UI updates steadier on large files
 - Improved: Source line numbers now measure and render incrementally for the visible range instead of rebuilding the full gutter on every scroll, click, or selection change, which is much friendlier to very large documents
