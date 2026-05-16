@@ -102,6 +102,33 @@ export const uploader: Uploader = async (files, schema) => {
 
   for (const img of images) {
     console.log('[Paste] 处理图片:', img.name, 'size:', img.size, 'type:', img.type)
+    try {
+      const resolver = (window as any).flymdResolveImageTarget
+      if (typeof resolver === 'function') {
+        const target = await resolver(
+          img,
+          img.name || 'image',
+          img.type || 'application/octet-stream',
+          { preferRelative: true },
+        )
+        const finalUrl = target?.url ? String(target.url) : ''
+        if (finalUrl) {
+          const n = schema.nodes.image.createAndFill({ src: finalUrl, alt: img.name }) as ProseNode
+          if (n) {
+            console.log('[Paste] 使用宿主图片策略创建节点成功, src:', finalUrl)
+            nodes.push(n)
+            continue
+          }
+        }
+        notifyPasteError('粘贴图片失败：无法上传且本地保存失败（已禁用 base64 兜底）')
+        continue
+      }
+    } catch (e) {
+      console.error('[Paste] 宿主图片策略失败:', e)
+      notifyPasteError('粘贴图片失败：无法上传且本地保存失败（已禁用 base64 兜底）')
+      continue
+    }
+
     let localPath: string | null = null
     let cloudUrl: string | null = null
 

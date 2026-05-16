@@ -2,12 +2,11 @@
 // 只关心占位符替换与本地/图床/兜底策略，不直接依赖 DOM 全局
 
 import type { AnyUploaderConfig } from '../uploader/types'
-import { uploadImageToCloud } from '../uploader/upload'
-import { toDocRelativeImagePathIfInImages } from '../utils/localImageSrcResolve'
+import { resolveImageTarget, type ImageTargetDeps } from './imageTarget'
 
 export type EditorMode = 'edit' | 'preview'
 
-export interface ImageUploadDeps {
+export interface ImageUploadDeps extends ImageTargetDeps {
   // 编辑器内容读写
   getEditorValue(): string
   setEditorValue(v: string): void
@@ -76,79 +75,6 @@ function replaceUploadingPlaceholder(
   }
 }
 
-async function saveBlobLocallyWithPrefs(
-  deps: ImageUploadDeps,
-  blob: Blob,
-  fname: string
-): Promise<string | null> {
-  const { saveLocalAsWebp, webpQuality } = await deps.getTranscodePrefs()
-  let blobForSave: Blob = blob
-  let nameForSave: string = fname
-  try {
-    if (saveLocalAsWebp) {
-      const r = await deps.transcodeToWebpIfNeeded(blob, fname, webpQuality, { skipAnimated: true })
-      blobForSave = r.blob
-      nameForSave = r.fileName
-    }
-  } catch {}
-
-  const currentFilePath = deps.getCurrentFilePath()
-
-  // 1a. 当前文档同目录 images/
-  if (deps.isTauriRuntime() && currentFilePath) {
-    try {
-      const base = currentFilePath.replace(/[\\/][^\\/]*$/, '')
-      const sep = base.includes('\\') ? '\\' : '/'
-      const imgDir = base + sep + 'images'
-      await deps.ensureDir(imgDir)
-      const dst = imgDir + sep + nameForSave
-      const buf = new Uint8Array(await blobForSave.arrayBuffer())
-      await deps.writeBinaryFile(dst, buf)
-      return dst
-    } catch {
-      // ignore, 继续尝试其他目录
-    }
-  }
-
-  // 1b. 未保存的文档：默认粘贴目录
-  if (deps.isTauriRuntime() && !currentFilePath) {
-    try {
-      const dir = await deps.getDefaultPasteDir()
-      if (dir) {
-        const baseDir = dir.replace(/[\\/]+$/, '')
-        const sep = baseDir.includes('\\') ? '\\' : '/'
-        const dst = baseDir + sep + nameForSave
-        const buf = new Uint8Array(await blobForSave.arrayBuffer())
-        await deps.ensureDir(baseDir)
-        await deps.writeBinaryFile(dst, buf)
-        return dst
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  // 1c. 兜底：用户图片目录
-  if (deps.isTauriRuntime() && !currentFilePath) {
-    try {
-      const pic = await deps.getUserPicturesDir()
-      if (pic) {
-        const baseDir = pic.replace(/[\\/]+$/, '')
-        const sep = baseDir.includes('\\') ? '\\' : '/'
-        const dst = baseDir + sep + nameForSave
-        const buf = new Uint8Array(await blobForSave.arrayBuffer())
-        await deps.ensureDir(baseDir)
-        await deps.writeBinaryFile(dst, buf)
-        return dst
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  return null
-}
-
 export function createImageUploader(deps: ImageUploadDeps) {
   async function handleUploadCore(fileOrBlob: File | Blob, fname: string, mime?: string) {
     const id = genUploadId()
@@ -156,72 +82,11 @@ export function createImageUploader(deps: ImageUploadDeps) {
 
     void (async () => {
       try {
-        const alwaysLocal = await deps.getAlwaysSaveLocalImages()
-        const upCfg = await deps.getUploaderConfig()
-        const uploaderEnabled = !!(upCfg && (upCfg as any).enabled)
-
-        let localPath: string | null = null
-        let cloudUrl: string | null = null
-
-        // ===== 步骤 1: 本地保存（如果需要）=====
-        if (!uploaderEnabled || alwaysLocal) {
-          localPath = await saveBlobLocallyWithPrefs(deps, fileOrBlob, fname)
-        }
-
-        // ===== 步骤 2: 图床上传（如果启用）=====
-        if (!localPath && uploaderEnabled && upCfg) {
-          try {
-            let blob2: Blob = fileOrBlob
-            let name2: string = fname
-            let mime2: string = mime || (fileOrBlob as any).type || 'application/octet-stream'
-            try {
-              if ((upCfg as any).convertToWebp) {
-                const r = await deps.transcodeToWebpIfNeeded(
-                  fileOrBlob,
-                  fname,
-                  (upCfg as any).webpQuality ?? 0.85,
-                  { skipAnimated: true }
-                )
-                blob2 = r.blob
-                name2 = r.fileName
-                mime2 = r.type || 'image/webp'
-              }
-            } catch {}
-
-            const res = await uploadImageToCloud(blob2, name2, mime2, upCfg)
-            cloudUrl = res.publicUrl
-          } catch {
-            // 上传失败继续后续兜底
-          }
-        }
-
-        // ===== 步骤 2b: 上传失败则强制本地保存（禁止 base64 兜底）=====
-        if (!localPath && !cloudUrl && uploaderEnabled && !alwaysLocal) {
-          localPath = await saveBlobLocallyWithPrefs(deps, fileOrBlob, fname)
-        }
-
-        // ===== 步骤 3: 决定最终 URL =====
-        if (localPath) {
-          let mdUrl: string = localPath
-          try {
-            const preferRel = await deps.getPreferRelativeLocalImages()
-            if (preferRel) {
-              const rel = toDocRelativeImagePathIfInImages(localPath, deps.getCurrentFilePath())
-              if (rel) mdUrl = rel
-            }
-          } catch {}
-          if (mdUrl === localPath) {
-            const needAngle =
-              /[\s()]/.test(localPath) ||
-              /^[a-zA-Z]:/.test(localPath) ||
-              /\\/.test(localPath)
-            mdUrl = needAngle ? `<${localPath}>` : localPath
-          }
-          replaceUploadingPlaceholder(deps, id, `![${fname}](${mdUrl})`)
-          return
-        }
-        if (cloudUrl) {
-          replaceUploadingPlaceholder(deps, id, `![${fname}](${cloudUrl})`)
+        const target = await resolveImageTarget(deps, fileOrBlob, fname, mime, {
+          preferRelative: true,
+        })
+        if (target?.url) {
+          replaceUploadingPlaceholder(deps, id, `![${fname}](${target.url})`)
           return
         }
       } catch {

@@ -14,6 +14,7 @@ import { homeDir, desktopDir, join } from '@tauri-apps/api/path'
 import { invoke } from '@tauri-apps/api/core'
 import { t } from './i18n'
 import { getPasteUrlTitleFetchEnabled, setPasteUrlTitleFetchEnabled } from './core/pasteUrlTitle'
+import { getPasteRemoteImagesEnabled, setPasteRemoteImagesEnabled } from './core/pasteRemoteImages'
 import { getContentFontSize, setContentFontSize } from './core/uiZoom'
 export type MdStyleId = 'standard' | 'github' | 'notion' | 'journal' | 'card' | 'docs' | 'typora' | 'obsidian' | 'bear' | 'minimalist'
 
@@ -671,6 +672,13 @@ function createPanel(): HTMLDivElement {
           <span class="theme-toggle-text">${t('theme.pasteUrlTitleFetch')}</span>
           <div class="theme-toggle-switch">
             <input type="checkbox" id="paste-url-title-toggle" class="theme-toggle-input" />
+            <span class="theme-toggle-slider"></span>
+          </div>
+        </label>
+        <label class="theme-toggle-label theme-toggle-third theme-toggle-boxed" for="paste-remote-images-toggle" title="${t('theme.pasteRemoteImages.tip')}">
+          <span class="theme-toggle-text">${t('theme.pasteRemoteImages')}</span>
+          <div class="theme-toggle-switch">
+            <input type="checkbox" id="paste-remote-images-toggle" class="theme-toggle-input" />
             <span class="theme-toggle-slider"></span>
           </div>
         </label>
@@ -1557,6 +1565,7 @@ function ensureThemePanelReady(): HTMLDivElement | null {
     const sourceLineNumbersToggle = panel.querySelector('#source-line-numbers-toggle') as HTMLInputElement | null
     const wysiwygHtmlTableToggle = panel.querySelector('#wysiwyg-html-table-toggle') as HTMLInputElement | null
     const pasteUrlTitleToggle = panel.querySelector('#paste-url-title-toggle') as HTMLInputElement | null
+    const pasteRemoteImagesToggle = panel.querySelector('#paste-remote-images-toggle') as HTMLInputElement | null
 
     const WYSIWYG_DEFAULT_KEY = 'flymd:wysiwyg:default'
     const SOURCEMODE_DEFAULT_KEY = 'flymd:sourcemode:default'
@@ -1672,6 +1681,14 @@ function ensureThemePanelReady(): HTMLDivElement | null {
       pasteUrlTitleToggle.checked = getPasteUrlTitleFetchEnabled()
       pasteUrlTitleToggle.addEventListener('change', () => {
         setPasteUrlTitleFetchEnabled(pasteUrlTitleToggle.checked)
+      })
+    }
+
+    // 网页富文本粘贴：自动下载远程图片到当前文档 images/ 并使用相对路径
+    if (pasteRemoteImagesToggle) {
+      pasteRemoteImagesToggle.checked = getPasteRemoteImagesEnabled()
+      pasteRemoteImagesToggle.addEventListener('change', () => {
+        setPasteRemoteImagesEnabled(pasteRemoteImagesToggle.checked)
       })
     }
 

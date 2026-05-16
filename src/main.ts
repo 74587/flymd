@@ -11,6 +11,7 @@ import './mobile.css'  // 移动端样式
 import { initThemeUI, applySavedTheme, updateChromeColorsForMode } from './theme'
 import { t, fmtStatus, getLocalePref, setLocalePref, getLocale, tLocale } from './i18n'
 import { getPasteUrlTitleFetchEnabled } from './core/pasteUrlTitle'
+import { getPasteRemoteImagesEnabled } from './core/pasteRemoteImages'
 // KaTeX 样式改为按需动态加载（首次检测到公式时再加载）
 // markdown-it 和 DOMPurify 改为按需动态 import，类型仅在编译期引用
 import type MarkdownIt from 'markdown-it'
@@ -66,6 +67,8 @@ import { initAsrNoteFeature } from './extensions/asrNote'
 // 平台适配层（Android 支持）
 import { initPlatformIntegration, mobileSaveFile, isMobilePlatform } from './platform-integration'
 import { createImageUploader } from './core/imageUpload'
+import { resolveImageTarget } from './core/imageTarget'
+import { hasDownloadableMarkdownImages, rewriteHtmlImagesByDownload, rewriteMarkdownImagesByDownload } from './core/htmlPasteImages'
 import { createPluginMarket, compareInstallableItems, FALLBACK_INSTALLABLES } from './extensions/market'
 import type { InstallableItem } from './extensions/market'
 import { listDirOnce } from './core/libraryFs'
@@ -4402,6 +4405,7 @@ const _imageUploader = createImageUploader({
   getPreferRelativeLocalImages: () => getPreferRelativeLocalImages(),
   getUploaderConfig: () => getUploaderConfig(),
   getTranscodePrefs: () => getTranscodePrefs(),
+  exists: async (p: string) => !!(await exists(p as any)),
   writeBinaryFile: async (path: string, bytes: Uint8Array) => { await writeFile(path as any, bytes as any) },
   fileToDataUrl: (f: File) => fileToDataUrl(f),
   transcodeToWebpIfNeeded: (blob, fname, quality, opts) => transcodeToWebpIfNeeded(blob, fname, quality, opts),
@@ -6239,6 +6243,65 @@ try {
     ;(window as any).flymdAlwaysSaveLocalImages = () => getAlwaysSaveLocalImages()
     ;(window as any).flymdPreferRelativeLocalImages = () => getPreferRelativeLocalImages()
     ;(window as any).flymdSaveImageToLocalAndGetPath = (file: File, name: string, force?: boolean) => saveImageToLocalAndGetPath(file, name, force)
+    ;(window as any).flymdResolveImageTarget = (blob: Blob, name: string, mime?: string, opts?: any) => resolveImageTarget(
+      {
+        getCurrentFilePath: () => currentFilePath,
+        isTauriRuntime: () => isTauriRuntime(),
+        ensureDir: async (dir: string) => { try { await ensureDir(dir) } catch {} },
+        exists: async (p: string) => !!(await exists(p as any)),
+        getDefaultPasteDir: () => getDefaultPasteDir(),
+        getUserPicturesDir: () => getUserPicturesDir(),
+        getAlwaysSaveLocalImages: () => getAlwaysSaveLocalImages(),
+        getUploaderConfig: () => getUploaderConfig(),
+        getTranscodePrefs: () => getTranscodePrefs(),
+        writeBinaryFile: async (path: string, bytes: Uint8Array) => { await writeFile(path as any, bytes as any) },
+        transcodeToWebpIfNeeded: (b, fname, quality, o) => transcodeToWebpIfNeeded(b, fname, quality, o),
+      },
+      blob,
+      name,
+      mime,
+      { forceLocal: !!opts?.forceLocal, preferRelative: true },
+    )
+    ;(window as any).flymdRewriteHtmlImages = (html: string, opts?: any) => rewriteHtmlImagesByDownload(
+      {
+        getCurrentFilePath: () => currentFilePath,
+        isTauriRuntime: () => isTauriRuntime(),
+        ensureDir: async (dir: string) => { try { await ensureDir(dir) } catch {} },
+        exists: async (p: string) => !!(await exists(p as any)),
+        getDefaultPasteDir: () => getDefaultPasteDir(),
+        getUserPicturesDir: () => getUserPicturesDir(),
+        getAlwaysSaveLocalImages: async () => true,
+        getUploaderConfig: async () => null,
+        getTranscodePrefs: () => getTranscodePrefs(),
+        writeBinaryFile: async (path: string, bytes: Uint8Array) => { await writeFile(path as any, bytes as any) },
+        transcodeToWebpIfNeeded: (b, fname, quality, o) => transcodeToWebpIfNeeded(b, fname, quality, o),
+      },
+      html,
+      {
+        ...(opts || {}),
+        forceLocal: true,
+      },
+    )
+    ;(window as any).flymdRewriteMarkdownImages = (markdown: string, opts?: any) => rewriteMarkdownImagesByDownload(
+      {
+        getCurrentFilePath: () => currentFilePath,
+        isTauriRuntime: () => isTauriRuntime(),
+        ensureDir: async (dir: string) => { try { await ensureDir(dir) } catch {} },
+        exists: async (p: string) => !!(await exists(p as any)),
+        getDefaultPasteDir: () => getDefaultPasteDir(),
+        getUserPicturesDir: () => getUserPicturesDir(),
+        getAlwaysSaveLocalImages: async () => true,
+        getUploaderConfig: async () => null,
+        getTranscodePrefs: () => getTranscodePrefs(),
+        writeBinaryFile: async (path: string, bytes: Uint8Array) => { await writeFile(path as any, bytes as any) },
+        transcodeToWebpIfNeeded: (b, fname, quality, o) => transcodeToWebpIfNeeded(b, fname, quality, o),
+      },
+      markdown,
+      {
+        ...(opts || {}),
+        forceLocal: true,
+      },
+    )
   }
 } catch {}
 
@@ -10056,6 +10119,45 @@ function bindEvents() {
               safe = sanitizeHtml!(html)
             } catch {}
 
+            // 网页富文本粘贴：远程/data 图片下载到当前文档 images/，并写成相对路径
+            if (getPasteRemoteImagesEnabled()) {
+              let noticeId = ''
+              try {
+                const r = await rewriteHtmlImagesByDownload(
+                  {
+                    getCurrentFilePath: () => currentFilePath,
+                    isTauriRuntime: () => isTauriRuntime(),
+                    ensureDir: async (dir: string) => { try { await ensureDir(dir) } catch {} },
+                    exists: async (p: string) => !!(await exists(p as any)),
+                    getDefaultPasteDir: () => getDefaultPasteDir(),
+                    getUserPicturesDir: () => getUserPicturesDir(),
+                    getAlwaysSaveLocalImages: async () => true,
+                    getUploaderConfig: async () => null,
+                    getTranscodePrefs: () => getTranscodePrefs(),
+                    writeBinaryFile: async (path: string, bytes: Uint8Array) => { await writeFile(path as any, bytes as any) },
+                    transcodeToWebpIfNeeded: (blob, fname, quality, opts) => transcodeToWebpIfNeeded(blob, fname, quality, opts),
+                  },
+                  safe,
+                  {
+                    baseUrl,
+                    forceLocal: true,
+                    onProgress: (done, total) => {
+                      if (!total) return
+                      try {
+                        if (!noticeId) noticeId = NotificationManager.show('extension', `正在下载图片 0/${total}`, 0)
+                        NotificationManager.updateMessage(noticeId, `正在下载图片 ${Math.min(done, total)}/${total}`)
+                      } catch {}
+                    },
+                  },
+                )
+                safe = r.html
+              } catch {
+                // 图片本地化失败不能吞掉正文粘贴
+              } finally {
+                try { if (noticeId) NotificationManager.hide(noticeId) } catch {}
+              }
+            }
+
             // 转成 Markdown 文本（动态导入）
             let mdText = ''
             try {
@@ -10075,6 +10177,50 @@ function bindEvents() {
           }
         }
       } catch {}
+
+      // 1a) 处理纯 Markdown 图片语法：![alt](https://...)
+      // 这类粘贴没有 text/html，不能走上面的 HTML 图片重写分支。
+      if (getPasteRemoteImagesEnabled() && plainText && hasDownloadableMarkdownImages(plainText)) {
+        e.preventDefault()
+        let noticeId = ''
+        try {
+          const r = await rewriteMarkdownImagesByDownload(
+            {
+              getCurrentFilePath: () => currentFilePath,
+              isTauriRuntime: () => isTauriRuntime(),
+              ensureDir: async (dir: string) => { try { await ensureDir(dir) } catch {} },
+              exists: async (p: string) => !!(await exists(p as any)),
+              getDefaultPasteDir: () => getDefaultPasteDir(),
+              getUserPicturesDir: () => getUserPicturesDir(),
+              getAlwaysSaveLocalImages: async () => true,
+              getUploaderConfig: async () => null,
+              getTranscodePrefs: () => getTranscodePrefs(),
+              writeBinaryFile: async (path: string, bytes: Uint8Array) => { await writeFile(path as any, bytes as any) },
+              transcodeToWebpIfNeeded: (blob, fname, quality, opts) => transcodeToWebpIfNeeded(blob, fname, quality, opts),
+            },
+            plainText,
+            {
+              forceLocal: true,
+              onProgress: (done, total) => {
+                if (!total) return
+                try {
+                  if (!noticeId) noticeId = NotificationManager.show('extension', `正在下载图片 0/${total}`, 0)
+                  NotificationManager.updateMessage(noticeId, `正在下载图片 ${Math.min(done, total)}/${total}`)
+                } catch {}
+              },
+            },
+          )
+          insertAtCursor(r.markdown || plainText)
+          if (mode === 'preview') await renderPreview(); else if (wysiwyg) scheduleWysiwygRender()
+          return
+        } catch {
+          insertAtCursor(plainText)
+          if (mode === 'preview') await renderPreview(); else if (wysiwyg) scheduleWysiwygRender()
+          return
+        } finally {
+          try { if (noticeId) NotificationManager.hide(noticeId) } catch {}
+        }
+      }
 
       // 1b) Ctrl+V 且仅有单个 URL：插入占位提示 [正在抓取title]，异步抓取网页标题后替换为 [标题](url)
       if (pasteCombo === 'normal' && urlTitleFetchEnabled) {

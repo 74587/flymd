@@ -2,8 +2,9 @@
 // 暴露 enable/disable 与 setMarkdown/getMarkdown 能力，供主流程挂接
 
 import { history } from '@milkdown/plugin-history'
-import { Editor, rootCtx, defaultValueCtx, editorViewOptionsCtx, editorViewCtx, commandsCtx, remarkStringifyOptionsCtx } from '@milkdown/core'
+import { Editor, rootCtx, defaultValueCtx, editorViewOptionsCtx, editorViewCtx, commandsCtx, remarkStringifyOptionsCtx, parserCtx } from '@milkdown/core'
 import { TextSelection, type Command } from '@milkdown/prose/state'
+import { DOMParser as ProseDOMParser } from '@milkdown/prose/model'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { readFile } from '@tauri-apps/plugin-fs'
 // 用于外部（main.ts）在所见模式下插入 Markdown（文件拖放时复用普通模式逻辑）
@@ -16,6 +17,8 @@ import { upload, uploadConfig } from '@milkdown/plugin-upload'
 import { uploader } from './plugins/paste'
 import { protectExcelDollarRefs, unprotectExcelDollarRefs } from '../../utils/excelFormula'
 import { getPasteUrlTitleFetchEnabled } from '../../core/pasteUrlTitle'
+import { getPasteRemoteImagesEnabled } from '../../core/pasteRemoteImages'
+import { hasDownloadableMarkdownImages } from '../../core/htmlPasteImages'
 import { guessSyncedDocImageAbsPath } from '../../utils/localImagePath'
 import { resolveLocalImageAbsPathFromSrc } from '../../utils/localImageSrcResolve'
 import { normalizeTabIndentText } from '../../utils/tabIndent'
@@ -199,6 +202,68 @@ function fromFileUri(u: string): string | null {
 }
 function isTauriRuntime(): boolean {
   try { return typeof (window as any).__TAURI__ !== 'undefined' } catch { return false }
+}
+
+function extractBaseUrlFromHtml(html: string): string | undefined {
+  try {
+    const m = String(html || '').match(/<base\s+href=["']([^"']+)["']/i)
+    return m && m[1] ? m[1] : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function hasDownloadableHtmlImages(html: string, baseUrl?: string): boolean {
+  try {
+    if (!/<img\b/i.test(html || '')) return false
+    const template = document.createElement('template')
+    template.innerHTML = html
+    const imgs = Array.from(template.content.querySelectorAll('img[src]')) as HTMLImageElement[]
+    for (const img of imgs) {
+      const raw = String(img.getAttribute('src') || '').trim()
+      if (/^(data:image\/|https?:\/\/)/i.test(raw)) return true
+      if (baseUrl) {
+        try {
+          const u = new URL(raw, baseUrl)
+          if (/^https?:$/i.test(u.protocol)) return true
+        } catch {}
+      }
+    }
+  } catch {}
+  return false
+}
+
+function insertHtmlAtSelection(view: any, html: string): boolean {
+  try {
+    const template = document.createElement('template')
+    template.innerHTML = html
+    const slice = ProseDOMParser.fromSchema(view.state.schema).parseSlice(template.content.cloneNode(true) as any)
+    view.dispatch(view.state.tr.replaceSelection(slice).scrollIntoView())
+    return true
+  } catch {
+    return false
+  }
+}
+
+function insertMarkdownAtSelection(markdown: string): boolean {
+  try {
+    let inserted = false
+    _editor?.action((ctx) => {
+      const view = ctx.get(editorViewCtx)
+      const parser = ctx.get(parserCtx)
+      const slice = parser(String(markdown || ''))
+      if (!slice || typeof slice === 'string') {
+        view.dispatch(view.state.tr.insertText(String(markdown || '')).scrollIntoView())
+        inserted = true
+        return
+      }
+      view.dispatch(view.state.tr.replaceSelection(slice as any).scrollIntoView())
+      inserted = true
+    })
+    return inserted
+  } catch {
+    return false
+  }
 }
 
 function rewriteLocalImagesToAsset() {
@@ -468,6 +533,99 @@ export async function enableWysiwygV2(root: HTMLElement, initialMd: string, onCh
             if (pasteCombo === 'normal' && getPasteUrlTitleFetchEnabled() && plainTrim && /^https?:\/\/[^\s]+$/i.test(plainTrim)) {
               ev.preventDefault()
               void handleWysiwygPasteUrl(plainTrim)
+              return
+            }
+
+            const html = dt.getData('text/html') || ''
+            const baseUrl = extractBaseUrlFromHtml(html)
+            if (pasteCombo !== 'plain' && getPasteRemoteImagesEnabled() && plainText && hasDownloadableMarkdownImages(plainText, baseUrl)) {
+              ev.preventDefault()
+              try { ev.stopPropagation() } catch {}
+              try { (ev as any).stopImmediatePropagation?.() } catch {}
+              void (async () => {
+                let noticeId = ''
+                try {
+                  const rewriter = (window as any).flymdRewriteMarkdownImages
+                  const rewritten = typeof rewriter === 'function'
+                    ? await rewriter(plainText, {
+                        baseUrl,
+                        forceLocal: true,
+                        onProgress: (done: number, total: number) => {
+                          if (!total) return
+                          try {
+                            const nm = (window as any).NotificationManager
+                            if (!noticeId && nm?.show) noticeId = nm.show('extension', `正在下载图片 0/${total}`, 0)
+                            if (noticeId && nm?.updateMessage) nm.updateMessage(noticeId, `正在下载图片 ${Math.min(done, total)}/${total}`)
+                          } catch {}
+                        },
+                      })
+                    : { markdown: plainText }
+                  const text = String(rewritten?.markdown || plainText)
+                  if (!insertMarkdownAtSelection(text)) {
+                    const view = _getView()
+                    if (view) view.dispatch(view.state.tr.insertText(text).scrollIntoView())
+                  }
+                } catch {
+                  try {
+                    const view = _getView()
+                    if (view) view.dispatch(view.state.tr.insertText(plainText).scrollIntoView())
+                  } catch {}
+                } finally {
+                  try {
+                    const nm = (window as any).NotificationManager
+                    if (noticeId && nm?.hide) nm.hide(noticeId)
+                  } catch {}
+                }
+              })()
+              return
+            }
+
+            if (pasteCombo !== 'plain' && getPasteRemoteImagesEnabled() && html && hasDownloadableHtmlImages(html, baseUrl)) {
+              ev.preventDefault()
+              try { ev.stopPropagation() } catch {}
+              try { (ev as any).stopImmediatePropagation?.() } catch {}
+              void (async () => {
+                let noticeId = ''
+                try {
+                  let safe = html
+                  try {
+                    const mod: any = await import('dompurify')
+                    const DOMPurify = mod?.default || mod
+                    safe = DOMPurify.sanitize(html)
+                  } catch {}
+                  const rewriter = (window as any).flymdRewriteHtmlImages
+                  const rewritten = typeof rewriter === 'function'
+                    ? await rewriter(safe, {
+                        baseUrl,
+                        forceLocal: true,
+                        onProgress: (done: number, total: number) => {
+                          if (!total) return
+                          try {
+                            const nm = (window as any).NotificationManager
+                            if (!noticeId && nm?.show) noticeId = nm.show('extension', `正在下载图片 0/${total}`, 0)
+                            if (noticeId && nm?.updateMessage) nm.updateMessage(noticeId, `正在下载图片 ${Math.min(done, total)}/${total}`)
+                          } catch {}
+                        },
+                      })
+                    : { html: safe }
+                  const view = _getView()
+                  if (!view) return
+                  const ok = insertHtmlAtSelection(view, String(rewritten?.html || safe))
+                  if (!ok && plainText) {
+                    view.dispatch(view.state.tr.insertText(plainText).scrollIntoView())
+                  }
+                } catch {
+                  try {
+                    const view = _getView()
+                    if (view && plainText) view.dispatch(view.state.tr.insertText(plainText).scrollIntoView())
+                  } catch {}
+                } finally {
+                  try {
+                    const nm = (window as any).NotificationManager
+                    if (noticeId && nm?.hide) nm.hide(noticeId)
+                  } catch {}
+                }
+              })()
             }
           } catch {}
         }, true)
