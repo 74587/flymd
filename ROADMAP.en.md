@@ -2,6 +2,10 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v1.3.9
+- Added: Pasting remote images from web rich text or Markdown can now download them into the current document's `images/` folder and rewrite links to relative paths, reducing broken hotlinks and offline failures
+- Improved: Source mode and WYSIWYG now share the same image-localization path, with a Theme Settings toggle to control remote-image localization
+
 ## Update v1.3.8
 - Fixed: Table-of-contents anchor jumps in article Preview now land on the matching heading reliably, avoiding no-op clicks or inaccurate scroll positions
 - Improved: Source mode long-document performance has been tightened again, reducing repeated work during scrolling, selection changes, line-number refreshes, and IME patch fallback paths on very large files
