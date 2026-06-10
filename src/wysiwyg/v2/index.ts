@@ -11,7 +11,7 @@ import { readFile } from '@tauri-apps/plugin-fs'
 import { replaceAll, getMarkdown } from '@milkdown/utils'
 import { commonmark } from '@milkdown/preset-commonmark'
 import { gfm } from '@milkdown/preset-gfm'
-import { automd } from '@milkdown/plugin-automd'
+import { automd, inlineSyncConfig } from '@milkdown/plugin-automd'
 import { listener, listenerCtx } from '@milkdown/plugin-listener'
 import { upload, uploadConfig } from '@milkdown/plugin-upload'
 import { uploader } from './plugins/paste'
@@ -59,6 +59,82 @@ let _codeCopyResizeObserver: ResizeObserver | null = null
 let _codeCopyWindowResizeHandler: (() => void) | null = null
 let _inlineCodeMouseTimer: number | null = null
 let _rootMouseDownHandler: ((ev: MouseEvent) => void) | null = null
+
+function hasDollarText(node: any): boolean {
+  try { return String(node?.textContent || '').includes('$') } catch { return false }
+}
+
+function shouldSkipAutomdForDollar(payload: any): boolean {
+  try {
+    return hasDollarText(payload?.prevNode) ||
+      hasDollarText(payload?.nextNode) ||
+      String(payload?.text || '').includes('$')
+  } catch {
+    return false
+  }
+}
+
+function isEscapedDollarSlash(text: string, slashIndex: number): boolean {
+  if (text[slashIndex] !== '\\' || text[slashIndex + 1] !== '$') return false
+  let count = 0
+  for (let i = slashIndex; i >= 0 && text[i] === '\\'; i--) count++
+  return (count & 1) === 1
+}
+
+function isEscapedDollar(text: string, dollarIndex: number): boolean {
+  if (text[dollarIndex] !== '$') return false
+  return dollarIndex > 0 && isEscapedDollarSlash(text, dollarIndex - 1)
+}
+
+function dollarContext(text: string, beforeEnd: number, afterStart: number): { before: string, after: string } {
+  const size = 16
+  const normalize = (s: string) => s.replace(/\\(?=\$)/g, '')
+  return {
+    before: normalize(text.slice(Math.max(0, beforeEnd - size), beforeEnd)),
+    after: normalize(text.slice(afterStart, afterStart + size)),
+  }
+}
+
+function contextMatchesEscapedDollar(
+  token: { before: string, after: string },
+  current: { before: string, after: string }
+): boolean {
+  const beforeOk = token.before.length >= 4 && token.before === current.before
+  const afterOk = token.after.length >= 4 && token.after === current.after
+  const shortOk = token.before === current.before && token.after === current.after
+  return beforeOk || afterOk || shortOk
+}
+
+function restoreEscapedDollars(previousMd: string, nextMd: string): string {
+  const prev = String(previousMd || '')
+  const next = String(nextMd || '')
+  if (!prev.includes('\\$') || !next.includes('$')) return next
+
+  const tokens: Array<{ before: string, after: string, used: boolean }> = []
+  for (let i = 0; i < prev.length - 1; i++) {
+    if (!isEscapedDollarSlash(prev, i)) continue
+    tokens.push({ ...dollarContext(prev, i, i + 2), used: false })
+    i++
+  }
+  if (tokens.length < 1) return next
+
+  let out = ''
+  for (let i = 0; i < next.length; i++) {
+    if (next[i] !== '$' || isEscapedDollar(next, i)) {
+      out += next[i]
+      continue
+    }
+    const current = dollarContext(next, i, i + 1)
+    const token = tokens.find((item) => !item.used && contextMatchesEscapedDollar(item, current))
+    if (token) {
+      token.used = true
+      out += '\\$'
+    } else {
+      out += '$'
+    }
+  }
+  return out
+}
 
 async function applyHtmlTableToGfmIfEnabled(): Promise<void> {
   if (!_editor) return
@@ -415,12 +491,12 @@ export async function enableWysiwygV2(root: HTMLElement, initialMd: string, onCh
   _root = root
   _onChange = onChange
   _suppressInitialUpdate = true
-  _lastMd = contentForEditor
+  _lastMd = content
 
   const editor = await Editor.make()
     .config((ctx) => {
       ctx.set(rootCtx, root)
-      ctx.set(defaultValueCtx, _lastMd)
+      ctx.set(defaultValueCtx, contentForEditor)
       // 配置编辑器视图选项，确保可编辑
       ctx.set(editorViewOptionsCtx, { editable: () => true })
       // 配置上传：接入现有图床上传逻辑，同时允许从 HTML 粘贴的文件触发上传
@@ -437,6 +513,20 @@ export async function enableWysiwygV2(root: HTMLElement, initialMd: string, onCh
           ...prev,
           bullet: '-',
         } as any))
+      } catch {}
+      try {
+        ctx.update(inlineSyncConfig.key, (prev: any) => {
+          const shouldSyncNode = typeof prev?.shouldSyncNode === 'function'
+            ? prev.shouldSyncNode
+            : null
+          return {
+            ...prev,
+            shouldSyncNode: (payload: any) => {
+              if (shouldSkipAutomdForDollar(payload)) return false
+              return shouldSyncNode ? shouldSyncNode(payload) : false
+            },
+          }
+        })
       } catch {}
     })
     .use(commonmark)
@@ -686,7 +776,7 @@ export async function enableWysiwygV2(root: HTMLElement, initialMd: string, onCh
           return s
         } catch { return md2 }
       })()
-      const md4 = normalizeTabIndentText(unprotectExcelDollarRefs(md3))
+      const md4 = normalizeTabIndentText(unprotectExcelDollarRefs(restoreEscapedDollars(_lastMd, md3)))
       _lastMd = md4
       try { _onChange?.(md4) } catch {}
       try { setTimeout(() => { try { rewriteLocalImagesToAsset() } catch {} }, 0) } catch {}
@@ -711,7 +801,7 @@ export async function disableWysiwygV2() {
     if (_editor) {
       try {
         const mdNow = await (_editor as any).action(getMarkdown())
-        _lastMd = normalizeTabIndentText(unprotectExcelDollarRefs(mdNow))
+        _lastMd = normalizeTabIndentText(unprotectExcelDollarRefs(restoreEscapedDollars(_lastMd, String(mdNow || ''))))
       } catch {}
     }
   } catch {}
@@ -745,6 +835,7 @@ export async function wysiwygV2ReplaceAll(markdown: string) {
     // 若 editorView 尚未就绪或已被销毁，直接跳过，避免 MilkdownError 冒泡
     try { ctx.get(editorViewCtx) } catch { return }
     const next0 = maybeConvertHtmlTableBlocksToGfm(String(markdown || ''))
+    _lastMd = normalizeTabIndentText(next0)
     const next = protectExcelDollarRefs(normalizeTabIndentText(next0))
     await _editor.action(replaceAll(next))
   } catch {}
