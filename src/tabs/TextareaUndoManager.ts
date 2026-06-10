@@ -12,6 +12,10 @@ interface EditRecord {
   selectionStart: number
   selectionEnd: number
   timestamp: number
+  inputType?: string
+  inputData?: string
+  groupStartedAt?: number
+  groupCount?: number
 }
 
 interface ManualUndoStack {
@@ -32,6 +36,12 @@ export class TextareaUndoManager {
   private isApplying = false
   // 标记：外部程序性更新（如切换标签、打开文件），不记录到撤销栈
   private suppressRecording = false
+
+  private getMaxStackSize(contentSize: number): number {
+    if (contentSize > 500_000) return 15
+    if (contentSize > 100_000) return 50
+    return 120
+  }
 
   /**
    * 初始化当前激活标签的撤销栈
@@ -56,7 +66,7 @@ export class TextareaUndoManager {
     let stack = this.stacks.get(tabId)
     const contentSize = textarea.value.length
     if (!stack) {
-      const maxSize = contentSize > 500_000 ? 15 : 30
+      const maxSize = this.getMaxStackSize(contentSize)
       stack = { undoStack: [], redoStack: [], maxSize }
       this.stacks.set(tabId, stack)
 
@@ -151,9 +161,9 @@ export class TextareaUndoManager {
    * 绑定 textarea 的输入/按键监听
    */
   private bindListeners(textarea: HTMLTextAreaElement): void {
-    this.inputHandler = () => {
+    this.inputHandler = (e: Event) => {
       if (this.isApplying || this.suppressRecording) return
-      this.recordEdit()
+      this.recordEdit(e)
     }
 
     this.keydownHandler = (e: KeyboardEvent) => {
@@ -169,16 +179,11 @@ export class TextareaUndoManager {
       const isMeta = e.metaKey
       const key = e.key.toLowerCase()
       if (key === 'z' && !e.shiftKey) {
-        // 只有在我们实际处理了撤销时才拦截快捷键
-        const handled = this.undo()
-        if (handled) {
-          e.preventDefault()
-        }
+        e.preventDefault()
+        this.undo()
       } else if (key === 'y' || (isMeta && key === 'z' && e.shiftKey)) {
-        const handled = this.redo()
-        if (handled) {
-          e.preventDefault()
-        }
+        e.preventDefault()
+        this.redo()
       }
     }
 
@@ -223,7 +228,7 @@ export class TextareaUndoManager {
     }
 
     const contentSize = content.length
-    const maxSize = contentSize > 500_000 ? 15 : 30
+    const maxSize = this.getMaxStackSize(contentSize)
 
     if (!stack) {
       stack = { undoStack: [record], redoStack: [], maxSize }
@@ -241,31 +246,37 @@ export class TextareaUndoManager {
    * 记录一次编辑快照
    * 使用时间窗口合并策略 + 栈深度限制控制内存占用
    */
-  private recordEdit(): void {
+  private recordEdit(event?: Event): void {
     if (!this.currentTabId || !this.textarea) return
 
     const stack = this.stacks.get(this.currentTabId)
     if (!stack) return
 
     const now = Date.now()
+    const inputEvent = (typeof InputEvent !== 'undefined' && event instanceof InputEvent)
+      ? event
+      : null
+    const inputType = inputEvent?.inputType || ''
+    const inputData = inputEvent?.data || ''
     const record: EditRecord = {
       content: this.textarea.value,
       selectionStart: this.textarea.selectionStart,
       selectionEnd: this.textarea.selectionEnd,
       timestamp: now,
+      inputType,
+      inputData,
+      groupStartedAt: now,
+      groupCount: 1,
     }
 
     const undoStack = stack.undoStack
     const last = undoStack[undoStack.length - 1]
 
-    const contentSize = record.content.length
-    const mergeWindow = contentSize > 500_000 ? 2000 : 800
-
-    if (last && now - last.timestamp < mergeWindow) {
-      // 合并：替换最后一条记录
+    if (last && this.shouldMergeEdit(last, record, now)) {
+      record.groupStartedAt = last.groupStartedAt || last.timestamp
+      record.groupCount = (last.groupCount || 1) + 1
       undoStack[undoStack.length - 1] = record
     } else {
-      // 新增记录
       undoStack.push(record)
 
       // 栈满时丢弃最旧记录（FIFO）
@@ -285,6 +296,47 @@ export class TextareaUndoManager {
         `estimated memory: ${memUsage}KB`
       )
     }
+  }
+
+  private shouldMergeEdit(last: EditRecord, next: EditRecord, now: number): boolean {
+    if (!last || last.timestamp <= 0) return false
+    if (!next.inputType || last.inputType !== next.inputType) return false
+
+    const groupStartedAt = last.groupStartedAt || last.timestamp
+    if (now - last.timestamp > 500) return false
+    if (now - groupStartedAt > 1200) return false
+    if ((last.groupCount || 1) >= 8) return false
+
+    if (next.inputType === 'insertText') return this.canMergeInsertText(last, next)
+    if (next.inputType === 'deleteContentBackward') return this.canMergeDeleteBackward(last, next)
+    if (next.inputType === 'deleteContentForward') return this.canMergeDeleteForward(last, next)
+    return false
+  }
+
+  private isBoundaryInput(data: string | undefined): boolean {
+    if (!data || data.length !== 1) return true
+    return /[\s.,;:!?，。；：！？、]/.test(data)
+  }
+
+  private canMergeInsertText(last: EditRecord, next: EditRecord): boolean {
+    const data = next.inputData || ''
+    if (this.isBoundaryInput(data) || this.isBoundaryInput(last.inputData)) return false
+    if (last.selectionStart !== last.selectionEnd || next.selectionStart !== next.selectionEnd) return false
+    if (next.content.length !== last.content.length + data.length) return false
+    if (next.selectionStart !== last.selectionStart + data.length) return false
+    return next.content.slice(last.selectionStart, last.selectionStart + data.length) === data
+  }
+
+  private canMergeDeleteBackward(last: EditRecord, next: EditRecord): boolean {
+    if (last.selectionStart !== last.selectionEnd || next.selectionStart !== next.selectionEnd) return false
+    if (next.content.length !== last.content.length - 1) return false
+    return next.selectionStart === Math.max(0, last.selectionStart - 1)
+  }
+
+  private canMergeDeleteForward(last: EditRecord, next: EditRecord): boolean {
+    if (last.selectionStart !== last.selectionEnd || next.selectionStart !== next.selectionEnd) return false
+    if (next.content.length !== last.content.length - 1) return false
+    return next.selectionStart === last.selectionStart
   }
 
   /**
