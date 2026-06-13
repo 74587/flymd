@@ -2,11 +2,13 @@
 // 目标：边说边出字 + 计费/余额/充值/登录，全流程独立模块化，不污染 main.ts。
 
 import type { Store } from '@tauri-apps/plugin-store'
-import { addToPluginsMenu } from './pluginMenu'
+import { addToPluginsMenu, removeFromPluginsMenu } from './pluginMenu'
 import { getHttpClient } from './runtime'
 import { acquireMic, getActiveMicOwner, type MicLease } from './micManager'
 
 const FEATURE_ID = 'asr-note'
+// 自动语音笔记暂时弃用：只隐藏菜单入口，功能实现保留。
+const ASR_NOTE_MENU_ENABLED = false
 
 const ASR_BACKEND_BASE_DEFAULT = 'https://flymd.llingfei.com/asr'
 const ASR_SAMPLE_RATE = 16000
@@ -459,6 +461,11 @@ async function asrEnsureTokenInteractive(): Promise<string | null> {
 
 function updateMenu(): void {
   try {
+    if (!ASR_NOTE_MENU_ENABLED) {
+      removeFromPluginsMenu(FEATURE_ID)
+      return
+    }
+
     const deps = _deps
     const note = _active
     const running = !!(note && note.running && !note.ending)
