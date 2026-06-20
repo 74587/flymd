@@ -471,7 +471,6 @@ FlyMD 拥有丰富的插件生态,支持通过扩展插件无限扩展功能。
 ⭐⭐⭐[rightcode](https://www.right.codes/register?aff=E8E36524) **:稳定性和性价比都极高的Claude和codex**
 
 
-⭐⭐⭐ [PackyCode](https://www.packyapi.com/register?aff=Rqk1) **同样高性价比的Claude、codex、Gemini**
 
 
 
