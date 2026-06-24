@@ -2,6 +2,15 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v1.4.1
+- Added: When opening `md` / `markdown` / `txt` files outside the saved library through system double-click or “Open with”, FlyMD now treats the file's folder as a session-only temporary library in the sidebar; it is not written to the library configuration and disappears after switching back to a saved library or closing the app
+- Improved: The temporary library sidebar shows built-in supported files in the same folder (`md` / `markdown` / `txt` / `pdf`) plus plugin-provided suffixes, and marks the title as temporary to avoid confusing it with saved libraries
+- Improved: WebDAV sync actions are disabled while a temporary library is active, preventing sync from targeting the previous saved library while the sidebar is showing a temporary folder
+- Added: Theme Settings now includes a symbol auto-completion toggle, so paired-symbol completion can be disabled when needed
+- Fixed: WYSIWYG code-block highlighting now refreshes correctly after pasting code, avoiding stale or missing rendered highlights
+- Improved: Markdown / PDF icons and selected-state contrast in the library sidebar have been refined so the current file is easier to identify
+- Docs: Removed the stale PackyCode relay-service link from README
+
 ## Update v1.4.0
 - Fixed: App exit now checks unsaved changes across all open tabs instead of only the current document; “Save and exit” saves each dirty tab in turn to reduce the risk of losing edits in multi-tab sessions
 - Fixed: In WYSIWYG mode, paragraphs containing `\$`, Excel formulas, or other `$` content are no longer rewritten incorrectly by automatic Markdown inline sync, preventing lost backslashes and corrupted Markdown markers such as bold delimiters
