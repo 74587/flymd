@@ -12,6 +12,7 @@ import { initThemeUI, applySavedTheme, updateChromeColorsForMode } from './theme
 import { t, fmtStatus, getLocalePref, setLocalePref, getLocale, tLocale } from './i18n'
 import { getPasteUrlTitleFetchEnabled } from './core/pasteUrlTitle'
 import { getPasteRemoteImagesEnabled } from './core/pasteRemoteImages'
+import { getSymbolAutoCompletionEnabled } from './core/symbolAutoCompletion'
 // KaTeX 样式改为按需动态加载（首次检测到公式时再加载）
 // markdown-it 和 DOMPurify 改为按需动态 import，类型仅在编译期引用
 import type MarkdownIt from 'markdown-it'
@@ -522,6 +523,7 @@ function hashMermaidCode(code: string): string {
           const ta = getEditor(); if (!ta) return
           if (ev.target !== ta) return
           if (!isEditMode()) return
+          if (!getSymbolAutoCompletionEnabled()) { rememberPrev(); return }
           const w = window as any
           const prev = String(w._edPrevVal ?? '')
           const ps = (w._edPrevSelS >>> 0) || 0
@@ -591,6 +593,7 @@ function hashMermaidCode(code: string): string {
           const ta = getEditor(); if (!ta) return
           if (ev.target !== ta) return
           if (!isEditMode()) return
+          if (!getSymbolAutoCompletionEnabled()) return
           const it = (ev as any).inputType || ''
           if (it !== 'insertText' && it !== 'insertCompositionText') return
           const data = (ev as any).data as string || ''
@@ -8559,16 +8562,8 @@ function bindEvents() {
       const getEditor = (): HTMLTextAreaElement | null => document.getElementById('editor') as HTMLTextAreaElement | null
       const isEditMode = () => (typeof mode !== 'undefined' && mode === 'edit' && !wysiwyg)
 
-      const pairs: Array<[string, string]> = [["(", ")"],["[", "]"],["{", "}"],["\"", "\""],["'", "'"],["*","*"],["_","_"],["（","）"],["【","】"],["《","》"],["「","」"],["『","』"],["“","”"],["‘","’"]]
-      try { pairs.push([String.fromCharCode(96), String.fromCharCode(96)]) } catch {}
+      const pairs: Array<[string, string]> = [["(", ")"],["[", "]"],["{", "}"],["\"", "\""],["'", "'"],["*","*"],["_","_"]]
       const openClose = Object.fromEntries(pairs as any) as Record<string,string>
-      try { pairs.push([String.fromCharCode(0x300A), String.fromCharCode(0x300B)]) } catch {}
-      try { pairs.push([String.fromCharCode(0x3010), String.fromCharCode(0x3011)]) } catch {}
-      try { pairs.push([String.fromCharCode(0xFF08), String.fromCharCode(0xFF09)]) } catch {}
-      try { pairs.push([String.fromCharCode(0x300C), String.fromCharCode(0x300D)]) } catch {}
-      try { pairs.push([String.fromCharCode(0x300E), String.fromCharCode(0x300F)]) } catch {}
-      try { pairs.push([String.fromCharCode(0x201C), String.fromCharCode(0x201D)]) } catch {}
-      try { pairs.push([String.fromCharCode(0x2018), String.fromCharCode(0x2019)]) } catch {}
       const closers = new Set(Object.values(openClose))
 
       function handleKeydown(e: KeyboardEvent) {
@@ -8576,21 +8571,20 @@ function bindEvents() {
         if (e.target !== ta) return
         if (!isEditMode()) return
         if (e.ctrlKey || e.metaKey || e.altKey) return
+        if (!getSymbolAutoCompletionEnabled()) return
         if (e.key === '*') {
           e.preventDefault()
           handleImmediateStarCompletion(ta)
           return
         }
-        const val = String(ta.value || '')
-        const s = ta.selectionStart >>> 0
-        const epos = ta.selectionEnd >>> 0
-
-        // 反引号：即时补全，第二次扩成双反引号，第三次扩成围栏
         if (e.key === '`') {
           e.preventDefault()
           handleImmediateBacktickCompletion(ta)
           return
         }
+        const val = String(ta.value || '')
+        const s = ta.selectionStart >>> 0
+        const epos = ta.selectionEnd >>> 0
 
         // 跳过右侧
         if (closers.has(e.key) && s === epos && val[s] === e.key) { e.preventDefault(); ta.selectionStart = ta.selectionEnd = s + 1; return }
@@ -9220,6 +9214,7 @@ function bindEvents() {
     replaceEditorRange(ta, s, e, ins, selStart, selEnd)
     return true
   }
+
   function handleImmediateBacktickCompletion(ta: HTMLTextAreaElement): boolean {
     const val = String(ta.value || '')
     const s = ta.selectionStart >>> 0
@@ -9366,16 +9361,16 @@ function bindEvents() {
   try {
     (editor as HTMLTextAreaElement).addEventListener('keydown', (e: KeyboardEvent) => { if ((e as any).defaultPrevented) return; if (e.ctrlKey || e.metaKey || e.altKey) return
       try { if (tryHandleListEnter(editor as HTMLTextAreaElement, e)) return } catch {}
-      // 反引号：即时补全，第二次扩成双反引号，第三次扩成围栏
-      if (e.key === '`') {
-        e.preventDefault()
-        handleImmediateBacktickCompletion(editor as HTMLTextAreaElement)
-        return
-      }
+      if (!getSymbolAutoCompletionEnabled()) return
       // 星号：第一次斜体，第二次立刻扩成加粗，不再傻等定时器
       if (e.key === '*') {
         e.preventDefault()
         handleImmediateStarCompletion(editor as HTMLTextAreaElement)
+        return
+      }
+      if (e.key === '`') {
+        e.preventDefault()
+        handleImmediateBacktickCompletion(editor as HTMLTextAreaElement)
         return
       }
       // 波浪线：一次按键即完成成对环抱补全（~~ 语法）
@@ -9397,10 +9392,8 @@ function bindEvents() {
         return
       }
       const _pairs: Array<[string, string]> = [
-        ["(", ")"], ["[", "]"], ["{", "}"], ['"', '"'], ["'", "'"], ["*", "*"], ["_", "_"],
-        ["（", "）"], ["【", "】"], ["《", "》"], ["「", "」"], ["『", "』"], ["“", "”"], ["‘", "’"]
+        ["(", ")"], ["[", "]"], ["{", "}"], ['"', '"'], ["'", "'"], ["*", "*"], ["_", "_"]
       ]
-      try { _pairs.push([String.fromCharCode(96), String.fromCharCode(96)]) } catch {}
       const openClose: Record<string, string> = Object.fromEntries(_pairs as any)
       const closers = new Set(Object.values(openClose))
       const ta = editor as HTMLTextAreaElement

@@ -1,3 +1,5 @@
+import { getSymbolAutoCompletionEnabled } from './core/symbolAutoCompletion'
+
 // IME compatibility patch: delegate events globally, act only on #editor in edit mode
 (function () {
   try {
@@ -36,16 +38,8 @@
         case 0x7B: return '}'
         case 0x22: return '"'
         case 0x27: return "'"
-        case 0x60: return '`'
         case 0x2A: return '*'
         case 0x5F: return '_'
-        case 0x300A: return String.fromCharCode(0x300B) // 
-        case 0x3010: return String.fromCharCode(0x3011) // 
-        case 0xFF08: return String.fromCharCode(0xFF09) // 
-        case 0x300C: return String.fromCharCode(0x300D) // 
-        case 0x300E: return String.fromCharCode(0x300F) // 
-        case 0x201C: return String.fromCharCode(0x201D) // 
-        case 0x2018: return String.fromCharCode(0x2019) // 
         default: return null
       }
     }
@@ -97,7 +91,6 @@
       if (
         data === '~~'
         || data === '～～'
-        || data === '```'
         || data === '**'
         || /^[\uFF0A]{2}$/.test(data)
         || data === '\uFFE5\uFFE5'
@@ -113,20 +106,12 @@
         case 0x7D: // }
         case 0x22: // "
         case 0x27: // '
-        case 0x60: // `
         case 0x2A: // *
         case 0x5F: // _
         case 0x007E: // ~
         case 0xFF5E: // ～
         case 0x00A5: // ¥
         case 0xFFE5: // ￥
-        case 0x300B: // 》
-        case 0x3011: // 】
-        case 0xFF09: // ）
-        case 0x300D: // 」
-        case 0x300F: // 』
-        case 0x201D: // ”
-        case 0x2019: // ’
           return true
         default:
           return false
@@ -143,14 +128,7 @@
         if (s === 0 || s >= val.length) return false
 
         const PAIRS: Array<[string, string]> = [
-          ['(', ')'], ['[', ']'], ['{', '}'], ['"', '"'], ["'", "'"], ['`', '`'], ['*', '*'], ['_', '_'],
-          [String.fromCharCode(0x300A), String.fromCharCode(0x300B)], // 《》
-          [String.fromCharCode(0x3010), String.fromCharCode(0x3011)], // 【】
-          [String.fromCharCode(0xFF08), String.fromCharCode(0xFF09)], // （）
-          [String.fromCharCode(0x300C), String.fromCharCode(0x300D)], // 「」
-          [String.fromCharCode(0x300E), String.fromCharCode(0x300F)], // 『』
-          [String.fromCharCode(0x201C), String.fromCharCode(0x201D)], // “”
-          [String.fromCharCode(0x2018), String.fromCharCode(0x2019)], // ‘’
+          ['(', ')'], ['[', ']'], ['{', '}'], ['"', '"'], ["'", "'"], ['*', '*'], ['_', '_'],
         ]
 
         const L0 = val[s - 1]
@@ -180,6 +158,7 @@
         const it = (ev as any).inputType || ''
         if (!/insert(Text|CompositionText|FromComposition)/i.test(it)) return
         const data = (ev as any).data as string || ''
+        if (!getSymbolAutoCompletionEnabled()) return
         // 组合输入：除 ~ / ～ 外一律放行给 IME；而 ~ / ～ 允许在 composing 阶段处理，以便识别连击
         const composing = isComposingEv(ev)
         const isTildeData = (!!data && (/^~+$/.test(data) || /^～+$/.test(data)))
@@ -209,19 +188,6 @@
             else { ta.selectionStart = ta.selectionEnd = s + tlen }
             rememberPrev(); return
           }
-        }
-        // 三连反引号：插入围栏（可撤销）
-        if (data === '```') {
-          ev.preventDefault()
-          const mid = val.slice(s, e)
-          const content = (e > s ? ('\n' + mid + '\n') : ('\n\n'))
-          ta.selectionStart = s; ta.selectionEnd = e
-          if (!insertUndoable(ta, '```' + content + '```')) {
-            ta.value = val.slice(0, s) + '```' + content + '```' + val.slice(e)
-          }
-          ta.selectionStart = ta.selectionEnd = (e > s ? (s + content.length + 3) : (s + 4))
-          rememberPrev()
-          return
         }
         if (data.length === 1) {
           // 跳过右侧闭合
@@ -255,10 +221,11 @@
         const ta = getEditor(); if (!ta) return
         if ((ev as any).target !== ta) return
         if (!isEditMode()) return
-        if (isComposingEv(ev)) return
         const evType = String((ev as any).type || '')
         const inputType = String((ev as any).inputType || '')
         const rawData = typeof (ev as any).data === 'string' ? String((ev as any).data || '') : ''
+        if (!getSymbolAutoCompletionEnabled()) { rememberPrev(); return }
+        if (isComposingEv(ev)) return
         if (evType !== 'compositionend' && !/insert(Text|CompositionText|FromComposition)/i.test(inputType)) {
           rememberPrev()
           return
@@ -336,7 +303,6 @@
           }
           rememberPrev(); return
         }
-        // fence：中文输入法对 ``` 的补全效果差，此处删除处理，保留 handleBeforeInput 中的英文输入法路径
         // 加粗（** / ＊＊）：IME 一次性提交两颗星，仅将光标移至中间，避免重复补全
                 // 加粗（** / ＊＊）：IME 一次性提交两颗星，补全为 **|** 或 **选区**
         if (inserted === '**' || /^[\uFF0A]{2}$/.test(inserted)) {
@@ -369,16 +335,6 @@
             rememberPrev(); return
           }
         }
-        // 反引号三连击：检测 ``` 触发代码块补全
-        if (inserted === '`' && a >= 2 && prev.slice(a - 2, a) === '``') {
-          const left = prev.slice(0, a - 2)
-          const right = prev.slice(prev.length - b)
-          const content = hadSel ? ('\n' + removed + '\n') : '\n\n'
-          ta.value = left + '```' + content + '```' + right
-          ta.selectionStart = ta.selectionEnd = left.length + 4
-          rememberPrev()
-          return
-        }
           const close = codeClose(inserted)
           if (close) {
             if (hadSel) {
@@ -406,6 +362,10 @@
       try {
         setTimeout(() => {
           try {
+            if (!getSymbolAutoCompletionEnabled()) {
+              rememberPrev()
+              return
+            }
             handleInput(e as any)
             const ta = getEditor(); if (ta && collapseDuplicatePairAtCaret(ta)) { rememberPrev() }
           } catch {}

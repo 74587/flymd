@@ -15,6 +15,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { t } from './i18n'
 import { getPasteUrlTitleFetchEnabled, setPasteUrlTitleFetchEnabled } from './core/pasteUrlTitle'
 import { getPasteRemoteImagesEnabled, setPasteRemoteImagesEnabled } from './core/pasteRemoteImages'
+import { getSymbolAutoCompletionEnabled, setSymbolAutoCompletionEnabled } from './core/symbolAutoCompletion'
 import { getContentFontSize, setContentFontSize } from './core/uiZoom'
 export type MdStyleId = 'standard' | 'github' | 'notion' | 'journal' | 'card' | 'docs' | 'typora' | 'obsidian' | 'bear' | 'minimalist'
 
@@ -658,6 +659,13 @@ function createPanel(): HTMLDivElement {
           <span class="theme-toggle-text">${t('theme.sourceLineNumbers')}</span>
           <div class="theme-toggle-switch">
             <input type="checkbox" id="source-line-numbers-toggle" class="theme-toggle-input" />
+            <span class="theme-toggle-slider"></span>
+          </div>
+        </label>
+        <label class="theme-toggle-label theme-toggle-third theme-toggle-boxed" for="symbol-auto-completion-toggle" title="${t('theme.symbolAutoCompletion.tip')}">
+          <span class="theme-toggle-text">${t('theme.symbolAutoCompletion')}</span>
+          <div class="theme-toggle-switch">
+            <input type="checkbox" id="symbol-auto-completion-toggle" class="theme-toggle-input" />
             <span class="theme-toggle-slider"></span>
           </div>
         </label>
@@ -1563,6 +1571,7 @@ function ensureThemePanelReady(): HTMLDivElement | null {
     const wysiwygDefaultToggle = panel.querySelector('#wysiwyg-default-toggle') as HTMLInputElement | null
     const sourcemodeDefaultToggle = panel.querySelector('#sourcemode-default-toggle') as HTMLInputElement | null
     const sourceLineNumbersToggle = panel.querySelector('#source-line-numbers-toggle') as HTMLInputElement | null
+    const symbolAutoCompletionToggle = panel.querySelector('#symbol-auto-completion-toggle') as HTMLInputElement | null
     const wysiwygHtmlTableToggle = panel.querySelector('#wysiwyg-html-table-toggle') as HTMLInputElement | null
     const pasteUrlTitleToggle = panel.querySelector('#paste-url-title-toggle') as HTMLInputElement | null
     const pasteRemoteImagesToggle = panel.querySelector('#paste-remote-images-toggle') as HTMLInputElement | null
@@ -1665,6 +1674,13 @@ function ensureThemePanelReady(): HTMLDivElement | null {
       sourceLineNumbersToggle.checked = getSourceLineNumbersEnabled()
       sourceLineNumbersToggle.addEventListener('change', () => {
         setSourceLineNumbersEnabled(sourceLineNumbersToggle.checked)
+      })
+    }
+
+    if (symbolAutoCompletionToggle) {
+      symbolAutoCompletionToggle.checked = getSymbolAutoCompletionEnabled()
+      symbolAutoCompletionToggle.addEventListener('change', () => {
+        setSymbolAutoCompletionEnabled(symbolAutoCompletionToggle.checked)
       })
     }
 

@@ -22,6 +22,7 @@ import { hasDownloadableMarkdownImages } from '../../core/htmlPasteImages'
 import { guessSyncedDocImageAbsPath } from '../../utils/localImagePath'
 import { resolveLocalImageAbsPathFromSrc } from '../../utils/localImageSrcResolve'
 import { normalizeTabIndentText } from '../../utils/tabIndent'
+import { getSymbolAutoCompletionEnabled } from '../../core/symbolAutoCompletion'
 import { mermaidPlugin } from './plugins/mermaid'
 import { mathInlineViewPlugin, mathBlockViewPlugin } from './plugins/math'
 import { htmlMediaPlugin } from './plugins/htmlMedia'
@@ -964,13 +965,6 @@ function setupBracketPairingForWysiwyg(pm: HTMLElement | null) {
     '{': '}',
     '"': '"',
     "'": "'",
-    '（': '）',
-    '【': '】',
-    '《': '》',
-    '「': '」',
-    '『': '』',
-    '“': '”',
-    '‘': '’',
   }
   const CLOSERS = new Set<string>(Object.values(OPEN_TO_CLOSE))
   let prevSelFrom = 0
@@ -997,6 +991,7 @@ function setupBracketPairingForWysiwyg(pm: HTMLElement | null) {
 
   const handleBeforeInput = (ev: InputEvent) => {
     try {
+      if (!getSymbolAutoCompletionEnabled()) return
       // 防抖：如果刚刚执行过环抱补全，跳过后续的 beforeinput 事件
       if (Date.now() - _lastWrapTs < 100) {
         ev.preventDefault()  // 必须阻止浏览器默认行为，否则会重复插入字符
@@ -1063,6 +1058,7 @@ function setupBracketPairingForWysiwyg(pm: HTMLElement | null) {
   // 中文输入法等通过组合提交的括号/引号：在 input(Composition*) 阶段补全
   const handleInput = (ev: InputEvent) => {
     try {
+      if (!getSymbolAutoCompletionEnabled()) return
       const data = (ev as any).data as string || ''
       if (!data) return
       const it = String((ev as any).inputType || '')
@@ -1203,6 +1199,7 @@ function setupBracketPairingForWysiwyg(pm: HTMLElement | null) {
         return
       }
 
+      if (!getSymbolAutoCompletionEnabled()) return
       if (ev.key !== 'Backspace') return
       if (ev.ctrlKey || ev.metaKey || ev.altKey) return
       // 组合输入阶段不介入
