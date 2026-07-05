@@ -10,6 +10,27 @@ export function isSupportedDoc(name: string): boolean {
   return /\.(md|markdown|txt|pdf)$/i.test(name)
 }
 
+function nameOf(path: string): string {
+  return String(path || '').split(/[\\/]+/).filter(Boolean).pop() || String(path || '')
+}
+
+function shouldSkipLibraryDir(path: string): boolean {
+  const name = nameOf(path).trim().toLowerCase()
+  return name === 'ebwebview'
+    || name === 'node_modules'
+    || name === '.git'
+    || name === '.hg'
+    || name === '.svn'
+    || name === 'target'
+    || name === 'dist'
+    || name === 'build'
+    || name === '.next'
+    || name === '.vite'
+    || name === 'code cache'
+    || name === 'gpucache'
+    || name === 'service worker'
+}
+
 // 目录递归包含受支持文档的缓存
 const libHasDocCache = new Map<string, boolean>()
 const libHasDocPending = new Map<string, Promise<boolean>>()
@@ -19,6 +40,10 @@ async function dirHasSupportedDocRecursive(
   depth = 20,
 ): Promise<boolean> {
   try {
+    if (shouldSkipLibraryDir(dir)) {
+      libHasDocCache.set(dir, false)
+      return false
+    }
     if (libHasDocCache.has(dir)) return libHasDocCache.get(dir) as boolean
     if (libHasDocPending.has(dir)) {
       return await (libHasDocPending.get(dir) as Promise<boolean>)
@@ -86,6 +111,7 @@ async function dirHasSupportedDocRecursive(
 // 单层列出目录：只返回「包含支持文档的子目录」和「当前目录下的支持文档」
 export async function listDirOnce(dir: string): Promise<LibEntry[]> {
   try {
+    if (shouldSkipLibraryDir(dir)) return []
     const entries = await readDir(dir, { recursive: false } as any)
     const files: LibEntry[] = []
     const dirCandidates: LibEntry[] = []
@@ -101,6 +127,7 @@ export async function listDirOnce(dir: string): Promise<LibEntry[]> {
         const isDir = !!(s as any)?.isDirectory
         const name = (it?.name || p.split(/[\\/]+/).pop() || '') as string
         if (isDir) {
+          if (shouldSkipLibraryDir(p)) continue
           dirCandidates.push({ name, path: p, isDir: true })
         } else if (isSupportedDoc(name)) {
           files.push({ name, path: p, isDir: false })

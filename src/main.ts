@@ -5079,6 +5079,10 @@ async function openFile2(preset?: unknown) {
     if (Array.isArray(selected)) { if (selected.length < 1) return; selected = selected[0] }
 
     const selectedPath = normalizePath(selected)
+    if (await isDirectoryPath(selectedPath)) {
+      pluginNotice('暂不支持打开文件夹，请选择具体文档', 'err', 2600)
+      return
+    }
     // 同一文件且当前存在未保存内容时，避免误覆盖编辑态
     const currentPathNormalized = currentFilePath ? normalizePath(currentFilePath) : ''
     const reopeningSameFile = !!currentPathNormalized && currentPathNormalized === selectedPath
@@ -5638,6 +5642,29 @@ function isMarkdownLikeDocPath(path: string): boolean {
   return /\.(md|markdown|txt)$/i.test(String(path || ''))
 }
 
+async function isDirectoryPath(path: string): Promise<boolean> {
+  try {
+    const st: any = await stat(path as any)
+    return !!st?.isDirectory
+  } catch {
+    return false
+  }
+}
+
+async function isUnsafeTemporaryLibraryRoot(root: string): Promise<boolean> {
+  try {
+    const r = normalizePath(root).replace(/[\\/]+$/, '')
+    if (!r) return false
+    if (/[\\/]EBWebView(?:[\\/]|$)/i.test(r)) return true
+    const appLocal = await getAppLocalDataDirCached()
+    if (!appLocal) return false
+    const a = normalizePath(appLocal).replace(/[\\/]+$/, '')
+    return samePathLoose(a, r) || isInside(a, r)
+  } catch {
+    return false
+  }
+}
+
 async function findPersistedLibraryForPath(path: string): Promise<{ id: string; root: string; name?: string } | null> {
   try {
     const p = normalizePath(path)
@@ -5684,7 +5711,8 @@ async function syncTemporaryLibraryRootForOpenedPath(path: string): Promise<void
   } else if (temporaryLibraryRoot && isInside(temporaryLibraryRoot, p)) {
     nextRoot = temporaryLibraryRoot
   } else if (isMarkdownLikeDocPath(p)) {
-    nextRoot = getParentDir(p)
+    const parent = getParentDir(p)
+    nextRoot = parent && !(await isUnsafeTemporaryLibraryRoot(parent)) ? parent : null
   }
 
   const changed = setTemporaryLibraryRoot(nextRoot)
@@ -10781,9 +10809,15 @@ function bindEvents() {
             if (payload && typeof payload === 'object' && payload.action && payload.action !== 'drop') return
             const arr = Array.isArray(payload) ? payload : (payload?.paths || payload?.urls || payload?.files || [])
             const paths: string[] = (Array.isArray(arr) ? arr : []).map((p) => normalizePath(p))
-            const md = paths.find((p) => /\.(md|markdown|txt)$/i.test(p))
+            const checkedPaths = await Promise.all(paths.map(async (p) => ({ path: p, isDir: await isDirectoryPath(p) })))
+            const hasDroppedDir = checkedPaths.some((x) => x.isDir)
+            const filePaths = checkedPaths.filter((x) => !x.isDir).map((x) => x.path)
+            if (hasDroppedDir) {
+              pluginNotice('暂不支持拖入文件夹，请选择具体文档', 'err', 2600)
+            }
+            const md = filePaths.find((p) => /\.(md|markdown|txt)$/i.test(p))
             if (md) { void openFile2(md); return }
-            const imgs = paths.filter((p) => /\.(png|jpe?g|gif|svg|webp|bmp|avif|ico)$/i.test(p))
+            const imgs = filePaths.filter((p) => /\.(png|jpe?g|gif|svg|webp|bmp|avif|ico)$/i.test(p))
             if (imgs.length > 0) {
               // 若所见 V2 激活：交由所见模式自身处理（支持拖拽到编辑区）
               if (wysiwygV2Active) {

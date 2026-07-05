@@ -261,6 +261,22 @@ function join(a: string, b: string): string { const s = sep(a); return (a.endsWi
 function base(p: string): string { return p.split(/[\\/]+/).slice(0, -1).join(sep(p)) }
 function nameOf(p: string): string { const n = p.split(/[\\/]+/).pop() || p; return n }
 function isInside(root: string, p: string): boolean { const r = norm(root).toLowerCase(); const q = norm(p).toLowerCase(); const s = r.endsWith(sep(r)) ? r : r + sep(r); return q.startsWith(s) }
+function shouldSkipLibraryDir(p: string): boolean {
+  const n = nameOf(p).trim().toLowerCase()
+  return n === 'ebwebview'
+    || n === 'node_modules'
+    || n === '.git'
+    || n === '.hg'
+    || n === '.svn'
+    || n === 'target'
+    || n === 'dist'
+    || n === 'build'
+    || n === '.next'
+    || n === '.vite'
+    || n === 'code cache'
+    || n === 'gpucache'
+    || n === 'service worker'
+}
 
 async function ensureDir(dir: string) { try { await mkdir(dir, { recursive: true } as any) } catch {} }
 
@@ -444,6 +460,7 @@ function toMtimeMs(meta: any): number {
 }
 
 async function listDir(root: string, dir: string): Promise<{ name: string; path: string; isDir: boolean }[]> {
+  if (shouldSkipLibraryDir(dir)) return []
   const items: { name: string; path: string; isDir: boolean; mtime?: number; ext?: string }[] = []
   let ents: any[] = []
   try { ents = await readDir(dir, { recursive: false } as any) as any[] } catch { ents = [] }
@@ -463,6 +480,7 @@ async function listDir(root: string, dir: string): Promise<{ name: string; path:
       try { st = await stat(p) as any } catch {}
     }
     if (isDir) {
+      if (shouldSkipLibraryDir(p)) continue
       // 仅保留“包含受支持文档(递归)”的目录
       if (await dirHasSupportedDocRecursive(p, allow)) {
         dirs.push({ name: nameOf(p), path: p, isDir: true, mtime: needMtime ? toMtimeMs(st) : undefined })
@@ -513,6 +531,7 @@ async function listDir(root: string, dir: string): Promise<{ name: string; path:
 // 递归判断目录是否包含受支持文档（带缓存）
 async function dirHasSupportedDocRecursive(dir: string, allow: Set<string>, depth = 20): Promise<boolean> {
   try {
+    if (shouldSkipLibraryDir(dir)) { hasDocCache.set(dir, false); return false }
     if (hasDocCache.has(dir)) return hasDocCache.get(dir) as boolean
     if (hasDocPending.has(dir)) return await (hasDocPending.get(dir) as Promise<boolean>)
 
