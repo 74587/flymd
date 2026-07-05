@@ -2,6 +2,13 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v1.4.2
+- Added: “Source + Reading split view” can now be enabled directly from Reading mode; FlyMD automatically switches back to Source mode and opens the split view, reducing friction when editing while reading
+- Fixed: Network proxy settings no longer globally rewrite `window.fetch`; plugin HTTP requests and update checks now have timeouts plus localhost bypasses, preventing severe slowdown after enabling a proxy
+- Fixed: Dragged folders or abnormal directories are no longer treated as Markdown documents, and high-risk folders such as `EBWebView`, `node_modules`, and `.git` are skipped to avoid sidebar scan issues and stalls
+- Fixed: In dark mode, the current Markdown document icon and selected state in the library sidebar now have clearer contrast
+- Improved: Library sidebar scanning is more conservative around build caches, version-control folders, and WebView data directories, reducing the risk of accidentally scanning temporary/cache trees
+
 ## Update v1.4.1
 - Added: When opening `md` / `markdown` / `txt` files outside the saved library through system double-click or “Open with”, FlyMD now treats the file's folder as a session-only temporary library in the sidebar; it is not written to the library configuration and disappears after switching back to a saved library or closing the app
 - Improved: The temporary library sidebar shows built-in supported files in the same folder (`md` / `markdown` / `txt` / `pdf`) plus plugin-provided suffixes, and marks the title as temporary to avoid confusing it with saved libraries
