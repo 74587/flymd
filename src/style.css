@@ -93,6 +93,8 @@
     --accent: #60a5fa;
     --accent-hover: #3b82f6;
     --accent-light: rgba(96, 165, 250, 0.15);
+    --lib-file-markdown-selected-color: #22d3ee;
+    --lib-file-pdf-selected-color: #f87171;
     --hover-bg: rgba(255, 255, 255, 0.08);
     --active-bg: rgba(255, 255, 255, 0.12);
     --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
@@ -5682,7 +5684,7 @@ body.dark-mode .container.wysiwyg-v2 #md-wysiwyg-root .overlay-host .ov-codecopy
 .library .lib-ico-app { width: 16px; height: 16px; border-radius: 3px; object-fit: cover; }
 
 
-/* 库侧栏选中态：保持与标签栏激活态一致，避免后置规则把高亮压回灰色 */
+/* 库侧栏选中态：亮色模式保持原有对比 */
 .library .lib-node.selected { background: var(--accent-light); }
 .library .lib-node.selected .lib-ico-markdown { color: var(--accent); }
 .library .lib-file .lib-ico-pdf { color: #f4a261; }
@@ -6603,6 +6605,8 @@ body.dark-mode {
   --accent: #60a5fa;
   --accent-hover: #3b82f6;
   --accent-light: rgba(96, 165, 250, 0.15);
+  --lib-file-markdown-selected-color: #22d3ee;
+  --lib-file-pdf-selected-color: #f87171;
   --hover-bg: rgba(255, 255, 255, 0.08);
   --active-bg: rgba(255, 255, 255, 0.12);
   --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
@@ -6734,6 +6738,20 @@ body.dark-mode [class*="file-"] span,
 body.dark-mode [class*="library"] span,
 body.dark-mode [class*="sidebar"] span {
   color: #e5e7eb !important;
+}
+
+/* 只增强选中文档图标，未选中文档继续沿用黑白图标体系 */
+body.dark-mode .library .lib-node.selected,
+body.dark-mode .library .lib-node.selected:hover {
+  background: transparent !important;
+}
+
+body.dark-mode .library .lib-node.selected .lib-ico-markdown {
+  color: var(--lib-file-markdown-selected-color) !important;
+}
+
+body.dark-mode .library .lib-node.selected .lib-ico-pdf {
+  color: var(--lib-file-pdf-selected-color) !important;
 }
 
 body.dark-mode .sidebar-item:hover,
