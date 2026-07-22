@@ -27,6 +27,7 @@ import { mermaidPlugin } from './plugins/mermaid'
 import { mathInlineViewPlugin, mathBlockViewPlugin } from './plugins/math'
 import { htmlMediaPlugin } from './plugins/htmlMedia'
 import { maybeConvertHtmlTableBlocksToGfm } from './plugins/htmlTable'
+import { guardStrongBoundaryForCommonMark, stripStrongBoundaryGuard } from '../../plugins/strongBoundaryCompat'
 import { remarkMathPlugin, katexOptionsCtx, mathInlineSchema, mathBlockSchema, mathInlineInputRule, mathBlockInputRule } from '@milkdown/plugin-math'
 import { liftListItem, sinkListItem } from 'prosemirror-schema-list'
 import { deleteColumn, deleteRow } from 'prosemirror-tables'
@@ -141,9 +142,10 @@ async function applyHtmlTableToGfmIfEnabled(): Promise<void> {
   if (!_editor) return
   try {
     const mdNow = await (_editor as any).action(getMarkdown())
-    const next = maybeConvertHtmlTableBlocksToGfm(String(mdNow || ''))
-    if (next !== String(mdNow || '')) {
-      await (_editor as any).action(replaceAll(next))
+    const current = stripStrongBoundaryGuard(String(mdNow || ''))
+    const next = maybeConvertHtmlTableBlocksToGfm(current)
+    if (next !== current) {
+      await (_editor as any).action(replaceAll(guardStrongBoundaryForCommonMark(next)))
     }
   } catch {}
 }
@@ -328,7 +330,8 @@ function insertMarkdownAtSelection(markdown: string): boolean {
     _editor?.action((ctx) => {
       const view = ctx.get(editorViewCtx)
       const parser = ctx.get(parserCtx)
-      const slice = parser(String(markdown || ''))
+      const source = guardStrongBoundaryForCommonMark(String(markdown || ''))
+      const slice = parser(source)
       if (!slice || typeof slice === 'string') {
         view.dispatch(view.state.tr.insertText(String(markdown || '')).scrollIntoView())
         inserted = true
@@ -484,7 +487,7 @@ export async function enableWysiwygV2(root: HTMLElement, initialMd: string, onCh
   const content0 = normalizeTabIndentText((initialMd || '').toString())
   const content = maybeConvertHtmlTableBlocksToGfm(content0)
   // 保护 Excel 公式里的 `$`，避免被 remark-math / 输入规则误识别为行内数学
-  const contentForEditor = protectExcelDollarRefs(content)
+  const contentForEditor = guardStrongBoundaryForCommonMark(protectExcelDollarRefs(content))
   console.log('[WYSIWYG V2] enableWysiwygV2 called, content length:', content.length)
 
   // 仅销毁旧编辑器与观察器，保留外层传入的 root（避免被移除导致空白）
@@ -777,7 +780,8 @@ export async function enableWysiwygV2(root: HTMLElement, initialMd: string, onCh
           return s
         } catch { return md2 }
       })()
-      const md4 = normalizeTabIndentText(unprotectExcelDollarRefs(restoreEscapedDollars(_lastMd, md3)))
+      const md3Clean = stripStrongBoundaryGuard(md3)
+      const md4 = normalizeTabIndentText(unprotectExcelDollarRefs(restoreEscapedDollars(_lastMd, md3Clean)))
       _lastMd = md4
       try { _onChange?.(md4) } catch {}
       try { setTimeout(() => { try { rewriteLocalImagesToAsset() } catch {} }, 0) } catch {}
@@ -802,7 +806,8 @@ export async function disableWysiwygV2() {
     if (_editor) {
       try {
         const mdNow = await (_editor as any).action(getMarkdown())
-        _lastMd = normalizeTabIndentText(unprotectExcelDollarRefs(restoreEscapedDollars(_lastMd, String(mdNow || ''))))
+        const clean = stripStrongBoundaryGuard(String(mdNow || ''))
+        _lastMd = normalizeTabIndentText(unprotectExcelDollarRefs(restoreEscapedDollars(_lastMd, clean)))
       } catch {}
     }
   } catch {}
@@ -1929,8 +1934,9 @@ function scheduleMathBlockReparse() {
     if (_suppressMathReparse) return // 再次检查
     try {
       const mdNow = await (_editor as any).action(getMarkdown())
-      if (/\$\$[\s\S]*?\$\$/m.test(String(mdNow || ''))) {
-        await (_editor as any).action(replaceAll(String(mdNow || '')))
+      const current = stripStrongBoundaryGuard(String(mdNow || ''))
+      if (/\$\$[\s\S]*?\$\$/m.test(current)) {
+        await (_editor as any).action(replaceAll(guardStrongBoundaryForCommonMark(current)))
       }
     } catch {}
   }, 240)
