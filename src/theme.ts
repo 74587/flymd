@@ -18,6 +18,7 @@ import { getPasteRemoteImagesEnabled, setPasteRemoteImagesEnabled } from './core
 import { getSymbolAutoCompletionEnabled, setSymbolAutoCompletionEnabled } from './core/symbolAutoCompletion'
 import { getContentFontSize, setContentFontSize } from './core/uiZoom'
 import { NETWORK_PROXY_DEFAULT_NO_PROXY, normalizeNetworkNoProxy } from './core/networkProxy'
+import { getUpdateCheckDisabled, setUpdateCheckDisabled } from './core/updateCheckPrefs'
 export type MdStyleId = 'standard' | 'github' | 'notion' | 'journal' | 'card' | 'docs' | 'typora' | 'obsidian' | 'bear' | 'minimalist'
 
 export interface ThemePrefs {
@@ -688,6 +689,13 @@ function createPanel(): HTMLDivElement {
           <span class="theme-toggle-text">${t('theme.pasteRemoteImages')}</span>
           <div class="theme-toggle-switch">
             <input type="checkbox" id="paste-remote-images-toggle" class="theme-toggle-input" />
+            <span class="theme-toggle-slider"></span>
+          </div>
+        </label>
+        <label class="theme-toggle-label theme-toggle-third theme-toggle-boxed" for="update-check-disabled-toggle" title="${t('theme.updateCheckDisabled.tip')}">
+          <span class="theme-toggle-text">${t('theme.updateCheckDisabled')}</span>
+          <div class="theme-toggle-switch">
+            <input type="checkbox" id="update-check-disabled-toggle" class="theme-toggle-input" />
             <span class="theme-toggle-slider"></span>
           </div>
         </label>
@@ -1576,6 +1584,7 @@ function ensureThemePanelReady(): HTMLDivElement | null {
     const wysiwygHtmlTableToggle = panel.querySelector('#wysiwyg-html-table-toggle') as HTMLInputElement | null
     const pasteUrlTitleToggle = panel.querySelector('#paste-url-title-toggle') as HTMLInputElement | null
     const pasteRemoteImagesToggle = panel.querySelector('#paste-remote-images-toggle') as HTMLInputElement | null
+    const updateCheckDisabledToggle = panel.querySelector('#update-check-disabled-toggle') as HTMLInputElement | null
 
     const WYSIWYG_DEFAULT_KEY = 'flymd:wysiwyg:default'
     const SOURCEMODE_DEFAULT_KEY = 'flymd:sourcemode:default'
@@ -1706,6 +1715,14 @@ function ensureThemePanelReady(): HTMLDivElement | null {
       pasteRemoteImagesToggle.checked = getPasteRemoteImagesEnabled()
       pasteRemoteImagesToggle.addEventListener('change', () => {
         setPasteRemoteImagesEnabled(pasteRemoteImagesToggle.checked)
+      })
+    }
+
+    // 更新检测：关闭后启动静默检测和手动检测入口都不再发起请求
+    if (updateCheckDisabledToggle) {
+      updateCheckDisabledToggle.checked = getUpdateCheckDisabled()
+      updateCheckDisabledToggle.addEventListener('change', () => {
+        setUpdateCheckDisabled(updateCheckDisabledToggle.checked)
       })
     }
 
